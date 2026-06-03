@@ -1,7 +1,7 @@
 #!/bin/bash
 # test-update-xray-core-sync.sh
 # Phase 5 sync-test: проверяет что inline-копии update_xray_core() в трех файлах
-# (xrayebator, update.sh, install.sh) идентичны после нормализации.
+# (xraytailscale, update.sh, install.sh) идентичны после нормализации.
 #
 # Если расходятся — exit 1 с diff'ом. CI/pre-commit guard для REQ-B03.
 #
@@ -65,11 +65,11 @@ compare_pair() {
   return 0
 }
 
-echo -e "${YELLOW}Проверка sync update_xray_core() между xrayebator/update.sh/install.sh${NC}"
+echo -e "${YELLOW}Проверка sync update_xray_core() между xraytailscale/update.sh/install.sh${NC}"
 
 UPDATE_SH="$REPO_ROOT/update.sh"
 INSTALL_SH="$REPO_ROOT/install.sh"
-XRAYEBATOR="$REPO_ROOT/xrayebator"
+XRAYTAILSCALE="$REPO_ROOT/xraytailscale"
 
 # Проверка всех 4 функций (main + 3 helper'а), 3 пары файлов = 12 сравнений.
 # Для прохождения теста все должны совпадать.
@@ -79,8 +79,8 @@ fails=0
 for fn in "${fns[@]}"; do
   echo -e "${YELLOW}- $fn:${NC}"
   compare_pair "$fn" "$UPDATE_SH" "$INSTALL_SH" || ((fails++))
-  compare_pair "$fn" "$UPDATE_SH" "$XRAYEBATOR" || ((fails++))
-  compare_pair "$fn" "$INSTALL_SH" "$XRAYEBATOR" || ((fails++))
+  compare_pair "$fn" "$UPDATE_SH" "$XRAYTAILSCALE" || ((fails++))
+  compare_pair "$fn" "$INSTALL_SH" "$XRAYTAILSCALE" || ((fails++))
 done
 
 if [[ $fails -gt 0 ]]; then

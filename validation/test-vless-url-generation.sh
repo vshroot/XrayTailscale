@@ -11,11 +11,11 @@ fail() {
 
 echo "Проверка генерации VLESS URLs"
 
-WORKDIR=$(mktemp -d /tmp/xrayebator-urlgen.XXXXXX)
+WORKDIR=$(mktemp -d /tmp/xraytailscale-urlgen.XXXXXX)
 trap 'rm -rf "$WORKDIR"' EXIT
 
 # shellcheck disable=SC1091
-source "$REPO_ROOT/xrayebator"
+source "$REPO_ROOT/xraytailscale"
 
 CONFIG_FILE="$WORKDIR/config.json"
 PROFILES_DIR="$WORKDIR/profiles"

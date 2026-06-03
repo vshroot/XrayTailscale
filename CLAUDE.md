@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Xrayebator — automated Xray Reality VPN manager for bypassing DPI censorship in Russia. Single Bash script (`xrayebator`, ~2500 lines) that turns a VPS into a managed VPN server with interactive terminal UI. Deployed to Debian 10+/Ubuntu 20.04+ servers.
+XrayTailscale — automated Xray Reality VPN manager for bypassing DPI censorship in Russia. Single Bash script (`xraytailscale`, ~2500 lines) that turns a VPS into a managed VPN server with interactive terminal UI. Deployed to Debian 10+/Ubuntu 20.04+ servers.
 
 ## Validation Commands
 
 ```bash
-bash -n xrayebator              # Syntax check (MUST pass before commit)
+bash -n xraytailscale              # Syntax check (MUST pass before commit)
 bash -n install.sh              # Also check lifecycle scripts
 bash -n update.sh
 ```
@@ -20,7 +20,7 @@ There are no automated tests. Validation is manual: create/delete profiles, chec
 
 ### Single-file application
 
-All logic lives in `xrayebator`. Supporting scripts (`install.sh`, `update.sh`, `uninstall.sh`) handle lifecycle but are not part of the runtime.
+All logic lives in `xraytailscale`. Supporting scripts (`install.sh`, `update.sh`, `uninstall.sh`) handle lifecycle but are not part of the runtime.
 
 ### Production paths
 
@@ -28,7 +28,7 @@ All logic lives in `xrayebator`. Supporting scripts (`install.sh`, `update.sh`, 
 - `/usr/local/etc/xray/profiles/*.json` — per-user profile metadata
 - `/usr/local/etc/xray/.private_key`, `.public_key` — Reality keys (generated once at install, never regenerated)
 - `/usr/local/etc/xray/backups/` — timestamped config backups (created by `backup_config()`)
-- `/usr/local/bin/xrayebator` — symlink to the script
+- `/usr/local/bin/xraytailscale` — symlink to the script
 - `/etc/systemd/system/xray.service.d/security.conf` — drop-in: `User=xray`, `CAP_NET_BIND_SERVICE`
 
 ### Critical concept: Inbound vs Profile
@@ -82,7 +82,7 @@ Xray runs as non-root user `xray` with `CAP_NET_BIND_SERVICE` via systemd drop-i
 
 ### Add-on services (deprecated v2.0)
 
-- **AdGuard Home** — Removed from the interactive menu in v2.0. If `/opt/AdGuardHome/AdGuardHome` is detected during `xrayebator update`, update.sh force-uninstalls it through `_adguard_force_uninstall_if_present` after rolling Xray DNS back to DoH Local (`https+local://1.1.1.1/dns-query`). `uninstall_adguard_home()` remains in `xrayebator` for manual emergency use.
+- **AdGuard Home** — Removed from the interactive menu in v2.0. If `/opt/AdGuardHome/AdGuardHome` is detected during `xraytailscale update`, update.sh force-uninstalls it through `_adguard_force_uninstall_if_present` after rolling Xray DNS back to DoH Local (`https+local://1.1.1.1/dns-query`). `uninstall_adguard_home()` remains in `xraytailscale` for manual emergency use.
 
 ## Coding Patterns
 
@@ -96,7 +96,7 @@ safe_jq_write --arg uuid "$uuid" --argjson port "$port" \
   '(.inbounds[] | select(.port == $port) | .settings.clients) += [{"id": $uuid}]' \
   "$CONFIG_FILE"
 ```
-Do NOT use raw `jq ... > temp && mv temp file` — always go through `safe_jq_write`. Note: `safe_jq_write` is only available inside `xrayebator`; `install.sh` and `update.sh` use inline jq with `-s` size validation.
+Do NOT use raw `jq ... > temp && mv temp file` — always go through `safe_jq_write`. Note: `safe_jq_write` is only available inside `xraytailscale`; `install.sh` and `update.sh` use inline jq with `-s` size validation.
 
 **jq argument passing**: Use `--argjson` for numeric ports, `--arg` for strings. Never interpolate variables into jq expressions.
 

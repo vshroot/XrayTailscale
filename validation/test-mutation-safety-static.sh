@@ -52,15 +52,15 @@ assert_not_contains() {
   ! grep -Fq "$needle" "$file" || fail "forbidden pattern remains: $needle"
 }
 
-tmpdir=$(mktemp -d /tmp/xrayebator-mutation-safety.XXXXXX)
+tmpdir=$(mktemp -d /tmp/xraytailscale-mutation-safety.XXXXXX)
 trap 'rm -rf "$tmpdir"' EXIT
 
-extract_fn xrayebator delete_profile_menu > "$tmpdir/delete_profile_menu"
-extract_fn xrayebator change_sni_menu > "$tmpdir/change_sni_menu"
-extract_fn xrayebator change_fingerprint_menu > "$tmpdir/change_fingerprint_menu"
-extract_fn xrayebator change_port_menu > "$tmpdir/change_port_menu"
-extract_fn xrayebator upgrade_profile_to_pq_menu > "$tmpdir/upgrade_profile_to_pq_menu"
-extract_fn xrayebator main_menu > "$tmpdir/main_menu"
+extract_fn xraytailscale delete_profile_menu > "$tmpdir/delete_profile_menu"
+extract_fn xraytailscale change_sni_menu > "$tmpdir/change_sni_menu"
+extract_fn xraytailscale change_fingerprint_menu > "$tmpdir/change_fingerprint_menu"
+extract_fn xraytailscale change_port_menu > "$tmpdir/change_port_menu"
+extract_fn xraytailscale upgrade_profile_to_pq_menu > "$tmpdir/upgrade_profile_to_pq_menu"
+extract_fn xraytailscale main_menu > "$tmpdir/main_menu"
 
 [[ -s "$tmpdir/delete_profile_menu" ]] || fail "delete_profile_menu not found"
 [[ -s "$tmpdir/change_sni_menu" ]] || fail "change_sni_menu not found"

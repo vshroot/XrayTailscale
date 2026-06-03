@@ -1,4 +1,4 @@
-# XRAYEBATOR - Категоризированный список SNI
+# XRAYTAILSCALE - Категоризированный список SNI
 # Последнее обновление: май 2026
 # Формат: домен|категория|приоритет
 # Категории: ru_whitelist, yandex_cdn, foreign, fallback

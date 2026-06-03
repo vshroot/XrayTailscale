@@ -159,7 +159,7 @@ ensure_xray_runtime_user || exit 1
 # ═══════════════════════════════════════════════════════════
 # ОБРАБОТКА АРГУМЕНТОВ И ВОССТАНОВЛЕНИЕ СЕССИИ
 # ═══════════════════════════════════════════════════════════
-UPDATE_SESSION_FILE="/tmp/.xrayebator_update_session"
+UPDATE_SESSION_FILE="/tmp/.xraytailscale_update_session"
 
 # Удаляем старые файлы сессии (старше 5 минут)
 if [[ -f "$UPDATE_SESSION_FILE" ]]; then
@@ -187,7 +187,7 @@ else
   echo -e "${CYAN}"
   echo '╔═══════════════════════════════════════════════════════════╗'
   echo '║                                                           ║'
-  echo '║              XRAYEBATOR UPDATE SCRIPT v2.0                ║'
+  echo '║              XRAYTAILSCALE UPDATE SCRIPT v2.0                ║'
   echo '║              Обновление & Смена версии                    ║'
   echo '║                                                           ║'
   echo '╚═══════════════════════════════════════════════════════════╝'
@@ -320,7 +320,7 @@ fi
 echo -e "${YELLOW}Создание резервной копии...${NC}"
 BACKUP_DIR="/usr/local/etc/xray/backup_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
-cp /usr/local/bin/xrayebator "$BACKUP_DIR/" 2>/dev/null
+cp /usr/local/bin/xraytailscale "$BACKUP_DIR/" 2>/dev/null
 cp -r /usr/local/etc/xray/profiles "$BACKUP_DIR/" 2>/dev/null
 cp /usr/local/etc/xray/config.json "$BACKUP_DIR/" 2>/dev/null
 cp /usr/local/etc/xray/.private_key "$BACKUP_DIR/" 2>/dev/null
@@ -373,23 +373,23 @@ echo ""
 # ОБНОВЛЕНИЕ ОСНОВНЫХ ФАЙЛОВ
 # ═══════════════════════════════════════════════════════════
 
-# Обновление xrayebator
-echo -e "${YELLOW}Обновление xrayebator...${NC}"
-XRAY_TMP=$(mktemp /tmp/xrayebator_new_XXXXXX)
-github_raw_curl "${RAW_BASE_URL}/xrayebator" --connect-timeout 10 --max-time 60 -o "$XRAY_TMP"
+# Обновление xraytailscale
+echo -e "${YELLOW}Обновление xraytailscale...${NC}"
+XRAY_TMP=$(mktemp /tmp/xraytailscale_new_XXXXXX)
+github_raw_curl "${RAW_BASE_URL}/xraytailscale" --connect-timeout 10 --max-time 60 -o "$XRAY_TMP"
 
 if [[ $? -eq 0 ]] && [[ -s "$XRAY_TMP" ]]; then
   chmod 755 "$XRAY_TMP"
   if bash -n "$XRAY_TMP"; then
-    mv "$XRAY_TMP" /usr/local/bin/xrayebator
-    echo -e "${GREEN}✓ xrayebator обновлён${NC}\n"
+    mv "$XRAY_TMP" /usr/local/bin/xraytailscale
+    echo -e "${GREEN}✓ xraytailscale обновлён${NC}\n"
   else
-    echo -e "${RED}✗ Скачанный xrayebator не проходит bash -n${NC}"
+    echo -e "${RED}✗ Скачанный xraytailscale не проходит bash -n${NC}"
     rm -f "$XRAY_TMP" "$UPDATE_SESSION_FILE" "$UPDATE_SESSION_FILE.warned"
     exit 1
   fi
 else
-  echo -e "${RED}✗ Ошибка загрузки xrayebator${NC}"
+  echo -e "${RED}✗ Ошибка загрузки xraytailscale${NC}"
   echo -e "${YELLOW}Проверьте доступность ветки '${GITHUB_BRANCH}' на GitHub${NC}"
   rm -f "$XRAY_TMP" "$UPDATE_SESSION_FILE" "$UPDATE_SESSION_FILE.warned"
   exit 1
@@ -398,7 +398,7 @@ fi
 # Обновление uninstall.sh и восстановление symlink'ов команд.
 echo -e "${YELLOW}Обновление служебных скриптов...${NC}"
 mkdir -p /usr/local/etc/xray/scripts
-UNINSTALL_TMP=$(mktemp /tmp/xrayebator_uninstall_new_XXXXXX.sh)
+UNINSTALL_TMP=$(mktemp /tmp/xraytailscale_uninstall_new_XXXXXX.sh)
 if github_raw_curl "${RAW_BASE_URL}/uninstall.sh" --connect-timeout 10 --max-time 30 -o "$UNINSTALL_TMP" \
    && [[ -s "$UNINSTALL_TMP" ]] \
    && head -n 1 "$UNINSTALL_TMP" | grep -q "^#!/bin/bash" \
@@ -410,12 +410,14 @@ else
   echo -e "${YELLOW}⚠ Не удалось обновить uninstall.sh${NC}"
   rm -f "$UNINSTALL_TMP"
 fi
-chmod 755 /usr/local/bin/xrayebator 2>/dev/null || true
+chmod 755 /usr/local/bin/xraytailscale 2>/dev/null || true
 chmod 755 /usr/local/etc/xray/scripts/update.sh 2>/dev/null || true
 chmod 755 /usr/local/etc/xray/scripts/uninstall.sh 2>/dev/null || true
-ln -sf /usr/local/etc/xray/scripts/update.sh /usr/local/bin/xrayebator-update 2>/dev/null || true
-ln -sf /usr/local/etc/xray/scripts/uninstall.sh /usr/local/bin/xrayebator-uninstall 2>/dev/null || true
-echo -e "${GREEN}✓ Команды xrayebator-update / xrayebator-uninstall проверены${NC}\n"
+ln -sf /usr/local/etc/xray/scripts/update.sh /usr/local/bin/xraytailscale-update 2>/dev/null || true
+ln -sf /usr/local/etc/xray/scripts/uninstall.sh /usr/local/bin/xraytailscale-uninstall 2>/dev/null || true
+legacy_cmd="xrayeba""tor"
+rm -f "/usr/local/bin/${legacy_cmd}" "/usr/local/bin/${legacy_cmd}-update" "/usr/local/bin/${legacy_cmd}-uninstall" 2>/dev/null || true
+echo -e "${GREEN}✓ Команды xraytailscale-update / xraytailscale-uninstall проверены${NC}\n"
 
 # Обновление списка SNI
 echo -e "${YELLOW}Обновление списка SNI...${NC}"
@@ -433,34 +435,34 @@ github_raw_curl "${RAW_BASE_URL}/ascii_art.txt" -o /usr/local/etc/xray/data/asci
 
 # Проверка версии
 echo -e "${YELLOW}Проверка установленной версии...${NC}"
-VERSION_INFO=$(grep -m 1 "XRAYEBATOR v" /usr/local/bin/xrayebator | sed 's/.*XRAYEBATOR //' | sed 's/ .*//')
+VERSION_INFO=$(grep -m 1 "XRAYTAILSCALE v" /usr/local/bin/xraytailscale | sed 's/.*XRAYTAILSCALE //' | sed 's/ .*//')
 echo -e "${GREEN}✓ Версия: ${VERSION_INFO}${NC}\n"
 
 # Если HAPP subscription уже установлен, его handler — сгенерированный файл.
-# После обновления основного xrayebator нужно перегенерировать subhttp.sh, иначе
+# После обновления основного xraytailscale нужно перегенерировать subhttp.sh, иначе
 # активная подписка останется на старой логике до ручного запуска меню.
 if [[ -f /usr/local/etc/xray/.subscription_installed ]]; then
   echo -e "${YELLOW}Обновление HAPP subscription handler...${NC}"
-  if source /usr/local/bin/xrayebator && install_subscription_server >/dev/null 2>&1; then
+  if source /usr/local/bin/xraytailscale && install_subscription_server >/dev/null 2>&1; then
     if declare -F _subscription_restart_service >/dev/null 2>&1; then
       if _subscription_restart_service; then
-        echo -e "${GREEN}✓ subhttp.sh обновлён, xrayebator-sub.service запущен${NC}"
+        echo -e "${GREEN}✓ subhttp.sh обновлён, xraytailscale-sub.service запущен${NC}"
       else
-        echo -e "${YELLOW}⚠ subhttp.sh обновлён, но xrayebator-sub.service не запустился${NC}"
-        echo -e "${YELLOW}  Проверьте: systemctl status xrayebator-sub --no-pager -l${NC}"
+        echo -e "${YELLOW}⚠ subhttp.sh обновлён, но xraytailscale-sub.service не запустился${NC}"
+        echo -e "${YELLOW}  Проверьте: systemctl status xraytailscale-sub --no-pager -l${NC}"
       fi
     else
-      systemctl reset-failed xrayebator-sub.service 2>/dev/null || true
-      systemctl enable xrayebator-sub.service >/dev/null 2>&1 || true
-      if systemctl restart xrayebator-sub.service; then
-        echo -e "${GREEN}✓ subhttp.sh обновлён, xrayebator-sub.service запущен${NC}"
+      systemctl reset-failed xraytailscale-sub.service 2>/dev/null || true
+      systemctl enable xraytailscale-sub.service >/dev/null 2>&1 || true
+      if systemctl restart xraytailscale-sub.service; then
+        echo -e "${GREEN}✓ subhttp.sh обновлён, xraytailscale-sub.service запущен${NC}"
       else
-        echo -e "${YELLOW}⚠ subhttp.sh обновлён, но xrayebator-sub.service не запустился${NC}"
-        echo -e "${YELLOW}  Проверьте: systemctl status xrayebator-sub --no-pager -l${NC}"
+        echo -e "${YELLOW}⚠ subhttp.sh обновлён, но xraytailscale-sub.service не запустился${NC}"
+        echo -e "${YELLOW}  Проверьте: systemctl status xraytailscale-sub --no-pager -l${NC}"
       fi
     fi
   else
-    echo -e "${YELLOW}⚠ Не удалось регенерировать HAPP handler. Запустите: sudo xrayebator → Подписка HAPP${NC}"
+    echo -e "${YELLOW}⚠ Не удалось регенерировать HAPP handler. Запустите: sudo xraytailscale → Подписка HAPP${NC}"
   fi
   echo ""
 fi
@@ -511,8 +513,8 @@ fi
 
 # ═══════════════════════════════════════════════════════════
 # ОПРЕДЕЛЕНИЕ update_xray_core (REQ-B01) — БЕЗ автоматического вызова.
-# Trigger обновления = CLI `xrayebator update` (см. xrayebator dispatcher).
-# Функция определена здесь для sync-test parity с install.sh / xrayebator.
+# Trigger обновления = CLI `xraytailscale update` (см. xraytailscale dispatcher).
+# Функция определена здесь для sync-test parity с install.sh / xraytailscale.
 # ═══════════════════════════════════════════════════════════
 
 # update_xray_core
@@ -687,7 +689,7 @@ update_xray_core() {
   fi
 
   # ── Step 13: Restart с systemd-unit-guard (skip в install mode) ──
-  # safe_restart_xray в update.sh недоступна (определена в xrayebator).
+  # safe_restart_xray в update.sh недоступна (определена в xraytailscale).
   # Используем прямой systemctl + проверка is-active.
   if systemctl list-unit-files xray.service >/dev/null 2>&1 && [[ -f /etc/systemd/system/xray.service.d/security.conf ]]; then
     systemctl restart xray
@@ -944,7 +946,7 @@ case $GITHUB_BRANCH in
     echo -e "${BLUE}  Dev версия установлена${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo -e "  ${GREEN}✓${NC} Свежие исправления"
-    echo -e "  ${YELLOW}⚠${NC} Для отката: sudo xrayebator-update → Stable"
+    echo -e "  ${YELLOW}⚠${NC} Для отката: sudo xraytailscale-update → Stable"
     ;;
   experimental)
     echo -e "${MAGENTA}═══════════════════════════════════════════════════════════${NC}"
@@ -954,14 +956,14 @@ case $GITHUB_BRANCH in
     echo -e "  ${GREEN}✓${NC} Индивидуальная настройка SNI/fingerprint"
     echo -e "  ${GREEN}✓${NC} Расширенная диагностика"
     echo -e "  ${RED}⚠${NC} Тестовая версия!"
-    echo -e "  ${YELLOW}Для отката: sudo xrayebator-update → Stable${NC}"
+    echo -e "  ${YELLOW}Для отката: sudo xraytailscale-update → Stable${NC}"
     ;;
 esac
 
 echo ""
 echo -e "${BLUE}Команды:${NC}"
-echo -e "  ${YELLOW}sudo xrayebator${NC} - запустить менеджер"
-echo -e "  ${YELLOW}sudo xrayebator-update${NC} - сменить/обновить версию"
+echo -e "  ${YELLOW}sudo xraytailscale${NC} - запустить менеджер"
+echo -e "  ${YELLOW}sudo xraytailscale-update${NC} - сменить/обновить версию"
 echo -e "  ${YELLOW}systemctl status xray${NC} - статус сервиса"
 echo -e "  ${YELLOW}journalctl -u xray -f${NC} - логи в реальном времени"
 echo ""

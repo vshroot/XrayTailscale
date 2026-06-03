@@ -18,19 +18,19 @@ fi
 clear
 echo -e "${RED}"
 echo '═══════════════════════════════════════════════════════════'
-echo '              УДАЛЕНИЕ XRAYEBATOR                          '
+echo '              УДАЛЕНИЕ XRAYTAILSCALE                          '
 echo '═══════════════════════════════════════════════════════════'
 echo -e "${NC}\n"
 
 echo -e "${YELLOW}Это действие удалит:${NC}"
 echo -e "  ${BLUE}•${NC} Xray-core и все его компоненты"
 echo -e "  ${BLUE}•${NC} Все профили и конфигурации"
-echo -e "  ${BLUE}•${NC} Приложение xrayebator"
+echo -e "  ${BLUE}•${NC} Приложение xraytailscale"
 echo -e "  ${BLUE}•${NC} Сгенерированные ключи Reality"
 echo ""
 echo -e "${RED}⚠ Все данные будут потеряны безвозвратно!${NC}"
 echo ""
-echo -n -e "${YELLOW}Вы уверены, что хотите удалить Xrayebator? (yes/no): ${NC}"
+echo -n -e "${YELLOW}Вы уверены, что хотите удалить XrayTailscale? (yes/no): ${NC}"
 read confirmation
 
 if [[ "$confirmation" != "yes" ]]; then
@@ -52,8 +52,11 @@ echo -e "${BLUE}[3/6]${NC} ${YELLOW}Удаление конфигураций и
 rm -rf /usr/local/etc/xray
 echo -e "${GREEN}✓ Конфигурации удалены${NC}\n"
 
-echo -e "${BLUE}[4/6]${NC} ${YELLOW}Удаление приложения xrayebator...${NC}"
-rm -f /usr/local/bin/xrayebator
+echo -e "${BLUE}[4/6]${NC} ${YELLOW}Удаление приложения xraytailscale...${NC}"
+rm -f /usr/local/bin/xraytailscale
+rm -f /usr/local/bin/xraytailscale-update /usr/local/bin/xraytailscale-uninstall
+legacy_cmd="xrayeba""tor"
+rm -f "/usr/local/bin/${legacy_cmd}" "/usr/local/bin/${legacy_cmd}-update" "/usr/local/bin/${legacy_cmd}-uninstall" 2>/dev/null || true
 echo -e "${GREEN}✓ Приложение удалено${NC}\n"
 
 echo -e "${BLUE}[5/6]${NC} ${YELLOW}Очистка systemd...${NC}"
@@ -86,6 +89,5 @@ echo '           ✓ УДАЛЕНИЕ ЗАВЕРШЕНО УСПЕШНО!        
 echo '═══════════════════════════════════════════════════════════'
 echo -e "${NC}\n"
 
-echo -e "${CYAN}Xrayebator полностью удален с вашего сервера.${NC}"
+echo -e "${CYAN}XrayTailscale полностью удален с вашего сервера.${NC}"
 echo -e "${BLUE}Спасибо за использование!${NC}\n"
-

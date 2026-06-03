@@ -26,7 +26,7 @@ VLESS_DECRYPTION_FILE="/usr/local/etc/xray/.vless_decryption"
 VLESS_ENCRYPTION_FILE="/usr/local/etc/xray/.vless_encryption"
 SNI_LIST="$DATA_DIR/sni_list.txt"
 ASCII_ART="$DATA_DIR/ascii_art.txt"
-TAILSCALE_SYSCTL_FILE="/etc/sysctl.d/99-xrayebator-tailscale.conf"
+TAILSCALE_SYSCTL_FILE="/etc/sysctl.d/99-xraytailscale-tailscale.conf"
 GITHUB_USER="${GITHUB_USER:-vshroot}"
 GITHUB_REPO="${GITHUB_REPO:-XrayTailscale}"
 GITHUB_BRANCH="${GITHUB_BRANCH:-main}"
@@ -72,23 +72,23 @@ readonly -a KNOWN_DEFAULTS_v1=(
 # ═══════════════════════════════════════════════════════════
 # SOURCE-SAFETY GUARD (Phase 7, REQ-C10)
 # ═══════════════════════════════════════════════════════════
-# Если xrayebator source-ится из другого скрипта (subhttp.sh для HAPP subscription),
+# Если xraytailscale source-ится из другого скрипта (subhttp.sh для HAPP subscription),
 # мы НЕ должны выполнять root-check, загружать ключи Reality или входить в интерактивное
 # main_menu — нужны только определения функций и констант.
 # Тест: BASH_SOURCE[0] (путь к sourced-файлу) != ${0} (имя процесса) → значит source.
 # В source-режиме мы ПРОПУСКАЕМ top-level эффекты (root-check, key-load, CLI dispatch),
 # но определения функций ниже регистрируются как обычно.
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
-  XRAYEBATOR_SOURCED=1
+  XRAYTAILSCALE_SOURCED=1
 else
-  XRAYEBATOR_SOURCED=0
+  XRAYTAILSCALE_SOURCED=0
 fi
 
 # Проверка прав root + загрузка ключей выполняются только при прямом запуске.
-if [[ "$XRAYEBATOR_SOURCED" -eq 0 ]]; then
+if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
   if [[ $EUID -ne 0 ]]; then
     echo -e "${RED}✗ Требуются права root${NC}"
-    echo -e "${YELLOW}Используйте: sudo xrayebator${NC}"
+    echo -e "${YELLOW}Используйте: sudo xraytailscale${NC}"
     exit 1
   fi
 
@@ -387,16 +387,16 @@ _generate_vless_urls_for_profile() {
   local profile_file="$1"
   [[ -f "$profile_file" ]] || return 1
 
-  local old_addr_override="${XRAYEBATOR_SERVER_ADDR_OVERRIDE-}"
+  local old_addr_override="${XRAYTAILSCALE_SERVER_ADDR_OVERRIDE-}"
   local had_addr_override=0
-  if [[ -n "${XRAYEBATOR_SERVER_ADDR_OVERRIDE+x}" ]]; then
+  if [[ -n "${XRAYTAILSCALE_SERVER_ADDR_OVERRIDE+x}" ]]; then
     had_addr_override=1
   fi
-  if [[ -z "${XRAYEBATOR_SERVER_ADDR_OVERRIDE:-}" ]]; then
+  if [[ -z "${XRAYTAILSCALE_SERVER_ADDR_OVERRIDE:-}" ]]; then
     local resolved_addr
     resolved_addr=$(_connection_server_address) || return 1
     [[ -n "$resolved_addr" ]] || return 1
-    XRAYEBATOR_SERVER_ADDR_OVERRIDE="$resolved_addr"
+    XRAYTAILSCALE_SERVER_ADDR_OVERRIDE="$resolved_addr"
   fi
 
   local route_count
@@ -419,9 +419,9 @@ _generate_vless_urls_for_profile() {
   fi
 
   if [[ "$had_addr_override" -eq 1 ]]; then
-    XRAYEBATOR_SERVER_ADDR_OVERRIDE="$old_addr_override"
+    XRAYTAILSCALE_SERVER_ADDR_OVERRIDE="$old_addr_override"
   else
-    unset XRAYEBATOR_SERVER_ADDR_OVERRIDE
+    unset XRAYTAILSCALE_SERVER_ADDR_OVERRIDE
   fi
 
   [[ "$emitted" -eq 1 ]] || return 1
@@ -503,8 +503,8 @@ _subscription_is_local_only() {
 }
 
 _connection_server_address() {
-  if [[ -n "${XRAYEBATOR_SERVER_ADDR_OVERRIDE:-}" ]]; then
-    echo "$XRAYEBATOR_SERVER_ADDR_OVERRIDE"
+  if [[ -n "${XRAYTAILSCALE_SERVER_ADDR_OVERRIDE:-}" ]]; then
+    echo "$XRAYTAILSCALE_SERVER_ADDR_OVERRIDE"
     return 0
   fi
 
@@ -1593,7 +1593,7 @@ _migrate_mlkem_keys() {
      { [[ "$xray_major" -eq 25 ]] && [[ "$xray_minor" -lt 9 ]]; } || \
      { [[ "$xray_major" -eq 25 ]] && [[ "$xray_minor" -eq 9 ]] && [[ "$xray_patch" -lt 5 ]]; }; then
     echo -e "${RED}✗ Xray-core $xray_ver_full < 25.9.5 — vlessenc недоступен${NC}"
-    echo -e "${YELLOW}  Обновите Xray-core: sudo xrayebator update${NC}"
+    echo -e "${YELLOW}  Обновите Xray-core: sudo xraytailscale update${NC}"
     echo -e "${YELLOW}  После обновления миграция повторится автоматически${NC}"
     return 2
   fi
@@ -1821,12 +1821,12 @@ _migrate_subhttp_multiroute_2026() {
     return 2
   fi
 
-  if systemctl is-active --quiet xrayebator-sub.service; then
-    systemctl restart xrayebator-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xrayebator-sub.service${NC}"
+  if systemctl is-active --quiet xraytailscale-sub.service; then
+    systemctl restart xraytailscale-sub.service || {
+      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xrayebator-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
   fi
 
   return 1
@@ -1844,12 +1844,12 @@ _migrate_subhttp_client_compat_2026() {
     return 2
   fi
 
-  if systemctl is-active --quiet xrayebator-sub.service; then
-    systemctl restart xrayebator-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xrayebator-sub.service${NC}"
+  if systemctl is-active --quiet xraytailscale-sub.service; then
+    systemctl restart xraytailscale-sub.service || {
+      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xrayebator-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
   fi
 
   return 1
@@ -1867,12 +1867,12 @@ _migrate_subhttp_no_default_happ_routing_2026() {
     return 2
   fi
 
-  if systemctl is-active --quiet xrayebator-sub.service; then
-    systemctl restart xrayebator-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xrayebator-sub.service${NC}"
+  if systemctl is-active --quiet xraytailscale-sub.service; then
+    systemctl restart xraytailscale-sub.service || {
+      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xrayebator-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
   fi
 
   return 1
@@ -1890,12 +1890,12 @@ _migrate_subhttp_stale_profiles_410_2026() {
     return 2
   fi
 
-  if systemctl is-active --quiet xrayebator-sub.service; then
-    systemctl restart xrayebator-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xrayebator-sub.service${NC}"
+  if systemctl is-active --quiet xraytailscale-sub.service; then
+    systemctl restart xraytailscale-sub.service || {
+      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xrayebator-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
   fi
 
   return 1
@@ -1913,12 +1913,12 @@ _migrate_subhttp_happ_xhttp_compat_2026() {
     return 2
   fi
 
-  if systemctl is-active --quiet xrayebator-sub.service; then
-    systemctl restart xrayebator-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xrayebator-sub.service${NC}"
+  if systemctl is-active --quiet xraytailscale-sub.service; then
+    systemctl restart xraytailscale-sub.service || {
+      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xrayebator-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
   fi
 
   return 1
@@ -1942,12 +1942,12 @@ _migrate_subhttp_happ_legacy_xhttp_2026() {
     return 2
   fi
 
-  if systemctl is-active --quiet xrayebator-sub.service; then
-    systemctl restart xrayebator-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xrayebator-sub.service${NC}"
+  if systemctl is-active --quiet xraytailscale-sub.service; then
+    systemctl restart xraytailscale-sub.service || {
+      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xrayebator-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
   fi
 
   return 1
@@ -2164,10 +2164,10 @@ probe_test_command() {
 # ═══════════════════════════════════════════════════════════
 
 # Phase 7: при source-режиме НЕ делаем curl/hostname на загрузке (subhttp.sh source-ит
-# xrayebator на каждый HTTP-request — лишние сетевые вызовы под xray:xray неприемлемы).
+# xraytailscale на каждый HTTP-request — лишние сетевые вызовы под xray:xray неприемлемы).
 # В source-режиме SERVER_IP инициализируется пустым; pure-функции берут публичный
 # адрес из HAPP markers, а get_server_ip() используют только как fallback.
-if [[ "$XRAYEBATOR_SOURCED" -eq 0 ]]; then
+if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
   SERVER_IP=$(get_server_ip)
 else
   SERVER_IP=""
@@ -2190,7 +2190,7 @@ show_ascii() {
     echo -e "${CYAN}"
     echo ' ╔═══════════════════════════════════╗'
     echo ' ║                                   ║'
-    echo ' ║        XRAYEBATOR v2.0           ║'
+    echo ' ║        XRAYTAILSCALE v2.0           ║'
     echo ' ║   Xray Reality VPN Manager       ║'
     echo ' ║                                   ║'
     echo ' ╚═══════════════════════════════════╝'
@@ -2204,7 +2204,7 @@ show_ascii() {
 # INLINE-КОПИЯ update_xray_core() + хелперов (REQ-B01/B02)
 # Синхронизирована с update.sh / install.sh через
 # validation/test-update-xray-core-sync.sh (sync-test parity).
-# Trigger = CLI `xrayebator update` через update_command().
+# Trigger = CLI `xraytailscale update` через update_command().
 # ═══════════════════════════════════════════════════════════
 
 # update_xray_core
@@ -2379,7 +2379,7 @@ update_xray_core() {
   fi
 
   # ── Step 13: Restart с systemd-unit-guard (skip в install mode) ──
-  # safe_restart_xray в update.sh недоступна (определена в xrayebator).
+  # safe_restart_xray в update.sh недоступна (определена в xraytailscale).
   # Используем прямой systemctl + проверка is-active.
   if systemctl list-unit-files xray.service >/dev/null 2>&1 && [[ -f /etc/systemd/system/xray.service.d/security.conf ]]; then
     systemctl restart xray
@@ -2461,7 +2461,7 @@ _cleanup_xray_backups() {
   fi
 }
 
-# CLI subcommand: xrayebator update (REQ-B02)
+# CLI subcommand: xraytailscale update (REQ-B02)
 # Запускает update_xray_core, отображает заголовок, возвращает exit code функции.
 update_command() {
   echo -e "${BLUE}╔════════════════════════════════════════════════════╗${NC}"
@@ -2483,7 +2483,7 @@ update_command() {
 # Nag: предупреждение об устаревшем Xray-core в main_menu (REQ-B02)
 # Запрашивает GitHub API раз в 24 часа (cache в /tmp), не блокирует на timeout.
 _check_xray_outdated_nag() {
-  local cache_file="/tmp/.xrayebator_xray_latest_check"
+  local cache_file="/tmp/.xraytailscale_xray_latest_check"
   local cache_ttl=86400
 
   # Проверяем свежесть кэша
@@ -2531,7 +2531,7 @@ _emit_nag_if_outdated() {
   if $should_nag; then
     echo -e "${YELLOW}╔════════════════════════════════════════════════════╗${NC}"
     echo -e "${YELLOW}║ Установлен Xray $current, доступен $target_v${NC}"
-    echo -e "${YELLOW}║ Выполни: ${GREEN}sudo xrayebator update${NC}"
+    echo -e "${YELLOW}║ Выполни: ${GREEN}sudo xraytailscale update${NC}"
     echo -e "${YELLOW}╚════════════════════════════════════════════════════╝${NC}"
     echo ""
   fi
@@ -2600,12 +2600,23 @@ show_pq_banner_once() {
 # ═══════════════════════════════════════════════════════════
 # Heredoc-генерирует ТРИ артефакта:
 #   1) /usr/local/bin/subhttp.sh                — HTTP handler (755 root:root);
-#   2) /etc/systemd/system/xrayebator-sub.service — opt-in systemd unit (644 root:root);
+#   2) /etc/systemd/system/xraytailscale-sub.service — opt-in systemd unit (644 root:root);
 #   3) /usr/local/etc/xray/.happ_defaults.env   — HAPP metadata defaults (644 xray:xray),
 #      создаётся только если отсутствует (idempotent — не перетираем правки оператора).
 # Marker: /usr/local/etc/xray/.subscription_installed (Plan 7.3 проверит наличие).
 # Юнит НЕ enable-ится и НЕ start-ится автоматически — этим занимается Plan 7.3 после
 # выбора публичного TLS (default) или local-only fallback.
+_cleanup_legacy_subscription_artifacts() {
+  local legacy_base="xrayeba""tor"
+  local legacy_unit="${legacy_base}-sub.service"
+  local legacy_site="${legacy_base}-sub"
+
+  systemctl disable --now "$legacy_unit" >/dev/null 2>&1 || true
+  rm -f "/etc/systemd/system/${legacy_unit}" 2>/dev/null || true
+  rm -f "/etc/nginx/sites-enabled/${legacy_site}" "/etc/nginx/sites-available/${legacy_site}" 2>/dev/null || true
+  systemctl daemon-reload >/dev/null 2>&1 || true
+}
+
 install_subscription_server() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
@@ -2616,7 +2627,8 @@ install_subscription_server() {
   if ! ensure_xray_runtime_user; then
     return 1
   fi
-  chmod 755 /usr/local/bin/xrayebator 2>/dev/null || true
+  chmod 755 /usr/local/bin/xraytailscale 2>/dev/null || true
+  _cleanup_legacy_subscription_artifacts
 
   # Pre-flight: socat (handler bind), openssl/base64/jq уже гарантированы install.sh.
   if ! command -v socat &>/dev/null; then
@@ -2635,7 +2647,7 @@ install_subscription_server() {
   # должны раскрываться в runtime handler-а, не на этапе записи файла).
   cat > /usr/local/bin/subhttp.sh << 'SUBHTTP_EOF'
 #!/bin/bash
-# xrayebator subhttp.sh — HAPP subscription handler (heredoc-generated from xrayebator).
+# xraytailscale subhttp.sh — HAPP subscription handler (heredoc-generated from xraytailscale).
 # socat fork-ит этот скрипт на каждый TCP-connect: stdin = HTTP request, stdout = HTTP response.
 # REQ-C05 (strict regex), REQ-C06 (constant-time 404), REQ-C07 (HAPP metadata symmetry headers↔body).
 
@@ -2655,11 +2667,11 @@ emit_500() {
   exit 0
 }
 
-# Source xrayebator для доступа к _generate_vless_url_pure() + констант (CONFIG_FILE,
+# Source xraytailscale для доступа к _generate_vless_url_pure() + констант (CONFIG_FILE,
 # PROFILES_DIR, PUBLIC_KEY_FILE, VLESS_ENCRYPTION_FILE). Source-safety guard (Plan 7.1
 # REQ-C10) гарантирует, что main_menu НЕ запустится при source.
-if [[ ! -r /usr/local/bin/xrayebator ]] || ! source /usr/local/bin/xrayebator; then
-  emit_500 "cannot source /usr/local/bin/xrayebator"
+if [[ ! -r /usr/local/bin/xraytailscale ]] || ! source /usr/local/bin/xraytailscale; then
+  emit_500 "cannot source /usr/local/bin/xraytailscale"
 fi
 
 # Source HAPP defaults — на КАЖДЫЙ request (REQ-C13 prerequisite: Plan 7.3 TUI редактирование
@@ -2752,7 +2764,7 @@ done
 profile_name=$(basename "$profile_file" .json)
 short_token="${token:0:8}"
 
-# Построить все vless:// маршруты профиля через pure-функции из xrayebator.
+# Построить все vless:// маршруты профиля через pure-функции из xraytailscale.
 vless_urls=$(_generate_vless_urls_for_profile "$profile_file" 2>/dev/null) || emit_410_stale
 
 query_lc=$(printf '%s' "$query" | tr '[:upper:]' '[:lower:]')
@@ -2870,7 +2882,7 @@ body_size=$(stat -c%s "$body_tmp" 2>/dev/null || wc -c < "$body_tmp")
 # Response: те же metadata-ключи дублируются как HTTP headers (REQ-C07 symmetry).
 printf 'HTTP/1.1 200 OK\r\n'
 printf 'content-type: text/plain; charset=utf-8\r\n'
-printf 'content-disposition: attachment; filename="xrayebator-%s.txt"\r\n' "$short_token"
+printf 'content-disposition: attachment; filename="xraytailscale-%s.txt"\r\n' "$short_token"
 printf 'content-length: %s\r\n' "$body_size"
 printf 'connection: close\r\n'
 printf 'cache-control: no-store\r\n'
@@ -2906,7 +2918,7 @@ SUBHTTP_EOF
   # ── (2) .happ_defaults.env (idempotent — не перетирать кастомизации оператора) ──
   if [[ ! -f /usr/local/etc/xray/.happ_defaults.env ]]; then
     cat > /usr/local/etc/xray/.happ_defaults.env << 'HAPP_DEFAULTS_EOF'
-# xrayebator HAPP subscription metadata defaults.
+# xraytailscale HAPP subscription metadata defaults.
 # Этот файл source-ится subhttp.sh на КАЖДЫЙ request — менять можно без рестарта сервиса.
 # Plan 7.3 menu позволит редактировать через TUI; править руками тоже допустимо
 # (синтаксис shell, любые BASH-совместимые конструкции).
@@ -2938,7 +2950,7 @@ HAPP_DEFAULTS_EOF
   fi
 
   # ── (3) systemd unit (REQ-C09 hardening; opt-in, НЕ enable/start здесь) ──
-  cat > /etc/systemd/system/xrayebator-sub.service << 'SUBUNIT_EOF'
+  cat > /etc/systemd/system/xraytailscale-sub.service << 'SUBUNIT_EOF'
 [Unit]
 Description=XrayTailscale HAPP subscription handler (socat + subhttp.sh)
 Documentation=https://github.com/vshroot/XrayTailscale
@@ -2953,7 +2965,7 @@ ExecStart=/usr/bin/socat TCP-LISTEN:8080,reuseaddr,fork,bind=127.0.0.1 EXEC:/usr
 
 # REQ-C09 hardening:
 ProtectSystem=strict
-ReadOnlyPaths=/usr/local/etc/xray /usr/local/bin/xrayebator /usr/local/bin/subhttp.sh
+ReadOnlyPaths=/usr/local/etc/xray /usr/local/bin/xraytailscale /usr/local/bin/subhttp.sh
 ReadWritePaths=/tmp
 NoNewPrivileges=yes
 MemoryDenyWriteExecute=yes
@@ -2972,9 +2984,9 @@ RestartSec=5
 WantedBy=multi-user.target
 SUBUNIT_EOF
 
-  chmod 644 /etc/systemd/system/xrayebator-sub.service
-  chown root:root /etc/systemd/system/xrayebator-sub.service
-  echo -e "${GREEN}  ✓ /etc/systemd/system/xrayebator-sub.service создан${NC}"
+  chmod 644 /etc/systemd/system/xraytailscale-sub.service
+  chown root:root /etc/systemd/system/xraytailscale-sub.service
+  echo -e "${GREEN}  ✓ /etc/systemd/system/xraytailscale-sub.service создан${NC}"
 
   # daemon-reload — чтобы systemctl увидел новый unit. НЕ enable, НЕ start.
   systemctl daemon-reload 2>/dev/null || true
@@ -3068,7 +3080,7 @@ _subscription_ensure_handler_running() {
     return 1
   fi
 
-  if systemctl is-active --quiet xrayebator-sub.service; then
+  if systemctl is-active --quiet xraytailscale-sub.service; then
     return 0
   fi
 
@@ -3077,14 +3089,14 @@ _subscription_ensure_handler_running() {
 
 _subscription_restart_service() {
   ensure_xray_runtime_user >/dev/null 2>&1 || return 1
-  [[ -f /etc/systemd/system/xrayebator-sub.service ]] || return 1
+  [[ -f /etc/systemd/system/xraytailscale-sub.service ]] || return 1
 
   systemctl daemon-reload 2>/dev/null || true
-  systemctl reset-failed xrayebator-sub.service 2>/dev/null || true
-  systemctl enable xrayebator-sub.service >/dev/null 2>&1 || return 1
-  systemctl restart xrayebator-sub.service >/dev/null 2>&1 || return 1
+  systemctl reset-failed xraytailscale-sub.service 2>/dev/null || true
+  systemctl enable xraytailscale-sub.service >/dev/null 2>&1 || return 1
+  systemctl restart xraytailscale-sub.service >/dev/null 2>&1 || return 1
   sleep 1
-  systemctl is-active --quiet xrayebator-sub.service
+  systemctl is-active --quiet xraytailscale-sub.service
 }
 
 _subscription_repair_handler() {
@@ -3107,8 +3119,8 @@ _subscription_local_self_test() {
   SUBSCRIPTION_SELFTEST_BODY=""
 
   local body_tmp err_tmp
-  body_tmp=$(mktemp /tmp/xrayebator-subtest.XXXXXX) || return 1
-  err_tmp=$(mktemp /tmp/xrayebator-subtest.err.XXXXXX) || {
+  body_tmp=$(mktemp /tmp/xraytailscale-subtest.XXXXXX) || return 1
+  err_tmp=$(mktemp /tmp/xraytailscale-subtest.err.XXXXXX) || {
     rm -f "$body_tmp"
     return 1
   }
@@ -3172,8 +3184,8 @@ _happ_print_subscription_url_for_profile() {
     echo -e "${RED}✗ HAPP subscription handler не отдаёт локальную подписку.${NC}"
     echo -e "${YELLOW}  Внешний клиент получит 502 Bad Gateway, пока 127.0.0.1:8080 не оживёт.${NC}"
     _subscription_print_selftest_failure
-    echo -e "${YELLOW}  Диагностика: systemctl status xrayebator-sub --no-pager -l${NC}"
-    echo -e "${YELLOW}  Логи: journalctl -u xrayebator-sub -n 80 --no-pager${NC}"
+    echo -e "${YELLOW}  Диагностика: systemctl status xraytailscale-sub --no-pager -l${NC}"
+    echo -e "${YELLOW}  Логи: journalctl -u xraytailscale-sub -n 80 --no-pager${NC}"
     echo ""
     return 1
   fi
@@ -3240,12 +3252,12 @@ install_subscription_ip_tls() {
   certbot_bin="$CERTBOT_IP_BIN"
   echo -e "${GREEN}  ✓ Certbot с IP support: ${certbot_bin}${NC}"
 
-  local webroot="/var/www/xrayebator-ip-acme"
+  local webroot="/var/www/xraytailscale-ip-acme"
   mkdir -p "$webroot/.well-known/acme-challenge"
   chmod -R 755 "$webroot"
 
-  cat > /etc/nginx/sites-available/xrayebator-sub << NGINX_HTTP_EOF
-limit_req_zone \$binary_remote_addr zone=xrayebator_sub:10m rate=30r/m;
+  cat > /etc/nginx/sites-available/xraytailscale-sub << NGINX_HTTP_EOF
+limit_req_zone \$binary_remote_addr zone=xraytailscale_sub:10m rate=30r/m;
 
 server {
     listen 80;
@@ -3262,10 +3274,10 @@ server {
     }
 }
 NGINX_HTTP_EOF
-  ln -sf /etc/nginx/sites-available/xrayebator-sub /etc/nginx/sites-enabled/xrayebator-sub
-  if ! nginx -t >/tmp/nginx-xrayebator-sub.log 2>&1; then
+  ln -sf /etc/nginx/sites-available/xraytailscale-sub /etc/nginx/sites-enabled/xraytailscale-sub
+  if ! nginx -t >/tmp/nginx-xraytailscale-sub.log 2>&1; then
     echo -e "${RED}✗ nginx -t failed${NC}"
-    cat /tmp/nginx-xrayebator-sub.log
+    cat /tmp/nginx-xraytailscale-sub.log
     return 1
   fi
   if ! systemctl enable --now nginx >/dev/null 2>&1; then
@@ -3309,8 +3321,8 @@ NGINX_HTTP_EOF
     return 1
   fi
 
-  cat > /etc/nginx/sites-available/xrayebator-sub << NGINX_TLS_EOF
-limit_req_zone \$binary_remote_addr zone=xrayebator_sub:10m rate=30r/m;
+  cat > /etc/nginx/sites-available/xraytailscale-sub << NGINX_TLS_EOF
+limit_req_zone \$binary_remote_addr zone=xraytailscale_sub:10m rate=30r/m;
 
 server {
     listen 80;
@@ -3339,7 +3351,7 @@ server {
 
     location /sub/ {
         access_log off;
-        limit_req zone=xrayebator_sub burst=10 nodelay;
+        limit_req zone=xraytailscale_sub burst=10 nodelay;
         add_header Cache-Control "no-store" always;
         add_header X-Robots-Tag "noindex, nofollow, nosnippet" always;
         proxy_pass http://127.0.0.1:8080;
@@ -3355,9 +3367,9 @@ server {
     }
 }
 NGINX_TLS_EOF
-  if ! nginx -t >/tmp/nginx-xrayebator-sub.log 2>&1; then
+  if ! nginx -t >/tmp/nginx-xraytailscale-sub.log 2>&1; then
     echo -e "${RED}✗ nginx TLS config failed${NC}"
-    cat /tmp/nginx-xrayebator-sub.log
+    cat /tmp/nginx-xraytailscale-sub.log
     return 1
   fi
   if ! systemctl reload nginx >/dev/null 2>&1; then
@@ -3372,7 +3384,7 @@ NGINX_TLS_EOF
   chown xray:xray /usr/local/etc/xray/.subscription_port /usr/local/etc/xray/.subscription_domain /usr/local/etc/xray/.subscription_server_addr /usr/local/etc/xray/.subscription_mode 2>/dev/null || true
 
   if ! _subscription_restart_service; then
-    echo -e "${RED}✗ xrayebator-sub.service не запустился — проверьте journalctl -u xrayebator-sub${NC}"
+    echo -e "${RED}✗ xraytailscale-sub.service не запустился — проверьте journalctl -u xraytailscale-sub${NC}"
     return 1
   fi
 
@@ -3400,7 +3412,7 @@ NGINX_TLS_EOF
 # Public TLS installer by domain.
 # Flow: domain prompt → DNS preflight (soft) → email prompt → port preflight
 # → nginx HTTP-only ACME site on :80 → certbot certonly --webroot → explicit SSL
-# nginx site on selected public port → markers → enable xrayebator-sub.
+# nginx site on selected public port → markers → enable xraytailscale-sub.
 # Важно: не используем certbot --nginx. Он плохо предсказуем на нестандартном
 # HTTPS-порту (8443) и может оставить plain HTTP listener после failed certbot.
 install_subscription_public_tls() {
@@ -3469,12 +3481,12 @@ install_subscription_public_tls() {
     return 1
   fi
 
-  local webroot="/var/www/xrayebator-domain-acme"
+  local webroot="/var/www/xraytailscale-domain-acme"
   mkdir -p "$webroot/.well-known/acme-challenge"
   chmod -R 755 "$webroot"
 
-  cat > /etc/nginx/sites-available/xrayebator-sub << NGINX_HTTP_EOF
-limit_req_zone \$binary_remote_addr zone=xrayebator_sub:10m rate=30r/m;
+  cat > /etc/nginx/sites-available/xraytailscale-sub << NGINX_HTTP_EOF
+limit_req_zone \$binary_remote_addr zone=xraytailscale_sub:10m rate=30r/m;
 
 server {
     listen 80;
@@ -3491,10 +3503,10 @@ server {
     }
 }
 NGINX_HTTP_EOF
-  ln -sf /etc/nginx/sites-available/xrayebator-sub /etc/nginx/sites-enabled/xrayebator-sub
-  if ! nginx -t >/tmp/nginx-xrayebator-sub.log 2>&1; then
+  ln -sf /etc/nginx/sites-available/xraytailscale-sub /etc/nginx/sites-enabled/xraytailscale-sub
+  if ! nginx -t >/tmp/nginx-xraytailscale-sub.log 2>&1; then
     echo -e "${RED}✗ nginx -t failed${NC}"
-    cat /tmp/nginx-xrayebator-sub.log
+    cat /tmp/nginx-xraytailscale-sub.log
     return 1
   fi
   if ! systemctl enable --now nginx >/dev/null 2>&1; then
@@ -3537,8 +3549,8 @@ NGINX_HTTP_EOF
     return 1
   fi
 
-  cat > /etc/nginx/sites-available/xrayebator-sub << NGINX_TLS_EOF
-limit_req_zone \$binary_remote_addr zone=xrayebator_sub:10m rate=30r/m;
+  cat > /etc/nginx/sites-available/xraytailscale-sub << NGINX_TLS_EOF
+limit_req_zone \$binary_remote_addr zone=xraytailscale_sub:10m rate=30r/m;
 
 server {
     listen 80;
@@ -3567,7 +3579,7 @@ server {
 
     location /sub/ {
         access_log off;
-        limit_req zone=xrayebator_sub burst=10 nodelay;
+        limit_req zone=xraytailscale_sub burst=10 nodelay;
         add_header Cache-Control "no-store" always;
         add_header X-Robots-Tag "noindex, nofollow, nosnippet" always;
         proxy_pass http://127.0.0.1:8080;
@@ -3583,9 +3595,9 @@ server {
     }
 }
 NGINX_TLS_EOF
-  if ! nginx -t >/tmp/nginx-xrayebator-sub.log 2>&1; then
+  if ! nginx -t >/tmp/nginx-xraytailscale-sub.log 2>&1; then
     echo -e "${RED}✗ nginx TLS config failed${NC}"
-    cat /tmp/nginx-xrayebator-sub.log
+    cat /tmp/nginx-xraytailscale-sub.log
     return 1
   fi
   if ! systemctl reload nginx >/dev/null 2>&1; then
@@ -3602,7 +3614,7 @@ NGINX_TLS_EOF
 
   # Активация unit.
   if ! _subscription_restart_service; then
-    echo -e "${RED}✗ xrayebator-sub.service не запустился — проверьте journalctl -u xrayebator-sub${NC}"
+    echo -e "${RED}✗ xraytailscale-sub.service не запустился — проверьте journalctl -u xraytailscale-sub${NC}"
     return 1
   fi
 
@@ -3650,7 +3662,7 @@ install_subscription_local_only() {
   chown xray:xray /usr/local/etc/xray/.subscription_port /usr/local/etc/xray/.subscription_domain /usr/local/etc/xray/.subscription_server_addr /usr/local/etc/xray/.subscription_mode 2>/dev/null || true
 
   if ! _subscription_restart_service; then
-    echo -e "${RED}✗ xrayebator-sub.service не запустился${NC}"
+    echo -e "${RED}✗ xraytailscale-sub.service не запустился${NC}"
     return 1
   fi
 
@@ -3755,7 +3767,7 @@ manage_subscription_menu() {
   local token
   token=$(jq -r '.sub_token // ""' "$pfile" 2>/dev/null)
   if [[ ! "$token" =~ ^[a-f0-9]{32}$ ]]; then
-    echo -e "${RED}✗ В профиле нет валидного sub_token. Запустите 'sudo xrayebator' — миграция .subscription_tokens_2026 догенерирует.${NC}"
+    echo -e "${RED}✗ В профиле нет валидного sub_token. Запустите 'sudo xraytailscale' — миграция .subscription_tokens_2026 догенерирует.${NC}"
     sleep 3
     return
   fi
@@ -3806,8 +3818,8 @@ manage_subscription_menu() {
             echo -e "${RED}✗ HAPP subscription handler не отвечает локально.${NC}"
             echo -e "${YELLOW}  Внешний клиент сейчас получит 502 Bad Gateway.${NC}"
             _subscription_print_selftest_failure
-            echo -e "${YELLOW}  Проверьте: systemctl status xrayebator-sub --no-pager -l${NC}"
-            echo -e "${YELLOW}  Логи: journalctl -u xrayebator-sub -n 80 --no-pager${NC}"
+            echo -e "${YELLOW}  Проверьте: systemctl status xraytailscale-sub --no-pager -l${NC}"
+            echo -e "${YELLOW}  Логи: journalctl -u xraytailscale-sub -n 80 --no-pager${NC}"
             echo ""
           fi
         fi
@@ -4108,7 +4120,7 @@ _tailscale_default_hostname() {
   raw=$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo "vps")
   raw=$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | sed 's/^-//; s/-$//; s/--*/-/g')
   [[ -z "$raw" ]] && raw="vps"
-  printf 'xrayebator-%s\n' "$raw"
+  printf 'xraytailscale-%s\n' "$raw"
 }
 
 install_tailscale_package() {
@@ -4561,7 +4573,7 @@ create_profile_all_routes() {
   [[ -z "$default_sni" ]] && default_sni="www.ozon.ru"
 
   local routes_tmp
-  routes_tmp=$(mktemp /tmp/xrayebator-routes.XXXXXX) || {
+  routes_tmp=$(mktemp /tmp/xraytailscale-routes.XXXXXX) || {
     echo -e "${RED}✗ mktemp failed${NC}"
     return 1
   }
@@ -4928,14 +4940,14 @@ add_inbound() {
   if [[ "$transport" == "xhttp" && "$pq_enabled" == "true" ]]; then
     if [[ ! -f "$VLESS_DECRYPTION_FILE" ]]; then
       echo -e "${RED}✗ PQ ключи отсутствуют: $VLESS_DECRYPTION_FILE${NC}"
-      echo -e "${YELLOW}  Перезапустите xrayebator — миграция .mlkem_keys_generated должна сгенерировать ключи${NC}"
+      echo -e "${YELLOW}  Перезапустите xraytailscale — миграция .mlkem_keys_generated должна сгенерировать ключи${NC}"
       echo -e "${YELLOW}  Если миграция падает — проверьте: sudo /usr/local/bin/xray version (нужен ≥ 25.9.5)${NC}"
       return 1
     fi
     vless_decryption=$(cat "$VLESS_DECRYPTION_FILE")
     if [[ ! "$vless_decryption" =~ ^mlkem768x25519plus\. ]]; then
       echo -e "${RED}✗ $VLESS_DECRYPTION_FILE содержит невалидную PQ строку${NC}"
-      echo -e "${YELLOW}  Удалите файл и перезапустите xrayebator для регенерации${NC}"
+      echo -e "${YELLOW}  Удалите файл и перезапустите xraytailscale для регенерации${NC}"
       return 1
     fi
   fi
@@ -5528,7 +5540,7 @@ generate_connection() {
   vless_link=$(_generate_vless_url_pure "$profile_file") || {
     echo -e "${RED}✗ Не удалось построить vless:// URL для профиля $profile_name${NC}"
     if [[ "$transport" == "xhttp" ]] && [[ "$pq_enabled" == "true" ]] && [[ ! -f "$VLESS_ENCRYPTION_FILE" ]]; then
-      echo -e "${YELLOW}  Причина: $VLESS_ENCRYPTION_FILE отсутствует. Перезапустите xrayebator (миграция .mlkem_keys_generated).${NC}"
+      echo -e "${YELLOW}  Причина: $VLESS_ENCRYPTION_FILE отсутствует. Перезапустите xraytailscale (миграция .mlkem_keys_generated).${NC}"
     fi
     echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
     read -r
@@ -6491,7 +6503,7 @@ manage_profile_advanced_menu() {
     minor=$(echo "$xray_ver" | cut -d'.' -f2)
     if [[ "$major" == "1" && "$minor" =~ ^[0-9]+$ && "$minor" -lt 251201 ]]; then
       echo -e "${YELLOW}Xray-core версия $xray_ver — testpre/testseed появились в v1.251201.0+${NC}"
-      echo -e "${YELLOW}  Поля будут добавлены в config, но эффекта не дадут. Рекомендуется sudo xrayebator update.${NC}"
+      echo -e "${YELLOW}  Поля будут добавлены в config, но эффекта не дадут. Рекомендуется sudo xraytailscale update.${NC}"
       echo -n -e "${YELLOW}Продолжить все равно? [y/N]: ${NC}"
       read -r ans
       [[ "$ans" =~ ^[yYдД]$ ]] || return
@@ -6847,7 +6859,7 @@ upgrade_profile_to_pq_menu() {
   # Pre-check: ключи vlessenc должны существовать (Plan 6.1 marker .mlkem_keys_generated)
   if [[ ! -f "$VLESS_DECRYPTION_FILE" ]] || [[ ! -f "$VLESS_ENCRYPTION_FILE" ]]; then
     echo -e "${RED}✗ ML-KEM ключи не найдены ($VLESS_DECRYPTION_FILE).${NC}"
-    echo -e "${YELLOW}  Запустите xrayebator update — миграция .mlkem_keys_generated должна сгенерировать ключи.${NC}"
+    echo -e "${YELLOW}  Запустите xraytailscale update — миграция .mlkem_keys_generated должна сгенерировать ключи.${NC}"
     echo -n -e "${YELLOW}Нажмите Enter для возврата...${NC}"; read
     return
   fi
@@ -6918,9 +6930,9 @@ upgrade_profile_to_pq_menu() {
   local old_transport=$(jq -r '.transport // "tcp"' "$pfile")
 
   # H1 fix: short_id ЧИТАЕМ ИЗ СУЩЕСТВУЮЩЕГО INBOUND (config.json), НЕ из profile JSON.
-  # create_profile() в xrayebator НИКОГДА не сохраняет short_id в profile JSON.
+  # create_profile() в xraytailscale НИКОГДА не сохраняет short_id в profile JSON.
   # Если на shared inbound сгенерировать новый short_id — Reality порвёт ВСЕ остальные клиенты на порту.
-  # Зеркалим логику generate_connection() (xrayebator:2217-2220): берём первый shortIds[0] из инбаунда.
+  # Зеркалим логику generate_connection() (xraytailscale:2217-2220): берём первый shortIds[0] из инбаунда.
   local short_id
   short_id=$(jq -r --argjson p "$port" \
     '.inbounds[] | select(.port == $p) | .streamSettings.realitySettings.shortIds[0]' \
@@ -7215,7 +7227,7 @@ uninstall_adguard_home() {
 # Без аргументов → interactive main_menu (legacy behaviour).
 # При source-режиме (Phase 7, REQ-C10) dispatch пропускается — sourcing-скрипт сам решает,
 # что делать с определёнными функциями.
-if [[ "$XRAYEBATOR_SOURCED" -eq 0 ]]; then
+if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
   case "${1:-}" in
     update)
       shift
@@ -7231,9 +7243,9 @@ if [[ "$XRAYEBATOR_SOURCED" -eq 0 ]]; then
     *)
       echo -e "${RED}✗ Неизвестная команда: $1${NC}"
       echo -e "${YELLOW}Использование:${NC}"
-      echo -e "  ${CYAN}sudo xrayebator${NC}         — открыть меню"
-      echo -e "  ${CYAN}sudo xrayebator update${NC}  — обновить Xray-core"
-      echo -e "  ${CYAN}sudo xrayebator probe-test${NC}  — проверить доступность SNI с VPS"
+      echo -e "  ${CYAN}sudo xraytailscale${NC}         — открыть меню"
+      echo -e "  ${CYAN}sudo xraytailscale update${NC}  — обновить Xray-core"
+      echo -e "  ${CYAN}sudo xraytailscale probe-test${NC}  — проверить доступность SNI с VPS"
       exit 1
       ;;
   esac
