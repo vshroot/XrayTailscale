@@ -1,0 +1,10 @@
+# локальный контекст ИИ
+AI_CONTEXT.md
+.planning/
+
+# бэкапы xrayebator
+xrayebator.backup_*
+
+# локальные ресерч-ноты (не публичные, личный контекст)
+RESEARCH_REPORT.md
+ресерч задание.txt
