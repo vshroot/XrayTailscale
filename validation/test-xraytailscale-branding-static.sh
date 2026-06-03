@@ -21,6 +21,8 @@ echo "Checking XrayTailscale command branding"
 grep -q 'sudo xraytailscale' README.md || fail "README must document sudo xraytailscale"
 grep -q 'xraytailscale-update' README.md || fail "README must document xraytailscale-update"
 grep -q 'xraytailscale-uninstall' README.md || fail "README must document xraytailscale-uninstall"
+grep -Fq 'curl -fsSL https://raw.githubusercontent.com/vshroot/XrayTailscale/main/install.sh | sudo bash' README.md || fail "README must document public one-command deploy"
+! grep -Eq 'GitHub token|XRAYTAILSCALE_GITHUB_TOKEN' README.md || fail "README must not require a GitHub token for deploy"
 
 grep -q '/usr/local/bin/xraytailscale' install.sh || fail "installer must install /usr/local/bin/xraytailscale"
 grep -q '/usr/local/bin/xraytailscale' update.sh || fail "updater must update /usr/local/bin/xraytailscale"
