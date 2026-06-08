@@ -4452,6 +4452,7 @@ main_menu() {
   run_migration "xhttp_migrated"                       "XHTTP host/SNI sync"             migrate_xhttp_profiles             || ((migration_failures++))
   run_migration "xhttp_drop_host_2026"                 "XHTTP: remove forced Host check" _migrate_xhttp_drop_host_2026      || ((migration_failures++))
   run_migration "xhttp_path_sync_2026"                 "XHTTP path sync для существующих профилей" _migrate_xhttp_path_sync_2026 || ((migration_failures++))
+  run_migration "xhttp_path_sync_after_multiroute_fix_2026" "XHTTP path sync после фикса multi-route генерации" _migrate_xhttp_path_sync_2026 || ((migration_failures++))
   run_migration "xhttp_reality_stream_one_2026"        "XHTTP Reality mode stream-one"   _migrate_xhttp_reality_stream_one_2026 || ((migration_failures++))
   run_migration "routing_v132_migrated"                "Routing default direct rule"      migrate_routing_config             || ((migration_failures++))
   run_migration "xhttp_mode_migrated"                  "XHTTP mode stream→auto"           migrate_xhttp_mode                 || ((migration_failures++))
@@ -4815,8 +4816,24 @@ create_profile_all_routes() {
   rollback_config=$(ls -t /usr/local/etc/xray/backups/config_*_create_profile_"$name".json 2>/dev/null | head -1)
 
   local created_ports=()
-  local route_line label transport sni fingerprint pq grpc xhttp
-  while IFS=$'\t' read -r label transport port sni fingerprint pq grpc xhttp; do
+  local route_json label transport sni fingerprint pq grpc xhttp
+  while IFS= read -r route_json; do
+    label=$(jq -r '.label // ""' <<< "$route_json")
+    transport=$(jq -r '.transport // ""' <<< "$route_json")
+    port=$(jq -r '.port // empty' <<< "$route_json")
+    sni=$(jq -r '.sni // ""' <<< "$route_json")
+    fingerprint=$(jq -r '.fingerprint // "chrome"' <<< "$route_json")
+    pq=$(jq -r '.pq_enabled // false' <<< "$route_json")
+    grpc=$(jq -r '.grpc_service_name // ""' <<< "$route_json")
+    xhttp=$(jq -r '.xhttp_path // ""' <<< "$route_json")
+
+    if [[ "$transport" == "xhttp" && "$xhttp" != /* ]]; then
+      [[ -n "$rollback_config" ]] && cp "$rollback_config" "$CONFIG_FILE"
+      rm -f "$PROFILES_DIR/$name.json"
+      echo -e "${RED}✗ XHTTP route ${label} собран без path; профиль удалён${NC}"
+      return 1
+    fi
+
     echo -e "${CYAN} → Маршрут ${label}: ${transport} :${port}${NC}"
     if ! add_inbound "$uuid" "$transport" "$port" "$sni" "$fingerprint" "$grpc" "$xhttp" "$pq"; then
       [[ -n "$rollback_config" ]] && cp "$rollback_config" "$CONFIG_FILE"
@@ -4833,7 +4850,7 @@ create_profile_all_routes() {
       return 1
     fi
     created_ports+=("$port")
-  done < <(jq -r '.[] | [.label,.transport,.port,.sni,.fingerprint,(.pq_enabled // false),(.grpc_service_name // ""),(.xhttp_path // "")] | @tsv' <<< "$routes_json")
+  done < <(jq -c '.[]' <<< "$routes_json")
 
   if ! safe_restart_xray; then
     rm -f "$PROFILES_DIR/$name.json"
