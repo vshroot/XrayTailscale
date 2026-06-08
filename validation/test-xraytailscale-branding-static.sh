@@ -28,6 +28,9 @@ grep -q '/usr/local/bin/xraytailscale' install.sh || fail "installer must instal
 grep -q '/usr/local/bin/xraytailscale' update.sh || fail "updater must update /usr/local/bin/xraytailscale"
 grep -q 'xraytailscale-sub.service' xraytailscale || fail "subscription service must use xraytailscale-sub.service"
 grep -q 'source /usr/local/bin/xraytailscale' xraytailscale || fail "subhttp handler must source xraytailscale"
+! grep -q 'Киса' ascii_art.txt || fail "ascii_art.txt must not ship legacy cat artwork"
+grep -q '_refresh_legacy_ascii_art()' xraytailscale || fail "xraytailscale must refresh legacy cached ASCII art"
+grep -q 'grep -q "Киса" "$ASCII_ART"' xraytailscale || fail "legacy cached ASCII art must be detected"
 
 if rg -n "${old_lower}|${old_title}|${old_upper}" \
     --glob '!validation/test-xraytailscale-branding-static.sh' \

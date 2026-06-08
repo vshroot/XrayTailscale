@@ -149,16 +149,11 @@ update_transport_settings_for_sni() {
   fi
   echo -e "${GREEN}  ✓ Reality SNI обновлен → $new_sni${NC}"
 
-  # Transport-specific updates
   if [[ "$transport" == "xhttp" ]]; then
-    if safe_jq_write --argjson port "$port_num" --arg sni "$new_sni" '
-      (.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings.host) |= $sni
-    ' "$config_file"; then
-      echo -e "${GREEN}  ✓ XHTTP host обновлен → $new_sni${NC}"
-    else
-      echo -e "${RED}  ✗ Ошибка обновления XHTTP host${NC}"
-      return 1
-    fi
+    safe_jq_write --argjson port "$port_num" '
+      (.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings) |= del(.host)
+    ' "$config_file" >/dev/null 2>&1 || true
+    echo -e "${GREEN}  ✓ XHTTP Host header не форсируется${NC}"
   fi
 }
 
@@ -363,11 +358,11 @@ _generate_vless_url_pure() {
         local raw_encryption encoded_encryption
         raw_encryption=$(cat "$VLESS_ENCRYPTION_FILE")
         encoded_encryption=$(jq -nr --arg enc "$raw_encryption" '$enc|@uri')
-        printf 'vless://%s@%s:%s?encryption=%s&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=xhttp&path=%s&host=%s&mode=auto#%s' \
-          "$uuid" "$server_ip" "$port" "$encoded_encryption" "$sni" "$fingerprint" "$clean_public_key" "$short_id" "$encoded_xhttp_path" "$sni" "$profile_name"
+        printf 'vless://%s@%s:%s?encryption=%s&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=xhttp&path=%s&mode=auto#%s' \
+          "$uuid" "$server_ip" "$port" "$encoded_encryption" "$sni" "$fingerprint" "$clean_public_key" "$short_id" "$encoded_xhttp_path" "$profile_name"
       else
-        printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=xhttp&path=%s&host=%s&mode=auto#%s' \
-          "$uuid" "$server_ip" "$port" "$sni" "$fingerprint" "$clean_public_key" "$short_id" "$encoded_xhttp_path" "$sni" "$profile_name"
+        printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=xhttp&path=%s&mode=auto#%s' \
+          "$uuid" "$server_ip" "$port" "$sni" "$fingerprint" "$clean_public_key" "$short_id" "$encoded_xhttp_path" "$profile_name"
       fi
       ;;
     *)
@@ -1158,19 +1153,17 @@ migrate_xhttp_profiles() {
     local transport=$(jq -r '.transport' "$profile_file")
     [[ "$transport" != "xhttp" ]] && continue
 
-    local profile_sni=$(jq -r '.sni' "$profile_file")
     local port=$(jq -r '.port' "$profile_file")
 
-    # Check if xhttpSettings.host matches profile SNI
-    local config_host=$(jq -r --argjson port "$port" \
-      '.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings.host' \
+    local has_host=$(jq -r --argjson port "$port" \
+      '.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings | has("host")' \
       "$CONFIG_FILE" 2>/dev/null)
 
-    if [[ "$config_host" != "$profile_sni" ]]; then
-      echo -e "${YELLOW}  → Миграция XHTTP: $(basename "$profile_file" .json)${NC}"
+    if [[ "$has_host" == "true" ]]; then
+      echo -e "${YELLOW}  → Удаляю XHTTP Host check: $(basename "$profile_file" .json)${NC}"
 
-      if safe_jq_write --argjson port "$port" --arg sni "$profile_sni" '
-        (.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings.host) |= $sni
+      if safe_jq_write --argjson port "$port" '
+        (.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings) |= del(.host)
       ' "$CONFIG_FILE"; then
         ((migrated++))
       fi
@@ -1180,12 +1173,38 @@ migrate_xhttp_profiles() {
   # safe_restart_xray удалён: вызывается run_migration после fn (Phase 4 refactor)
   # EXPLICIT return: 0=changed (restart нужен), 1=no-op (нечего мигрировать)
   if [[ $migrated -gt 0 ]]; then
-    echo -e "${GREEN}✓ Мигрировано $migrated XHTTP профилей${NC}"
+    echo -e "${GREEN}✓ Удалён XHTTP Host check у $migrated профилей${NC}"
     return 0   # changed → run_migration вызовет safe_restart_xray
   else
     echo -e "${GREEN}✓ Миграция XHTTP профилей не требуется${NC}"
     return 1   # no-op → run_migration touch-ит marker без restart
   fi
+}
+
+_migrate_xhttp_drop_host_2026() {
+  local count
+  count=$(jq '[.inbounds[]? | select(.streamSettings.network == "xhttp" and (.streamSettings.xhttpSettings | has("host")))] | length' "$CONFIG_FILE" 2>/dev/null || echo 0)
+  if [[ ! "$count" =~ ^[0-9]+$ || "$count" -eq 0 ]]; then
+    echo -e "${GREEN}✓ XHTTP Host check уже отсутствует${NC}"
+    return 1
+  fi
+
+  echo -e "${YELLOW}  → Удаляю xhttpSettings.host у ${count} XHTTP inbound(ов)${NC}"
+  if safe_jq_write '
+    .inbounds |= map(
+      if .streamSettings.network == "xhttp" and (.streamSettings.xhttpSettings | type == "object") then
+        .streamSettings.xhttpSettings |= del(.host)
+      else
+        .
+      end
+    )
+  ' "$CONFIG_FILE"; then
+    echo -e "${GREEN}✓ XHTTP Host check удалён${NC}"
+    return 0
+  fi
+
+  echo -e "${RED}✗ Не удалось удалить XHTTP Host check${NC}"
+  return 2
 }
 
 # Migration function for routing configuration (v2.0)
@@ -2175,12 +2194,24 @@ fi
 
 
 # Показать ASCII арт
+_refresh_legacy_ascii_art() {
+  local ASCII_URL="${RAW_BASE_URL}/ascii_art.txt"
+  if [[ -f "$ASCII_ART" ]] && grep -q "Киса" "$ASCII_ART" 2>/dev/null; then
+    github_raw_curl "$ASCII_URL" -o "$ASCII_ART" 2>/dev/null || true
+    if [[ -f "$ASCII_ART" ]] && grep -q "Киса" "$ASCII_ART" 2>/dev/null; then
+      rm -f "$ASCII_ART"
+    fi
+  fi
+}
+
 show_ascii() {
   clear
   local ASCII_URL="${RAW_BASE_URL}/ascii_art.txt"
+  _refresh_legacy_ascii_art
   if [[ ! -f "$ASCII_ART" ]]; then
     mkdir -p "$(dirname "$ASCII_ART")"
     github_raw_curl "$ASCII_URL" -o "$ASCII_ART" 2>/dev/null || true
+    _refresh_legacy_ascii_art
   fi
   if [[ -f "$ASCII_ART" ]] && [[ -s "$ASCII_ART" ]]; then
     echo -e "${CYAN}"
@@ -2190,8 +2221,8 @@ show_ascii() {
     echo -e "${CYAN}"
     echo ' ╔═══════════════════════════════════╗'
     echo ' ║                                   ║'
-    echo ' ║        XRAYTAILSCALE v2.0           ║'
-    echo ' ║   Xray Reality VPN Manager       ║'
+    echo ' ║        XRAYTAILSCALE v2.0        ║'
+    echo ' ║ Xray Reality VPN + Tailscale     ║'
     echo ' ║                                   ║'
     echo ' ╚═══════════════════════════════════╝'
     echo -e "${NC}"
@@ -4336,6 +4367,7 @@ main_menu() {
   local migration_failures=0
 
   run_migration "xhttp_migrated"                       "XHTTP host/SNI sync"             migrate_xhttp_profiles             || ((migration_failures++))
+  run_migration "xhttp_drop_host_2026"                 "XHTTP: remove forced Host check" _migrate_xhttp_drop_host_2026      || ((migration_failures++))
   run_migration "routing_v132_migrated"                "Routing default direct rule"      migrate_routing_config             || ((migration_failures++))
   run_migration "xhttp_mode_migrated"                  "XHTTP mode stream→auto"           migrate_xhttp_mode                 || ((migration_failures++))
   run_migration "xhttp_extra_restored"                 "XHTTP extra anti-DPI restore"     migrate_xhttp_extra_restore        || ((migration_failures++))
@@ -4462,28 +4494,6 @@ create_profile_menu() {
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
   echo -e "${BLUE}        СОЗДАНИЕ НОВОГО ПРОФИЛЯ               ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
-  echo -n -e "${YELLOW}Введите имя профиля (или 0 для отмены): ${NC}"
-  read -r profile_name
-  if [[ "$profile_name" == "0" ]]; then
-    return
-  fi
-  if [[ -z "$profile_name" ]]; then
-    echo -e "${RED}✗ Имя не может быть пустым${NC}"
-    sleep 2
-    return
-  fi
-  if [[ ! "$profile_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-    echo -e "${RED}✗ Используйте только буквы, цифры, дефис и подчеркивание${NC}"
-    sleep 2
-    return
-  fi
-  if [[ -f "$PROFILES_DIR/$profile_name.json" ]]; then
-    echo -e "${RED}✗ Профиль с таким именем уже существует${NC}"
-    sleep 2
-    return
-  fi
-
-  echo ""
   echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
   echo -e "${BLUE}║              ВЫБЕРИТЕ ТИП ПРОФИЛЯ                         ║${NC}"
   echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
@@ -4525,11 +4535,44 @@ create_profile_menu() {
   echo -e "    ${GREEN}✓${NC} SNI: api-maps.yandex.ru по умолчанию"
   echo -e "    ${YELLOW}⚠${NC} Узкий сценарий, не базовый дефолт"
   echo ""
+  echo -e "${CYAN} 8)${NC} Tailscale exit node не VLESS-профиль"
+  echo -e "    ${BLUE}ℹ${NC} Устанавливает Tailscale и объявляет VPS как exit node"
+  echo -e "    ${BLUE}ℹ${NC} Не создаёт Xray/VLESS profile JSON"
+  echo ""
   echo -e "${CYAN} 0)${NC} Назад в главное меню"
   echo ""
   echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
   echo -n -e "${YELLOW}Ваш выбор: ${NC}"
   read -r route_choice
+  case $route_choice in
+    1|2|3|4|5|6|7|xorpub) ;;
+    8) tailscale_exit_node_menu; return ;;
+    0) return ;;
+    *) echo -e "${RED}Неверный выбор${NC}"; sleep 2; return ;;
+  esac
+
+  echo ""
+  echo -n -e "${YELLOW}Введите имя профиля (или 0 для отмены): ${NC}"
+  read -r profile_name
+  if [[ "$profile_name" == "0" ]]; then
+    return
+  fi
+  if [[ -z "$profile_name" ]]; then
+    echo -e "${RED}✗ Имя не может быть пустым${NC}"
+    sleep 2
+    return
+  fi
+  if [[ ! "$profile_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo -e "${RED}✗ Используйте только буквы, цифры, дефис и подчеркивание${NC}"
+    sleep 2
+    return
+  fi
+  if [[ -f "$PROFILES_DIR/$profile_name.json" ]]; then
+    echo -e "${RED}✗ Профиль с таким именем уже существует${NC}"
+    sleep 2
+    return
+  fi
+
   case $route_choice in
     1) create_profile_all_routes "$profile_name" ;;
     2) create_profile "$profile_name" "tcp" "" "chrome" ;;
@@ -4549,8 +4592,6 @@ create_profile_menu() {
       sleep 3
       create_profile "$profile_name" "xhttp" "" "chrome"
       ;;
-    0) return ;;
-    *) echo -e "${RED}Неверный выбор${NC}"; sleep 2; return ;;
   esac
 }
 
@@ -5169,7 +5210,6 @@ GRPCEOF
     "xhttpSettings": {
       "mode": "auto",
       "path": "$xhttp_path",
-      "host": "$sni",
       "extra": {
         "xPaddingBytes": "100-1000",
         "xmux": {
@@ -7021,7 +7061,6 @@ upgrade_profile_to_pq_menu() {
     "xhttpSettings": {
       "mode": "auto",
       "path": "$xhttp_path",
-      "host": "$sni",
       "extra": {
         "xPaddingBytes": "100-1000",
         "xmux": {
