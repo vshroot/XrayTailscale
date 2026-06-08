@@ -93,9 +93,9 @@ urls=$(_generate_vless_urls_for_profile "$PROFILES_DIR/sample.json") || fail "UR
 
 grep -q 'sample-xhttp-legacy' <<< "$urls" || fail "legacy XHTTP route missing"
 grep -q 'encryption=none' <<< "$urls" || fail "legacy XHTTP must use encryption=none"
-grep -q 'type=xhttp&path=%2Fxhttp-test&mode=auto#sample-xhttp-legacy' <<< "$urls" || fail "legacy XHTTP URL must include mode=auto and encoded path"
+grep -q 'type=xhttp&path=%2Fxhttp-test&mode=stream-one#sample-xhttp-legacy' <<< "$urls" || fail "legacy XHTTP URL must include mode=stream-one and encoded path"
 grep -q 'encryption=mlkem768x25519plus.native.test-encryption' <<< "$urls" || fail "PQ XHTTP encryption missing"
-grep -q 'type=xhttp&path=%2Fxhttp-pq&mode=auto#sample-xhttp-pq' <<< "$urls" || fail "PQ XHTTP URL must include mode=auto"
+grep -q 'type=xhttp&path=%2Fxhttp-pq&mode=stream-one#sample-xhttp-pq' <<< "$urls" || fail "PQ XHTTP URL must include mode=stream-one"
 ! grep -q '&host=' <<< "$urls" || fail "XHTTP URLs must not force Host header"
 grep -q 'type=grpc&serviceName=svc-test&mode=gun#sample-grpc' <<< "$urls" || fail "gRPC URL must include mode=gun"
 

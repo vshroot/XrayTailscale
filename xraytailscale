@@ -358,10 +358,10 @@ _generate_vless_url_pure() {
         local raw_encryption encoded_encryption
         raw_encryption=$(cat "$VLESS_ENCRYPTION_FILE")
         encoded_encryption=$(jq -nr --arg enc "$raw_encryption" '$enc|@uri')
-        printf 'vless://%s@%s:%s?encryption=%s&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=xhttp&path=%s&mode=auto#%s' \
+        printf 'vless://%s@%s:%s?encryption=%s&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=xhttp&path=%s&mode=stream-one#%s' \
           "$uuid" "$server_ip" "$port" "$encoded_encryption" "$sni" "$fingerprint" "$clean_public_key" "$short_id" "$encoded_xhttp_path" "$profile_name"
       else
-        printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=xhttp&path=%s&mode=auto#%s' \
+        printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=xhttp&path=%s&mode=stream-one#%s' \
           "$uuid" "$server_ip" "$port" "$sni" "$fingerprint" "$clean_public_key" "$short_id" "$encoded_xhttp_path" "$profile_name"
       fi
       ;;
@@ -1204,6 +1204,32 @@ _migrate_xhttp_drop_host_2026() {
   fi
 
   echo -e "${RED}✗ Не удалось удалить XHTTP Host check${NC}"
+  return 2
+}
+
+_migrate_xhttp_reality_stream_one_2026() {
+  local affected
+  affected=$(jq -r '
+    .inbounds[]?
+    | select(.streamSettings.network == "xhttp" and .streamSettings.security == "reality")
+    | select((.streamSettings.xhttpSettings.mode // "") != "stream-one")
+    | .port
+  ' "$CONFIG_FILE" 2>/dev/null)
+
+  if [[ -z "$affected" ]]; then
+    echo -e "${GREEN}✓ XHTTP Reality уже использует stream-one${NC}"
+    return 1
+  fi
+
+  echo -e "${YELLOW}  → Переключаю XHTTP Reality mode на stream-one: ${affected//$'\n'/, }${NC}"
+  if safe_jq_write '
+    (.inbounds[]? | select(.streamSettings.network == "xhttp" and .streamSettings.security == "reality") | .streamSettings.xhttpSettings.mode) = "stream-one"
+  ' "$CONFIG_FILE"; then
+    echo -e "${GREEN}✓ XHTTP Reality mode=stream-one применён${NC}"
+    return 0
+  fi
+
+  echo -e "${RED}✗ Не удалось переключить XHTTP Reality на stream-one${NC}"
   return 2
 }
 
@@ -4368,6 +4394,7 @@ main_menu() {
 
   run_migration "xhttp_migrated"                       "XHTTP host/SNI sync"             migrate_xhttp_profiles             || ((migration_failures++))
   run_migration "xhttp_drop_host_2026"                 "XHTTP: remove forced Host check" _migrate_xhttp_drop_host_2026      || ((migration_failures++))
+  run_migration "xhttp_reality_stream_one_2026"        "XHTTP Reality mode stream-one"   _migrate_xhttp_reality_stream_one_2026 || ((migration_failures++))
   run_migration "routing_v132_migrated"                "Routing default direct rule"      migrate_routing_config             || ((migration_failures++))
   run_migration "xhttp_mode_migrated"                  "XHTTP mode stream→auto"           migrate_xhttp_mode                 || ((migration_failures++))
   run_migration "xhttp_extra_restored"                 "XHTTP extra anti-DPI restore"     migrate_xhttp_extra_restore        || ((migration_failures++))
@@ -5208,7 +5235,7 @@ GRPCEOF
     "network": "xhttp",
     "security": "reality",
     "xhttpSettings": {
-      "mode": "auto",
+      "mode": "stream-one",
       "path": "$xhttp_path",
       "extra": {
         "xPaddingBytes": "100-1000",
@@ -7059,7 +7086,7 @@ upgrade_profile_to_pq_menu() {
     "network": "xhttp",
     "security": "reality",
     "xhttpSettings": {
-      "mode": "auto",
+      "mode": "stream-one",
       "path": "$xhttp_path",
       "extra": {
         "xPaddingBytes": "100-1000",
