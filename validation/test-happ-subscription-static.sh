@@ -52,6 +52,7 @@ grep -q 'type=xhttp&path=.*&mode=stream-one' xraytailscale || fail "raw XHTTP VL
 grep -q '"mode": "stream-one"' xraytailscale || fail "XHTTP inbound templates must use stream-one"
 grep -q 'xhttp_drop_host_2026' xraytailscale || fail "missing XHTTP Host check removal migration"
 grep -q 'del(.host)' xraytailscale || fail "XHTTP Host check migration must delete xhttpSettings.host"
+grep -q 'xhttp_path_sync_2026' xraytailscale || fail "missing XHTTP path sync migration"
 grep -q 'xhttp_reality_stream_one_2026' xraytailscale || fail "missing XHTTP Reality stream-one migration"
 grep -q 'type=grpc&serviceName=.*&mode=gun' xraytailscale || fail "raw gRPC VLESS URLs must include mode=gun"
 grep -q 'tcp_vision=()' "$SUBHTTP_TMP" || fail "HAPP subscription must bucket routes for stable ordering"

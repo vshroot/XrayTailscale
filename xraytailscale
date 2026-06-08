@@ -1207,6 +1207,63 @@ _migrate_xhttp_drop_host_2026() {
   return 2
 }
 
+_migrate_xhttp_path_sync_2026() {
+  local migrated=0 failed=0 profile_file
+
+  echo -e "${CYAN}Проверка XHTTP path между profiles и config.json...${NC}"
+
+  for profile_file in "$PROFILES_DIR"/*.json; do
+    [[ -f "$profile_file" ]] || continue
+
+    local port path current_path
+    while IFS=$'\t' read -r port path; do
+      [[ "$port" =~ ^[0-9]+$ ]] || continue
+      [[ "$path" == /* ]] || continue
+
+      current_path=$(jq -r --argjson port "$port" '
+        .inbounds[]?
+        | select(.port == $port and .streamSettings.network == "xhttp")
+        | .streamSettings.xhttpSettings.path // ""
+      ' "$CONFIG_FILE" 2>/dev/null | head -1)
+
+      if [[ -z "$current_path" || "$current_path" == "null" ]]; then
+        echo -e "${YELLOW}  → Восстанавливаю XHTTP path на порту $port: $path${NC}"
+        if safe_jq_write --argjson port "$port" --arg path "$path" '
+          (.inbounds[]? | select(.port == $port and .streamSettings.network == "xhttp") | .streamSettings.xhttpSettings.path) = $path
+        ' "$CONFIG_FILE"; then
+          ((migrated++))
+        else
+          ((failed++))
+        fi
+      fi
+    done < <(jq -r '
+      if ((.routes // []) | length) > 0 then
+        (.routes // [])[]
+        | select(.transport == "xhttp" and (.port? | type == "number") and ((.xhttp_path // "") | length > 0))
+        | [.port, .xhttp_path]
+        | @tsv
+      elif .transport == "xhttp" and (.port? | type == "number") and ((.xhttp_path // "") | length > 0) then
+        [.port, .xhttp_path]
+        | @tsv
+      else
+        empty
+      end
+    ' "$profile_file" 2>/dev/null)
+  done
+
+  if [[ $failed -gt 0 ]]; then
+    echo -e "${RED}✗ XHTTP path sync: $failed ошибок, $migrated исправлено${NC}"
+    return 2
+  fi
+  if [[ $migrated -gt 0 ]]; then
+    echo -e "${GREEN}✓ XHTTP path sync: исправлено $migrated inbound(ов)${NC}"
+    return 0
+  fi
+
+  echo -e "${GREEN}✓ XHTTP path sync не требуется${NC}"
+  return 1
+}
+
 _migrate_xhttp_reality_stream_one_2026() {
   local affected
   affected=$(jq -r '
@@ -4394,6 +4451,7 @@ main_menu() {
 
   run_migration "xhttp_migrated"                       "XHTTP host/SNI sync"             migrate_xhttp_profiles             || ((migration_failures++))
   run_migration "xhttp_drop_host_2026"                 "XHTTP: remove forced Host check" _migrate_xhttp_drop_host_2026      || ((migration_failures++))
+  run_migration "xhttp_path_sync_2026"                 "XHTTP path sync для существующих профилей" _migrate_xhttp_path_sync_2026 || ((migration_failures++))
   run_migration "xhttp_reality_stream_one_2026"        "XHTTP Reality mode stream-one"   _migrate_xhttp_reality_stream_one_2026 || ((migration_failures++))
   run_migration "routing_v132_migrated"                "Routing default direct rule"      migrate_routing_config             || ((migration_failures++))
   run_migration "xhttp_mode_migrated"                  "XHTTP mode stream→auto"           migrate_xhttp_mode                 || ((migration_failures++))

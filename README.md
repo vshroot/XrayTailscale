@@ -209,6 +209,7 @@ From the repository root:
 bash -n xraytailscale install.sh update.sh uninstall.sh
 bash validation/test-vless-url-generation.sh
 bash validation/test-happ-subscription-static.sh
+bash validation/test-xhttp-path-sync-migration.sh
 bash validation/test-update-xray-core-sync.sh
 bash validation/test-mutation-safety-static.sh
 bash validation/test-tailscale-exit-node-static.sh
