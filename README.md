@@ -1,6 +1,6 @@
 # XrayTailscale
 
-XrayTailscale is a VPS setup and management script for a personal Xray Reality server with optional HAPP subscriptions, multi-route VLESS profiles, post-quantum XHTTP routes, bypass routing, and a Tailscale exit node.
+XrayTailscale is a VPS setup and management script for a personal Xray Reality server with optional HAPP subscriptions, multi-route VLESS profiles, post-quantum XHTTP routes, bypass routing, cascade upstream routing, and a Tailscale exit node.
 
 The project is designed for one-person or small private deployments. It installs Xray-core, creates and manages VLESS Reality inbounds, serves subscription URLs over HTTPS, and can join the VPS to your Tailscale tailnet as an exit node.
 
@@ -13,6 +13,7 @@ The project is designed for one-person or small private deployments. It installs
 - Optional HAPP subscription service: `xraytailscale-sub.service`.
 - Nginx HTTPS frontend for subscription URLs.
 - Optional Tailscale exit-node configuration.
+- Optional cascade routing through a separate upstream VLESS Reality node.
 - UFW firewall rules for SSH, HTTPS, subscription ports, and Xray routes.
 - BBR TCP tuning and geodata files for routing.
 
@@ -60,6 +61,8 @@ The manager is interactive. The most important options are:
 | `10` | Update Xray-core. |
 | `11` | Manage bypass routing rules. |
 | `12` | Install and configure Tailscale as an exit node. |
+| `13` | Configure cascade routing through an upstream node. |
+| `14` | Create an outbound-server node on a separate overseas VPS. |
 
 ## HAPP Subscription Setup
 
@@ -127,6 +130,32 @@ You can authenticate in two ways:
 - Leave the auth key empty and follow the login URL printed by `tailscale up`.
 
 The auth key is not saved by XrayTailscale.
+
+## Cascade Routing
+
+Cascade mode is server-side routing. Client profiles and HAPP subscription URLs stay on the main VPS, while Xray forwards default `tcp,udp` traffic through a separate upstream VLESS Reality server:
+
+```text
+client -> main VPS -> upstream VPS -> internet
+```
+
+On the upstream VPS, install XrayTailscale and choose:
+
+```text
+14) Create outbound server
+```
+
+This creates a TCP Reality Vision inbound and prints the values needed by the main VPS: host, port, UUID, public key, short ID, SNI, fingerprint, and flow.
+
+On the main VPS, choose:
+
+```text
+13) Cascade / upstream nodes
+```
+
+Enter the upstream values, then enable cascade mode. XrayTailscale stores the upstream config in `/usr/local/etc/xray/upstreams/cascade.json`, adds `cascade-upstream` and `cascade-fragment` outbounds, and switches only the default catch-all `tcp,udp` route to the cascade outbound. Existing bypass rules stay above the catch-all rule and continue to go direct.
+
+Disabling cascade removes the cascade outbounds and returns the catch-all route to `direct`. Existing client profiles, HAPP subscriptions, XHTTP paths, Reality keys, and Tailscale settings are not changed.
 
 ## Updates
 
@@ -208,6 +237,7 @@ From the repository root:
 ```bash
 bash -n xraytailscale install.sh update.sh uninstall.sh
 bash validation/test-vless-url-generation.sh
+bash validation/test-cascade-routing.sh
 bash validation/test-happ-subscription-static.sh
 bash validation/test-multiroute-xhttp-path-generation.sh
 bash validation/test-xhttp-path-sync-migration.sh

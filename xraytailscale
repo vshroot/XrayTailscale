@@ -20,6 +20,7 @@ NC='\033[0m'
 CONFIG_FILE="/usr/local/etc/xray/config.json"
 PROFILES_DIR="/usr/local/etc/xray/profiles"
 DATA_DIR="/usr/local/etc/xray/data"
+UPSTREAMS_DIR="/usr/local/etc/xray/upstreams"
 PRIVATE_KEY_FILE="/usr/local/etc/xray/.private_key"
 PUBLIC_KEY_FILE="/usr/local/etc/xray/.public_key"
 VLESS_DECRYPTION_FILE="/usr/local/etc/xray/.vless_decryption"
@@ -27,6 +28,7 @@ VLESS_ENCRYPTION_FILE="/usr/local/etc/xray/.vless_encryption"
 SNI_LIST="$DATA_DIR/sni_list.txt"
 ASCII_ART="$DATA_DIR/ascii_art.txt"
 TAILSCALE_SYSCTL_FILE="/etc/sysctl.d/99-xraytailscale-tailscale.conf"
+CASCADE_ACTIVE_FILE="/usr/local/etc/xray/.cascade_active"
 GITHUB_USER="${GITHUB_USER:-vshroot}"
 GITHUB_REPO="${GITHUB_REPO:-XrayTailscale}"
 GITHUB_BRANCH="${GITHUB_BRANCH:-main}"
@@ -4440,6 +4442,451 @@ tailscale_exit_node_menu() {
   done
 }
 
+_cascade_ensure_dir() {
+  mkdir -p "$UPSTREAMS_DIR"
+  chmod 700 "$UPSTREAMS_DIR" 2>/dev/null
+  chown xray:xray "$UPSTREAMS_DIR" 2>/dev/null || true
+}
+
+_cascade_config_file() {
+  echo "$UPSTREAMS_DIR/cascade.json"
+}
+
+_cascade_enabled() {
+  [[ -f "$CASCADE_ACTIVE_FILE" ]] && jq -e '.outbounds[]? | select(.tag == "cascade-upstream")' "$CONFIG_FILE" >/dev/null 2>&1
+}
+
+_cascade_print_status() {
+  local upstream_file
+  upstream_file=$(_cascade_config_file)
+  if _cascade_enabled; then
+    echo -e "${GREEN}Каскад: включен${NC}"
+  else
+    echo -e "${YELLOW}Каскад: выключен${NC}"
+  fi
+
+  if [[ -f "$upstream_file" ]]; then
+    echo -e "${CYAN}Upstream:${NC} $(jq -r '.address' "$upstream_file"):$(jq -r '.port' "$upstream_file") sni=$(jq -r '.sni' "$upstream_file")"
+  else
+    echo -e "${YELLOW}Upstream не настроен${NC}"
+  fi
+}
+
+_cascade_build_outbound_json() {
+  local upstream_file=$1
+  local address port uuid sni fingerprint public_key short_id flow packet_encoding
+  address=$(jq -r '.address' "$upstream_file")
+  port=$(jq -r '.port' "$upstream_file")
+  uuid=$(jq -r '.uuid' "$upstream_file")
+  sni=$(jq -r '.sni' "$upstream_file")
+  fingerprint=$(jq -r '.fingerprint // "chrome"' "$upstream_file")
+  public_key=$(jq -r '.public_key' "$upstream_file")
+  short_id=$(jq -r '.short_id' "$upstream_file")
+  flow=$(jq -r '.flow // "xtls-rprx-vision"' "$upstream_file")
+  packet_encoding=$(jq -r '.packet_encoding // empty' "$upstream_file")
+
+  jq -cn \
+    --arg address "$address" \
+    --argjson port "$port" \
+    --arg uuid "$uuid" \
+    --arg sni "$sni" \
+    --arg fp "$fingerprint" \
+    --arg public_key "$public_key" \
+    --arg short_id "$short_id" \
+    --arg flow "$flow" \
+    --arg packet_encoding "$packet_encoding" '
+    {
+      tag: "cascade-upstream",
+      protocol: "vless",
+      settings: {
+        vnext: [{
+          address: $address,
+          port: $port,
+          users: [{
+            id: $uuid,
+            encryption: "none",
+            flow: $flow
+          } + (if $packet_encoding == "" then {} else {packetEncoding: $packet_encoding} end)]
+        }]
+      },
+      streamSettings: {
+        network: "tcp",
+        security: "reality",
+        sockopt: {
+          dialerProxy: "cascade-fragment",
+          tcpFastOpen: true,
+          tcpNoDelay: true
+        },
+        realitySettings: {
+          serverName: $sni,
+          fingerprint: $fp,
+          publicKey: $public_key,
+          shortId: $short_id,
+          spiderX: "/"
+        }
+      }
+    }'
+}
+
+_cascade_build_fragment_outbound_json() {
+  jq -cn '{
+    tag: "cascade-fragment",
+    protocol: "freedom",
+    settings: {
+      fragment: {
+        packets: "tlshello",
+        length: "100-200",
+        interval: "10-20"
+      }
+    }
+  }'
+}
+
+_cascade_validate_upstream_fields() {
+  local address=$1 port=$2 uuid=$3 public_key=$4 short_id=$5 sni=$6 fingerprint=${7:-chrome} packet_encoding=${8:-}
+  if [[ -z "$address" || "$address" =~ ^(localhost$|0\.0\.0\.0$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[0-1])\.) ]]; then
+    echo -e "${RED}✗ Upstream address не должен быть локальным/private${NC}"
+    return 1
+  fi
+  if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ $port -lt 1 ]] || [[ $port -gt 65535 ]]; then
+    echo -e "${RED}✗ Некорректный порт${NC}"
+    return 1
+  fi
+  if [[ ! "$uuid" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+    echo -e "${RED}✗ Некорректный UUID${NC}"
+    return 1
+  fi
+  if [[ ! "$public_key" =~ ^[A-Za-z0-9_-]{40,}$ ]]; then
+    echo -e "${RED}✗ Некорректный Reality publicKey${NC}"
+    return 1
+  fi
+  if [[ ! "$short_id" =~ ^[0-9a-fA-F]{0,16}$ ]]; then
+    echo -e "${RED}✗ Некорректный shortId${NC}"
+    return 1
+  fi
+  if [[ -z "$sni" || ! "$sni" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+    echo -e "${RED}✗ Некорректный SNI${NC}"
+    return 1
+  fi
+  if [[ ! "$fingerprint" =~ ^(chrome|firefox|safari|ios|android|edge|qq|random|randomized)$ ]]; then
+    echo -e "${RED}✗ Некорректный fingerprint${NC}"
+    return 1
+  fi
+  if [[ -n "$packet_encoding" && "$packet_encoding" != "xudp" ]]; then
+    echo -e "${RED}✗ packetEncoding поддерживает только xudp или пустое значение${NC}"
+    return 1
+  fi
+}
+
+configure_cascade_upstream() {
+  show_ascii
+  echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
+  echo -e "${BLUE}    НАСТРОЙКА ЗАРУБЕЖНОЙ UPSTREAM-НОДЫ        ${NC}"
+  echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
+
+  _cascade_ensure_dir
+
+  local address port uuid public_key short_id sni fingerprint packet_encoding
+  echo -n -e "${YELLOW}Host/IP зарубежной ноды: ${NC}"
+  read -r address
+  echo -n -e "${YELLOW}Port [443]: ${NC}"
+  read -r port
+  port=${port:-443}
+  echo -n -e "${YELLOW}UUID клиента на зарубежной ноде: ${NC}"
+  read -r uuid
+  echo -n -e "${YELLOW}Reality publicKey зарубежной ноды: ${NC}"
+  read -r public_key
+  echo -n -e "${YELLOW}Reality shortId зарубежной ноды: ${NC}"
+  read -r short_id
+  echo -n -e "${YELLOW}SNI зарубежной ноды: ${NC}"
+  read -r sni
+  echo -n -e "${YELLOW}Fingerprint [chrome]: ${NC}"
+  read -r fingerprint
+  fingerprint=${fingerprint:-chrome}
+  echo -n -e "${YELLOW}packetEncoding [пусто для обычного tcp]: ${NC}"
+  read -r packet_encoding
+
+  _cascade_validate_upstream_fields "$address" "$port" "$uuid" "$public_key" "$short_id" "$sni" "$fingerprint" "$packet_encoding" || {
+    sleep 2
+    return 1
+  }
+
+  local upstream_file tmp
+  upstream_file=$(_cascade_config_file)
+  tmp=$(mktemp)
+  if ! jq -n \
+      --arg address "$address" \
+      --argjson port "$port" \
+      --arg uuid "$uuid" \
+      --arg public_key "$public_key" \
+      --arg short_id "$short_id" \
+      --arg sni "$sni" \
+      --arg fingerprint "$fingerprint" \
+      --arg packet_encoding "$packet_encoding" \
+      '{version:1,tag:"cascade-upstream",address:$address,port:$port,uuid:$uuid,transport:"tcp",sni:$sni,fingerprint:$fingerprint,public_key:$public_key,short_id:$short_id,flow:"xtls-rprx-vision"} + (if $packet_encoding == "" then {} else {packet_encoding:$packet_encoding} end)' \
+      > "$tmp"; then
+    rm -f "$tmp"
+    echo -e "${RED}✗ Не удалось собрать upstream JSON${NC}"
+    return 1
+  fi
+  mv "$tmp" "$upstream_file"
+  chmod 600 "$upstream_file" 2>/dev/null
+  chown xray:xray "$upstream_file" 2>/dev/null || true
+
+  echo -e "${GREEN}✓ Upstream сохранен: $upstream_file${NC}"
+  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  read -r _
+}
+
+enable_cascade_mode() {
+  local upstream_file outbound_json fragment_json address port uuid public_key short_id sni fingerprint packet_encoding
+  upstream_file=$(_cascade_config_file)
+  if [[ ! -f "$upstream_file" ]]; then
+    echo -e "${RED}✗ Сначала настройте upstream-ноду${NC}"
+    sleep 2
+    return 1
+  fi
+
+  address=$(jq -r '.address // ""' "$upstream_file" 2>/dev/null || echo "")
+  port=$(jq -r '.port // ""' "$upstream_file" 2>/dev/null || echo "")
+  uuid=$(jq -r '.uuid // ""' "$upstream_file" 2>/dev/null || echo "")
+  public_key=$(jq -r '.public_key // ""' "$upstream_file" 2>/dev/null || echo "")
+  short_id=$(jq -r '.short_id // ""' "$upstream_file" 2>/dev/null || echo "")
+  sni=$(jq -r '.sni // ""' "$upstream_file" 2>/dev/null || echo "")
+  fingerprint=$(jq -r '.fingerprint // "chrome"' "$upstream_file" 2>/dev/null || echo "chrome")
+  packet_encoding=$(jq -r '.packet_encoding // ""' "$upstream_file" 2>/dev/null || echo "")
+  _cascade_validate_upstream_fields "$address" "$port" "$uuid" "$public_key" "$short_id" "$sni" "$fingerprint" "$packet_encoding" || {
+    echo -e "${YELLOW}Исправьте upstream-настройки через пункт 1.${NC}"
+    sleep 2
+    return 1
+  }
+
+  outbound_json=$(_cascade_build_outbound_json "$upstream_file") || return 1
+  fragment_json=$(_cascade_build_fragment_outbound_json) || return 1
+
+  echo -e "${YELLOW}Включить каскад: весь default tcp/udp трафик пойдет через cascade-upstream? (y/N): ${NC}"
+  local confirm
+  read -r confirm
+  [[ "$confirm" =~ ^[yYдД]$ ]] || return 1
+
+  backup_config "cascade_enable" || return 1
+  if ! safe_jq_write --argjson outbound "$outbound_json" --argjson fragment "$fragment_json" --arg address "$address" '
+      def upstream_direct_rule:
+        if ($address | test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")) then
+          {"type":"field","ip":[$address],"outboundTag":"direct"}
+        else
+          {"type":"field","domain":["domain:" + $address],"outboundTag":"direct"}
+        end;
+      def quic_block_rule:
+        {"type":"field","network":"udp","port":443,"outboundTag":"block"};
+      def upstream_direct_match:
+        (.outboundTag == "direct" and (
+          (((.domain // []) | index("domain:" + $address)) != null) or
+          (((.ip // []) | index($address)) != null)
+        ));
+      def quic_block_match:
+        (.type == "field" and (.network // "") == "udp" and ((.port | tostring) == "443") and .outboundTag == "block");
+      def catch_all:
+        (.type == "field" and (.network // "") == "tcp,udp"
+         and (.domain // null) == null and (.ip // null) == null and (.port // null) == null);
+      .outbounds = ((.outbounds // []) | map(select(.tag != "cascade-upstream" and .tag != "cascade-fragment"))) |
+      .outbounds += [$fragment, $outbound] |
+      .routing.rules = [
+        .routing.rules[]?
+        | select((upstream_direct_match or quic_block_match or catch_all) | not)
+      ] |
+      .routing.rules = [upstream_direct_rule, quic_block_rule] + .routing.rules + [{"type":"field","network":"tcp,udp","outboundTag":"cascade-upstream"}]
+    ' "$CONFIG_FILE"; then
+    echo -e "${RED}✗ Не удалось применить cascade config${NC}"
+    return 1
+  fi
+  fix_xray_permissions
+  if safe_restart_xray; then
+    touch "$CASCADE_ACTIVE_FILE"
+    chown xray:xray "$CASCADE_ACTIVE_FILE" 2>/dev/null || true
+    echo -e "${GREEN}✓ Каскад включен${NC}"
+  else
+    rm -f "$CASCADE_ACTIVE_FILE"
+    return 1
+  fi
+  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  read -r _
+}
+
+disable_cascade_mode() {
+  echo -e "${YELLOW}Отключить каскад и вернуть default route в direct? (y/N): ${NC}"
+  local confirm
+  read -r confirm
+  [[ "$confirm" =~ ^[yYдД]$ ]] || return 1
+
+  local upstream_file address
+  upstream_file=$(_cascade_config_file)
+  address=""
+  if [[ -f "$upstream_file" ]]; then
+    address=$(jq -r '.address // ""' "$upstream_file" 2>/dev/null || echo "")
+  fi
+
+  backup_config "cascade_disable" || return 1
+  if ! safe_jq_write --arg address "$address" '
+      def catch_all:
+        (.type == "field" and (.network // "") == "tcp,udp"
+         and (.domain // null) == null and (.ip // null) == null and (.port // null) == null);
+      def cascade_upstream_direct_match:
+        ($address != "" and .outboundTag == "direct" and (
+          (((.domain // []) | index("domain:" + $address)) != null) or
+          (((.ip // []) | index($address)) != null)
+        ));
+      .outbounds = ((.outbounds // []) | map(select(.tag != "cascade-upstream" and .tag != "cascade-fragment"))) |
+      .routing.rules = [.routing.rules[]? | select(cascade_upstream_direct_match | not)] |
+      if any(.routing.rules[]?; catch_all) then
+        (.routing.rules[]? | select(catch_all) | .outboundTag) = "direct"
+      else
+        .routing.rules += [{"type":"field","network":"tcp,udp","outboundTag":"direct"}]
+      end
+    ' "$CONFIG_FILE"; then
+    echo -e "${RED}✗ Не удалось отключить каскад${NC}"
+    return 1
+  fi
+  fix_xray_permissions
+  if safe_restart_xray; then
+    rm -f "$CASCADE_ACTIVE_FILE"
+    echo -e "${GREEN}✓ Каскад отключен${NC}"
+  else
+    return 1
+  fi
+  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  read -r _
+}
+
+cascade_mode_menu() {
+  while true; do
+    show_ascii
+    echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}    КАСКАД / UPSTREAM-НОДЫ                    ${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
+    _cascade_print_status
+    echo ""
+    echo -e "${CYAN} 1)${NC} Настроить зарубежную upstream-ноду"
+    echo -e "${CYAN} 2)${NC} Включить каскад"
+    echo -e "${CYAN} 3)${NC} Отключить каскад"
+    echo -e "${CYAN} 0)${NC} Назад"
+    echo ""
+    echo -n -e "${YELLOW}Выбор: ${NC}"
+    local c
+    read -r c
+    case "$c" in
+      1) configure_cascade_upstream ;;
+      2) enable_cascade_mode ;;
+      3) disable_cascade_mode ;;
+      0) return ;;
+      *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
+    esac
+  done
+}
+
+setup_outbound_server_menu() {
+  show_ascii
+  echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
+  echo -e "${BLUE}    ПОДНЯТЬ OUTBOUND-СЕРВЕР (ЗАРУБЕЖНАЯ НОДА) ${NC}"
+  echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
+  echo -e "${CYAN}Запускайте этот пункт на ЗАРУБЕЖНОМ VPS.${NC}"
+  echo -e "${CYAN}Он поднимает TCP Reality Vision inbound — выход каскада.${NC}"
+  echo -e "${CYAN}Параметры вставьте на основном сервере: Каскад → Настроить upstream.${NC}\n"
+
+  if [[ -z "${PRIVATE_KEY:-}" && -f "$PRIVATE_KEY_FILE" ]]; then
+    PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
+  fi
+  if [[ -z "${PRIVATE_KEY:-}" || ! -f "$CONFIG_FILE" ]]; then
+    echo -e "${RED}✗ Reality-ключи или config не найдены. Установите XrayTailscale на этой ноде.${NC}"
+    sleep 2
+    return 1
+  fi
+
+  local default_sni port sni fingerprint
+  default_sni=$(grep -v '^#' "$SNI_LIST" 2>/dev/null | grep -v '^[[:space:]]*$' | head -n 1 | cut -d'|' -f1)
+  [[ -z "$default_sni" ]] && default_sni="www.ozon.ru"
+
+  echo -n -e "${YELLOW}Порт inbound [443]: ${NC}"
+  read -r port
+  port=${port:-443}
+  if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ $port -lt 1 ]] || [[ $port -gt 65535 ]]; then
+    echo -e "${RED}✗ Некорректный порт${NC}"
+    sleep 2
+    return 1
+  fi
+
+  echo -n -e "${YELLOW}SNI (маскировочный TLS-домен) [${default_sni}]: ${NC}"
+  read -r sni
+  sni=${sni:-$default_sni}
+  if [[ -z "$sni" ]] || [[ ! "$sni" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+    echo -e "${RED}✗ Некорректный SNI${NC}"
+    sleep 2
+    return 1
+  fi
+
+  echo -n -e "${YELLOW}Fingerprint [chrome]: ${NC}"
+  read -r fingerprint
+  fingerprint=${fingerprint:-chrome}
+  if [[ ! "$fingerprint" =~ ^(chrome|firefox|safari|ios|android|edge|qq|random|randomized)$ ]]; then
+    echo -e "${RED}✗ Некорректный fingerprint${NC}"
+    sleep 2
+    return 1
+  fi
+
+  local uuid
+  uuid=$(uuidgen)
+
+  echo ""
+  echo -n -e "${YELLOW}Поднять TCP Reality Vision inbound на порту $port (SNI $sni)? (y/N): ${NC}"
+  local confirm
+  read -r confirm
+  [[ "$confirm" =~ ^[yYдД]$ ]] || return 1
+
+  backup_config "outbound_server" || return 1
+  if ! add_inbound "$uuid" "tcp" "$port" "$sni" "$fingerprint" "" ""; then
+    echo -e "${RED}✗ Не удалось создать inbound зарубежной ноды${NC}"
+    return 1
+  fi
+
+  fix_xray_permissions
+  if ! safe_restart_xray; then
+    echo -e "${RED}✗ Xray не принял конфиг — выполнен авто-откат. Inbound не поднят.${NC}"
+    return 1
+  fi
+
+  local actual_sni actual_short_id actual_fp public_key address
+  actual_sni=$(jq -r --argjson p "$port" '.inbounds[]? | select(.port == $p) | .streamSettings.realitySettings.serverNames[0] // empty' "$CONFIG_FILE" 2>/dev/null)
+  actual_short_id=$(jq -r --argjson p "$port" '.inbounds[]? | select(.port == $p) | .streamSettings.realitySettings.shortIds[0] // empty' "$CONFIG_FILE" 2>/dev/null)
+  actual_fp=$(jq -r --argjson p "$port" '.inbounds[]? | select(.port == $p) | .streamSettings.realitySettings.fingerprint // "chrome"' "$CONFIG_FILE" 2>/dev/null)
+  [[ -z "$actual_sni" ]] && actual_sni="$sni"
+  [[ -z "$actual_fp" ]] && actual_fp="$fingerprint"
+  public_key=$(cat "$PUBLIC_KEY_FILE" 2>/dev/null || true)
+  address=$(get_server_ip)
+
+  echo ""
+  echo -e "${GREEN}✓ Зарубежный outbound-сервер поднят (inbound-$port, TCP Reality Vision).${NC}"
+  echo ""
+  echo -e "${MAGENTA}═══════════════════════════════════════════════${NC}"
+  echo -e "${MAGENTA} ПАРАМЕТРЫ ДЛЯ ОСНОВНОГО СЕРВЕРА (Каскад → Настроить upstream)${NC}"
+  echo -e "${MAGENTA}═══════════════════════════════════════════════${NC}"
+  echo -e "${CYAN}Host/IP:       ${NC}${address:-<впишите IP этой ноды вручную>}"
+  echo -e "${CYAN}Port:          ${NC}$port"
+  echo -e "${CYAN}UUID:          ${NC}$uuid"
+  echo -e "${CYAN}publicKey:     ${NC}${public_key:-<ключ не определён>}"
+  echo -e "${CYAN}shortId:       ${NC}$actual_short_id"
+  echo -e "${CYAN}SNI:           ${NC}$actual_sni"
+  echo -e "${CYAN}Fingerprint:   ${NC}$actual_fp"
+  echo -e "${CYAN}flow:          ${NC}xtls-rprx-vision"
+  echo -e "${CYAN}packetEncoding:${NC} (оставьте пустым)"
+  echo -e "${MAGENTA}═══════════════════════════════════════════════${NC}"
+  if [[ -z "$address" ]]; then
+    echo -e "${YELLOW}⚠ Внешний IP не определён автоматически — впишите Host/IP вручную.${NC}"
+  fi
+  echo ""
+  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  read -r _
+}
+
 # Главное меню
 main_menu() {
   # Run migrations on first launch after upgrade.
@@ -4553,6 +5000,10 @@ main_menu() {
     echo -e "${MAGENTA} TAILSCALE:${NC}"
     echo -e "${CYAN}12)${NC} Tailscale exit node"
     echo ""
+    echo -e "${MAGENTA} CASCADE:${NC}"
+    echo -e "${CYAN}13)${NC} Каскад / upstream-ноды"
+    echo -e "${CYAN}14)${NC} Поднять outbound-сервер (зарубежная нода)"
+    echo ""
     echo -e "${RED} 0)${NC} Выход"
     echo ""
     echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
@@ -4568,6 +5019,8 @@ main_menu() {
       10) update_command ;;
       11) bypass_routing_menu ;;
       12) tailscale_exit_node_menu ;;
+      13) cascade_mode_menu ;;
+      14) setup_outbound_server_menu ;;
       0) exit 0 ;;
       *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
     esac
