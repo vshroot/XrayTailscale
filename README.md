@@ -63,6 +63,7 @@ The manager is interactive. The most important options are:
 | `12` | Install and configure Tailscale as an exit node. |
 | `13` | Configure cascade routing through an upstream node. |
 | `14` | Create an outbound-server node on a separate overseas VPS. |
+| `15` | Generate and manage bulk HAPP multi-route users. |
 
 ## HAPP Subscription Setup
 
@@ -101,6 +102,46 @@ The generated multi-route profile can include:
 - XHTTP post-quantum route with `mlkem768x25519plus`.
 
 If the subscription URL leaks, revoke it from the HAPP subscription menu. Revocation rotates the profile token.
+
+## Bulk HAPP Users
+
+Bulk HAPP users are for issuing many separate subscription URLs on one VPS without opening a new set of ports per user.
+
+Open the manager:
+
+```bash
+sudo xraytailscale
+```
+
+Choose:
+
+```text
+15) Bulk HAPP users
+```
+
+The bulk generator creates one hidden shared multi-route seed profile named `_bulk_seed`, then creates normal user profiles such as:
+
+```text
+user-001
+user-002
+user-003
+```
+
+Each user gets a unique `uuid` and `sub_token`, but all users reuse the same multi-route ports and route metadata. Xray stores these users as separate clients inside the shared route inbounds.
+
+Generated CSV files are written to:
+
+```text
+/usr/local/etc/xray/bulk/
+```
+
+Each CSV contains:
+
+```csv
+name,subscription_url,uuid
+```
+
+Use `Revoke one user` to rotate only the subscription URL token. Use `Delete one user` to actually disable that user by removing their UUID from every shared multi-route inbound.
 
 ## Tailscale Exit Node
 
@@ -237,6 +278,7 @@ From the repository root:
 ```bash
 bash -n xraytailscale install.sh update.sh uninstall.sh
 bash validation/test-vless-url-generation.sh
+bash validation/test-bulk-happ-users.sh
 bash validation/test-cascade-routing.sh
 bash validation/test-happ-subscription-static.sh
 bash validation/test-multiroute-xhttp-path-generation.sh
