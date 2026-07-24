@@ -129,6 +129,8 @@ user-003
 
 Each user gets a unique `uuid` and `sub_token`, but all users reuse the same multi-route ports and route metadata. Xray stores these users as separate clients inside the shared route inbounds.
 
+If the hidden `_bulk_seed` profile points to ports that no longer exist in the live Xray config, the manager recreates the seed automatically before generating a new batch.
+
 After generation the manager prints the generated subscription URLs immediately:
 
 ```text

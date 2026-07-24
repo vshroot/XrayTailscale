@@ -39,6 +39,48 @@ safe_restart_xray() {
   SAFE_RESTART_COUNT=$((SAFE_RESTART_COUNT + 1))
   [[ "$SAFE_RESTART_FAIL" -eq 0 ]]
 }
+CREATE_SEED_COUNT=0
+create_profile_all_routes() {
+  local name="$1" pause_after="${2:-}" subscription_output="${3:-}"
+  [[ "$name" == "_bulk_seed" && "$pause_after" == "no_pause" && "$subscription_output" == "hide_subscription" ]] \
+    || return 1
+  CREATE_SEED_COUNT=$((CREATE_SEED_COUNT + 1))
+  cat > "$PROFILES_DIR/_bulk_seed.json" <<'JSON'
+{
+  "name": "_bulk_seed",
+  "uuid": "11111111-1111-4111-8111-111111111111",
+  "schema_version": 3,
+  "multi_route": true,
+  "bulk_seed": true,
+  "primary_route": "xhttp-legacy",
+  "sub_token": "",
+  "created": "2026-07-24 12:30:00",
+  "routes": [
+    {
+      "label": "xhttp-legacy",
+      "transport": "xhttp",
+      "port": 37174,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome",
+      "xhttp_path": "/xhttp-seed"
+    },
+    {
+      "label": "tcp-vision",
+      "transport": "tcp",
+      "port": 39000,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome"
+    }
+  ],
+  "transport": "xhttp",
+  "port": 37174,
+  "fingerprint": "chrome",
+  "sni": "www.ozon.ru",
+  "xhttp_path": "/xhttp-seed",
+  "pq_enabled": false
+}
+JSON
+}
 
 cat > "$CONFIG_FILE" <<'JSON'
 {
@@ -143,6 +185,48 @@ grep -q '_bulk_select_batch_for_print' xraytailscale || fail "bulk menu must use
 ! grep -q 'Batch ID для вывода URL' xraytailscale || fail "bulk menu must not require typing batch id manually"
 ! grep -q 'Export users CSV' xraytailscale || fail "bulk menu must not advertise CSV export"
 ! _list_visible_profile_names | grep -q '^_bulk_seed$' || fail "bulk seed must be hidden from ordinary profile lists"
+
+cat > "$PROFILES_DIR/_bulk_seed.json" <<'JSON'
+{
+  "name": "_bulk_seed",
+  "uuid": "22222222-2222-4222-8222-222222222222",
+  "schema_version": 3,
+  "multi_route": true,
+  "bulk_seed": true,
+  "primary_route": "xhttp-legacy",
+  "sub_token": "",
+  "created": "2026-07-24 12:10:00",
+  "routes": [
+    {
+      "label": "stale-xhttp",
+      "transport": "xhttp",
+      "port": 59999,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome",
+      "xhttp_path": "/xhttp-stale"
+    }
+  ],
+  "transport": "xhttp",
+  "port": 59999,
+  "fingerprint": "chrome",
+  "sni": "www.ozon.ru",
+  "xhttp_path": "/xhttp-stale",
+  "pq_enabled": false
+}
+JSON
+CREATE_SEED_COUNT=0
+stale_seed_output_file="$WORKDIR/stale-seed.out"
+if ! _bulk_seed_ready > "$stale_seed_output_file" 2>&1; then
+  cat "$stale_seed_output_file" >&2
+  fail "bulk seed with missing live ports must be recreated"
+fi
+[[ "$CREATE_SEED_COUNT" == "1" ]] || fail "stale bulk seed must trigger one seed recreation"
+jq -e --slurpfile cfg "$CONFIG_FILE" '
+  .bulk_seed == true
+  and .bulk_managed == false
+  and .sub_token == ""
+  and all((.routes // [])[]; .port as $p | any($cfg[0].inbounds[]?; .port == $p))
+' "$PROFILES_DIR/_bulk_seed.json" >/dev/null || fail "recreated bulk seed must point only to live inbounds"
 
 generate_output_file="$WORKDIR/generate.out"
 bulk_generate_users_core "user" "3" "bulk-test" > "$generate_output_file"

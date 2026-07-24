@@ -73,6 +73,8 @@ The profile format is compatible with existing multi-route profiles:
 
 The `routes` array points to shared inbound ports and transport metadata. Each user has different credentials, not different ports.
 
+If the hidden seed profile exists but references ports that are no longer present in the live Xray config, the manager recreates `_bulk_seed` before generating a new batch.
+
 The manager prints generated URLs immediately after successful creation:
 
 ```text

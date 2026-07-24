@@ -4276,6 +4276,35 @@ _bulk_target_name() {
   printf "%s-%0${width}d" "$prefix" "$index"
 }
 
+_bulk_seed_routes_exist_in_config() {
+  local seed_file="$1"
+  jq -e --slurpfile cfg "$CONFIG_FILE" '
+    all((.routes // [])[]; .port as $p | any($cfg[0].inbounds[]?; .port == $p))
+  ' "$seed_file" >/dev/null 2>&1
+}
+
+_bulk_recreate_seed_profile() {
+  local seed_file="$1"
+  local backup_file="${seed_file}.stale-$(date +%Y%m%d-%H%M%S)"
+
+  if [[ -f "$seed_file" ]]; then
+    cp "$seed_file" "$backup_file" 2>/dev/null || true
+  fi
+
+  echo -e "${YELLOW}  ⚠ Bulk seed ссылается на отсутствующие порты — пересоздаю _bulk_seed${NC}"
+  if ! create_profile_all_routes "_bulk_seed" "no_pause" "hide_subscription"; then
+    [[ -f "$backup_file" ]] && cp "$backup_file" "$seed_file" 2>/dev/null || true
+    echo -e "${RED}✗ Не удалось пересоздать bulk seed profile${NC}"
+    return 1
+  fi
+  if ! safe_jq_write '.bulk_seed = true | .bulk_managed = false | .sub_token = ""' "$seed_file"; then
+    [[ -f "$backup_file" ]] && cp "$backup_file" "$seed_file" 2>/dev/null || true
+    echo -e "${RED}✗ Не удалось пометить пересозданный bulk seed profile${NC}"
+    return 1
+  fi
+  fix_xray_permissions
+}
+
 _bulk_seed_ready() {
   local seed_file
   seed_file=$(_bulk_seed_profile_file)
@@ -4303,10 +4332,12 @@ _bulk_seed_ready() {
     return 1
   fi
 
-  if ! jq -e --slurpfile cfg "$CONFIG_FILE" '
-      all((.routes // [])[]; .port as $p | any($cfg[0].inbounds[]?; .port == $p))
-    ' "$seed_file" >/dev/null 2>&1; then
-    echo -e "${RED}✗ У bulk seed есть route, порт которого отсутствует в live config.json${NC}"
+  if ! _bulk_seed_routes_exist_in_config "$seed_file"; then
+    _bulk_recreate_seed_profile "$seed_file" || return 1
+  fi
+
+  if ! _bulk_seed_routes_exist_in_config "$seed_file"; then
+    echo -e "${RED}✗ У bulk seed есть route, порт которого отсутствует в live config.json даже после пересоздания${NC}"
     return 1
   fi
 }
