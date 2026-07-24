@@ -129,17 +129,16 @@ user-003
 
 Each user gets a unique `uuid` and `sub_token`, but all users reuse the same multi-route ports and route metadata. Xray stores these users as separate clients inside the shared route inbounds.
 
-Generated CSV files are written to:
+After generation the manager prints the generated subscription URLs immediately:
 
 ```text
-/usr/local/etc/xray/bulk/
+Batch: bulk-20260724-153000
+name subscription_url uuid
+user-001 https://your-domain.example/sub/<token> <uuid>
+user-002 https://your-domain.example/sub/<token> <uuid>
 ```
 
-Each CSV contains:
-
-```csv
-name,subscription_url,uuid
-```
+Use `Show/print user URLs` later to print the same URLs again from saved profile metadata.
 
 Use `Revoke one user` to rotate only the subscription URL token. Use `Delete one user` to actually disable that user by removing their UUID from every shared multi-route inbound.
 

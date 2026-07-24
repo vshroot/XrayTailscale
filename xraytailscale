@@ -20,7 +20,6 @@ NC='\033[0m'
 CONFIG_FILE="/usr/local/etc/xray/config.json"
 PROFILES_DIR="/usr/local/etc/xray/profiles"
 DATA_DIR="/usr/local/etc/xray/data"
-BULK_DIR="/usr/local/etc/xray/bulk"
 UPSTREAMS_DIR="/usr/local/etc/xray/upstreams"
 PRIVATE_KEY_FILE="/usr/local/etc/xray/.private_key"
 PUBLIC_KEY_FILE="/usr/local/etc/xray/.public_key"
@@ -4251,12 +4250,6 @@ happ_subscription_menu() {
 # BULK HAPP USERS
 # ═══════════════════════════════════════════════════════════
 
-_bulk_ensure_dir() {
-  mkdir -p "$BULK_DIR"
-  chmod 700 "$BULK_DIR" 2>/dev/null
-  chown xray:xray "$BULK_DIR" 2>/dev/null || true
-}
-
 _bulk_seed_profile_file() {
   echo "$PROFILES_DIR/_bulk_seed.json"
 }
@@ -4407,36 +4400,37 @@ _bulk_add_users_to_inbounds() {
   ' "$CONFIG_FILE"
 }
 
-bulk_export_users_csv() {
-  local batch_id="$1"
-  local filter_batch="${2:-$batch_id}"
-  if [[ -z "$batch_id" || ! "$batch_id" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
-    echo -e "${RED}✗ Некорректный batch id для CSV${NC}"
+bulk_print_users_urls_core() {
+  local filter_batch="${1:-}"
+  if [[ -n "$filter_batch" && ! "$filter_batch" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+    echo -e "${RED}✗ Некорректный batch id${NC}"
     return 1
   fi
 
-  _bulk_ensure_dir
-  local base_url csv_file
+  local base_url rows pf name token uuid pf_batch
   base_url=$(_subscription_base_url)
-  csv_file="$BULK_DIR/${batch_id}.csv"
-  printf 'name,subscription_url,uuid\n' > "$csv_file" || return 1
-
-  local pf name token uuid pf_batch
+  rows=0
+  echo "Batch: ${filter_batch:-all}"
+  echo "name subscription_url uuid"
   for pf in "$PROFILES_DIR"/*.json; do
     [[ -f "$pf" ]] || continue
     jq -e '.bulk_managed == true and .bulk_seed != true' "$pf" >/dev/null 2>&1 || continue
     pf_batch=$(jq -r '.bulk_batch_id // ""' "$pf" 2>/dev/null)
-    [[ -n "$filter_batch" && "$pf_batch" != "$filter_batch" ]] && continue
+    if [[ -n "$filter_batch" && "$pf_batch" != "$filter_batch" ]]; then
+      continue
+    fi
     name=$(jq -r '.name // empty' "$pf" 2>/dev/null)
     token=$(jq -r '.sub_token // empty' "$pf" 2>/dev/null)
     uuid=$(jq -r '.uuid // empty' "$pf" 2>/dev/null)
     [[ -n "$name" && "$token" =~ ^[a-f0-9]{32}$ && -n "$uuid" ]] || continue
-    printf '%s,%s/sub/%s,%s\n' "$name" "$base_url" "$token" "$uuid" >> "$csv_file" || return 1
+    printf '%s %s/sub/%s %s\n' "$name" "$base_url" "$token" "$uuid"
+    rows=$((rows + 1))
   done
 
-  chmod 600 "$csv_file" 2>/dev/null
-  chown xray:xray "$csv_file" 2>/dev/null || true
-  echo "$csv_file"
+  if [[ "$rows" -eq 0 ]]; then
+    echo -e "${YELLOW}Нет bulk users для batch: ${filter_batch:-all}${NC}"
+    return 1
+  fi
 }
 
 bulk_generate_users_core() {
@@ -4470,10 +4464,9 @@ bulk_generate_users_core() {
     names+=("$name")
   done
 
-  _bulk_ensure_dir
   _bulk_seed_ready || return 1
 
-  local seed_file routes_json users_json created csv_file
+  local seed_file routes_json users_json created
   seed_file=$(_bulk_seed_profile_file)
   routes_json=$(jq -c '.routes' "$seed_file") || return 1
   if ! jq -e 'length > 0' <<< "$routes_json" >/dev/null; then
@@ -4515,9 +4508,8 @@ bulk_generate_users_core() {
     return 1
   fi
 
-  csv_file=$(bulk_export_users_csv "$batch_id") || return 1
   echo -e "${GREEN}✓ Bulk users создано: $count${NC}"
-  echo -e "${CYAN}CSV:${NC} $csv_file"
+  bulk_print_users_urls_core "$batch_id"
 }
 
 bulk_revoke_user_core() {
@@ -4656,7 +4648,7 @@ bulk_happ_users_menu() {
     echo ""
 
     echo -e "${CYAN} 1)${NC} Generate multi-route users"
-    echo -e "${CYAN} 2)${NC} Export users CSV"
+    echo -e "${CYAN} 2)${NC} Show/print user URLs"
     echo -e "${CYAN} 3)${NC} Revoke one user sub_token"
     echo -e "${CYAN} 4)${NC} Delete one user"
     echo -e "${CYAN} 0)${NC} Назад"
@@ -4685,14 +4677,10 @@ bulk_happ_users_menu() {
         read -r _
         ;;
       2)
-        echo -n -e "${YELLOW}Batch ID для export: ${NC}"
-        local export_batch
-        read -r export_batch
-        if [[ -z "$export_batch" ]]; then
-          echo -e "${RED}Batch ID обязателен${NC}"
-        else
-          bulk_export_users_csv "$export_batch" "$export_batch"
-        fi
+        echo -n -e "${YELLOW}Batch ID для вывода URL [Enter=all]: ${NC}"
+        local print_batch
+        read -r print_batch
+        bulk_print_users_urls_core "$print_batch"
         echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
         read -r _
         ;;

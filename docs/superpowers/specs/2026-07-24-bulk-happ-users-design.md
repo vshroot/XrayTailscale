@@ -26,7 +26,7 @@ The submenu exposes:
 
 ```text
 1) Generate users
-2) Export users CSV
+2) Show/print user URLs
 3) Revoke one user
 4) Delete one user
 0) Back
@@ -73,17 +73,16 @@ The profile format is compatible with existing multi-route profiles:
 
 The `routes` array points to shared inbound ports and transport metadata. Each user has different credentials, not different ports.
 
-Bulk CSV exports are stored under:
+The manager prints generated URLs immediately after successful creation:
 
 ```text
-/usr/local/etc/xray/bulk/
+Batch: bulk-20260724-153000
+name subscription_url uuid
+user-001 https://your-domain.example/sub/<token> <uuid>
+user-002 https://your-domain.example/sub/<token> <uuid>
 ```
 
-The generated CSV has:
-
-```csv
-name,subscription_url,uuid
-```
+The same URLs can be printed later from saved profile JSON metadata.
 
 ## Shared Routes
 
@@ -103,7 +102,7 @@ The seed profile should be marked:
 }
 ```
 
-The seed profile exists to define shared routes. It should not be shown as an ordinary generated end-user in bulk CSV output or ordinary profile selection menus.
+The seed profile exists to define shared routes. It should not be shown as an ordinary generated end-user in bulk URL output or ordinary profile selection menus.
 
 ## Mutation Strategy
 

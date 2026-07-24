@@ -19,11 +19,10 @@ source "$REPO_ROOT/xraytailscale"
 
 CONFIG_FILE="$WORKDIR/config.json"
 PROFILES_DIR="$WORKDIR/profiles"
-BULK_DIR="$WORKDIR/bulk"
 PUBLIC_KEY_FILE="$WORKDIR/.public_key"
 VLESS_ENCRYPTION_FILE="$WORKDIR/.vless_encryption"
 
-mkdir -p "$PROFILES_DIR" "$BULK_DIR"
+mkdir -p "$PROFILES_DIR"
 printf 'test-public-key\n' > "$PUBLIC_KEY_FILE"
 printf 'mlkem768x25519plus.native.test\n' > "$VLESS_ENCRYPTION_FILE"
 
@@ -127,7 +126,7 @@ cat > "$PROFILES_DIR/_bulk_seed.json" <<'JSON'
 JSON
 
 type bulk_generate_users_core >/dev/null 2>&1 || fail "missing bulk_generate_users_core"
-type bulk_export_users_csv >/dev/null 2>&1 || fail "missing bulk_export_users_csv"
+type bulk_print_users_urls_core >/dev/null 2>&1 || fail "missing bulk_print_users_urls_core"
 type bulk_revoke_user_core >/dev/null 2>&1 || fail "missing bulk_revoke_user_core"
 type bulk_delete_user_core >/dev/null 2>&1 || fail "missing bulk_delete_user_core"
 type bulk_happ_users_menu >/dev/null 2>&1 || fail "missing bulk_happ_users_menu"
@@ -135,11 +134,18 @@ type _bulk_seed_profile_file >/dev/null 2>&1 || fail "missing _bulk_seed_profile
 type _bulk_seed_ready >/dev/null 2>&1 || fail "missing _bulk_seed_ready"
 type _list_visible_profile_names >/dev/null 2>&1 || fail "missing _list_visible_profile_names"
 
-grep -q '^BULK_DIR=' xraytailscale || fail "missing BULK_DIR constant"
+! grep -q '^BULK_DIR=' xraytailscale || fail "BULK_DIR constant should not be required for print-only output"
 grep -q '15) bulk_happ_users_menu' xraytailscale || fail "main menu option 15 must route to bulk HAPP users"
+grep -q 'Show/print user URLs' xraytailscale || fail "bulk menu must expose print URLs action"
+! grep -q 'Export users CSV' xraytailscale || fail "bulk menu must not advertise CSV export"
 ! _list_visible_profile_names | grep -q '^_bulk_seed$' || fail "bulk seed must be hidden from ordinary profile lists"
 
-bulk_generate_users_core "user" "3" "bulk-test" >/dev/null
+generate_output_file="$WORKDIR/generate.out"
+bulk_generate_users_core "user" "3" "bulk-test" > "$generate_output_file"
+generate_output=$(cat "$generate_output_file")
+grep -q '^Batch: bulk-test$' <<< "$generate_output" || fail "bulk generation must print batch id"
+grep -Eq '^user-001[[:space:]]+https://vpn\.example\.com/sub/[a-f0-9]{32}[[:space:]]+' <<< "$generate_output" \
+  || fail "bulk generation must print user subscription URLs"
 
 [[ "$SAFE_RESTART_COUNT" == "1" ]] || fail "bulk generation must restart Xray once"
 for name in user-001 user-002 user-003; do
@@ -172,11 +178,13 @@ jq -e --arg uuid "$(jq -r '.uuid' "$PROFILES_DIR/user-001.json")" '
   .inbounds[] | select(.port == 37174) | .settings.clients[] | select(.id == $uuid and .flow == "")
 ' "$CONFIG_FILE" >/dev/null || fail "xhttp route must add generated client without flow"
 
-csv_path="$BULK_DIR/bulk-test.csv"
-[[ -f "$csv_path" ]] || fail "bulk CSV was not written"
-grep -q '^name,subscription_url,uuid$' "$csv_path" || fail "CSV header missing"
-grep -q '^user-001,https://vpn.example.com/sub/' "$csv_path" || fail "CSV subscription URL missing"
-[[ "$(wc -l < "$csv_path" | tr -d ' ')" == "4" ]] || fail "CSV must contain header plus three users"
+[[ ! -e "$WORKDIR/bulk/bulk-test.csv" ]] || fail "bulk generation must not write CSV automatically"
+print_output_file="$WORKDIR/print.out"
+bulk_print_users_urls_core "bulk-test" > "$print_output_file"
+print_output=$(cat "$print_output_file")
+grep -q '^Batch: bulk-test$' <<< "$print_output" || fail "print URLs must include batch id"
+grep -Eq '^user-003[[:space:]]+https://vpn\.example\.com/sub/[a-f0-9]{32}[[:space:]]+' <<< "$print_output" \
+  || fail "print URLs must show existing generated users"
 
 old_uuid=$(jq -r '.uuid' "$PROFILES_DIR/user-001.json")
 old_token=$(jq -r '.sub_token' "$PROFILES_DIR/user-001.json")

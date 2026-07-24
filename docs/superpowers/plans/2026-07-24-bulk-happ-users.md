@@ -28,7 +28,7 @@
 
 **Interfaces:**
 - Consumes: existing source-safe `xraytailscale` functions and globals.
-- Produces: a failing test that requires `bulk_generate_users_core`, `bulk_revoke_user_core`, `bulk_delete_user_core`, `bulk_export_users_csv`, `bulk_happ_users_menu`, and main-menu route `15`.
+- Produces: a failing test that requires `bulk_generate_users_core`, `bulk_revoke_user_core`, `bulk_delete_user_core`, `bulk_print_users_urls_core`, `bulk_happ_users_menu`, and main-menu route `15`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -61,7 +61,7 @@ missing bulk_generate_users_core
 **Interfaces:**
 - Produces:
   - `bulk_generate_users_core <prefix> <count> <batch_id>`
-  - `bulk_export_users_csv <batch_id>`
+  - `bulk_print_users_urls_core <batch_id>`
   - `bulk_revoke_user_core <profile_name>`
   - `bulk_delete_user_core <profile_name>`
   - `_bulk_seed_profile_file`
@@ -86,7 +86,8 @@ Add helpers that:
 - Add each generated UUID to every route inbound.
 - Write user profile JSON files with `bulk_managed: true`.
 - Restart Xray once.
-- Export CSV under `/usr/local/etc/xray/bulk`.
+- Print generated subscription URLs after creation.
+- Print saved subscription URLs later from profile JSON metadata.
 
 - [ ] **Step 3: Verify GREEN**
 
@@ -114,7 +115,7 @@ Wire `bulk_happ_users_menu` into `main_menu` as option `15`.
 
 - [ ] **Step 2: Add README section**
 
-Document bulk generation, CSV output, revoke versus delete, and the shared multi-route model.
+Document bulk generation, printed URL output, revoke versus delete, and the shared multi-route model.
 
 - [ ] **Step 3: Verify regression tests**
 
