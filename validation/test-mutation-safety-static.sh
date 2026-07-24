@@ -107,7 +107,7 @@ assert_not_contains "$tmpdir/upgrade_profile_to_pq_menu" 'Profile JSON МОЖЕ�
 echo "  ok upgrade_profile_to_pq_menu"
 
 assert_contains "$tmpdir/main_menu" 'Обновить Xray-core'
-assert_contains "$tmpdir/main_menu" '10) update_command ;;'
+assert_contains "$tmpdir/main_menu" '11) update_command ;;'
 echo "  ok main_menu"
 
 assert_order install.sh 'for ufw_port in 22 80 443 8443 2053 2083 2087 8080 2096 8880 9443; do' 'ufw --force enable'

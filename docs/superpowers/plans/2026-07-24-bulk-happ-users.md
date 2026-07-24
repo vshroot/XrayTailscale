@@ -28,7 +28,7 @@
 
 **Interfaces:**
 - Consumes: existing source-safe `xraytailscale` functions and globals.
-- Produces: a failing test that requires `bulk_generate_users_core`, `bulk_revoke_user_core`, `bulk_delete_user_core`, `bulk_print_users_urls_core`, `bulk_happ_users_menu`, and main-menu route `15`.
+- Produces: a failing test that requires `bulk_generate_users_core`, `bulk_revoke_user_core`, `bulk_delete_user_core`, `bulk_print_users_urls_core`, `bulk_happ_users_menu`, and main-menu route `10`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -107,11 +107,11 @@ Expected: PASS.
 **Interfaces:**
 - Produces:
   - `bulk_happ_users_menu`
-  - main-menu item `15) Bulk HAPP users`
+  - main-menu item `10) Bulk HAPP users`
 
 - [ ] **Step 1: Add menu**
 
-Wire `bulk_happ_users_menu` into `main_menu` as option `15`.
+Wire `bulk_happ_users_menu` into `main_menu` as option `10`.
 
 - [ ] **Step 2: Add README section**
 

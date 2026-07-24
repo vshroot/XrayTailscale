@@ -19,7 +19,7 @@ The feature creates many independent user profiles with separate `uuid` and `sub
 Add a main-menu item:
 
 ```text
-15) Bulk HAPP users
+10) Bulk HAPP users
 ```
 
 The submenu exposes:

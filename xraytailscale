@@ -5534,20 +5534,20 @@ main_menu() {
     echo ""
     echo -e "${MAGENTA} HAPP SUBSCRIPTION:${NC}"
     echo -e "${CYAN} 9)${NC} Подписка HAPP (авто 7 маршрутов + URL/QR)"
-    echo -e "${CYAN}15)${NC} Bulk HAPP users (multi-route URLs)"
+    echo -e "${CYAN}10)${NC} Bulk HAPP users (multi-route URLs)"
     echo ""
     echo -e "${MAGENTA} ОБНОВЛЕНИЕ:${NC}"
-    echo -e "${CYAN}10)${NC} Обновить Xray-core"
+    echo -e "${CYAN}11)${NC} Обновить Xray-core"
     echo ""
     echo -e "${MAGENTA} BYPASS ROUTING:${NC}"
-    echo -e "${CYAN}11)${NC} Управление обходом VPN"
+    echo -e "${CYAN}12)${NC} Управление обходом VPN"
     echo ""
     echo -e "${MAGENTA} TAILSCALE:${NC}"
-    echo -e "${CYAN}12)${NC} Tailscale exit node"
+    echo -e "${CYAN}13)${NC} Tailscale exit node"
     echo ""
     echo -e "${MAGENTA} CASCADE:${NC}"
-    echo -e "${CYAN}13)${NC} Каскад / upstream-ноды"
-    echo -e "${CYAN}14)${NC} Поднять outbound-сервер (зарубежная нода)"
+    echo -e "${CYAN}14)${NC} Каскад / upstream-ноды"
+    echo -e "${CYAN}15)${NC} Поднять outbound-сервер (зарубежная нода)"
     echo ""
     echo -e "${RED} 0)${NC} Выход"
     echo ""
@@ -5561,12 +5561,12 @@ main_menu() {
       4) manage_profile_menu ;;
       8) upgrade_profile_to_pq_menu ;;
       9) happ_subscription_menu ;;
-      10) update_command ;;
-      11) bypass_routing_menu ;;
-      12) tailscale_exit_node_menu ;;
-      13) cascade_mode_menu ;;
-      14) setup_outbound_server_menu ;;
-      15) bulk_happ_users_menu ;;
+      10) bulk_happ_users_menu ;;
+      11) update_command ;;
+      12) bypass_routing_menu ;;
+      13) tailscale_exit_node_menu ;;
+      14) cascade_mode_menu ;;
+      15) setup_outbound_server_menu ;;
       0) exit 0 ;;
       *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
     esac

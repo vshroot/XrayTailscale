@@ -116,7 +116,7 @@ sudo xraytailscale
 Choose:
 
 ```text
-15) Bulk HAPP users
+10) Bulk HAPP users
 ```
 
 The bulk generator creates one hidden shared multi-route seed profile named `_bulk_seed`, then creates normal user profiles such as:
@@ -153,7 +153,7 @@ sudo xraytailscale
 Choose:
 
 ```text
-12) Tailscale exit node
+13) Tailscale exit node
 ```
 
 The script installs Tailscale, enables IP forwarding, starts `tailscaled`, and advertises the VPS as an exit node.
@@ -182,7 +182,7 @@ client -> main VPS -> upstream VPS -> internet
 On the upstream VPS, install XrayTailscale and choose:
 
 ```text
-14) Create outbound server
+15) Create outbound server
 ```
 
 This creates a TCP Reality Vision inbound and prints the values needed by the main VPS: host, port, UUID, public key, short ID, SNI, fingerprint, and flow.
@@ -190,7 +190,7 @@ This creates a TCP Reality Vision inbound and prints the values needed by the ma
 On the main VPS, choose:
 
 ```text
-13) Cascade / upstream nodes
+14) Cascade / upstream nodes
 ```
 
 Enter the upstream values, then enable cascade mode. XrayTailscale stores the upstream config in `/usr/local/etc/xray/upstreams/cascade.json`, adds `cascade-upstream` and `cascade-fragment` outbounds, and switches only the default catch-all `tcp,udp` route to the cascade outbound. Existing bypass rules stay above the catch-all rule and continue to go direct.
@@ -220,7 +220,7 @@ sudo xraytailscale
 Then choose:
 
 ```text
-10) Update Xray-core
+11) Update Xray-core
 ```
 
 ## Uninstall
