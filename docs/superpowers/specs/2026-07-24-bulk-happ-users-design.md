@@ -77,12 +77,12 @@ The manager prints generated URLs immediately after successful creation:
 
 ```text
 Batch: bulk-20260724-153000
-name subscription_url uuid
-user-001 https://your-domain.example/sub/<token> <uuid>
-user-002 https://your-domain.example/sub/<token> <uuid>
+name subscription_url
+user-001 https://your-domain.example/sub/<token>
+user-002 https://your-domain.example/sub/<token>
 ```
 
-The same URLs can be printed later from saved profile JSON metadata.
+The same URLs can be printed later from saved profile JSON metadata. The print flow lists available batches and lets the operator select one by number, with an `all` option for printing every bulk-managed user.
 
 ## Shared Routes
 

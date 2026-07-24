@@ -133,12 +133,12 @@ After generation the manager prints the generated subscription URLs immediately:
 
 ```text
 Batch: bulk-20260724-153000
-name subscription_url uuid
-user-001 https://your-domain.example/sub/<token> <uuid>
-user-002 https://your-domain.example/sub/<token> <uuid>
+name subscription_url
+user-001 https://your-domain.example/sub/<token>
+user-002 https://your-domain.example/sub/<token>
 ```
 
-Use `Show/print user URLs` later to print the same URLs again from saved profile metadata.
+Use `Show/print user URLs` later to print the same URLs again from saved profile metadata. The manager lists existing batches by number, so you do not need to remember the batch id manually.
 
 Use `Revoke one user` to rotate only the subscription URL token. Use `Delete one user` to actually disable that user by removing their UUID from every shared multi-route inbound.
 

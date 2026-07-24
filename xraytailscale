@@ -4411,7 +4411,7 @@ bulk_print_users_urls_core() {
   base_url=$(_subscription_base_url)
   rows=0
   echo "Batch: ${filter_batch:-all}"
-  echo "name subscription_url uuid"
+  echo "name subscription_url"
   for pf in "$PROFILES_DIR"/*.json; do
     [[ -f "$pf" ]] || continue
     jq -e '.bulk_managed == true and .bulk_seed != true' "$pf" >/dev/null 2>&1 || continue
@@ -4423,7 +4423,7 @@ bulk_print_users_urls_core() {
     token=$(jq -r '.sub_token // empty' "$pf" 2>/dev/null)
     uuid=$(jq -r '.uuid // empty' "$pf" 2>/dev/null)
     [[ -n "$name" && "$token" =~ ^[a-f0-9]{32}$ && -n "$uuid" ]] || continue
-    printf '%s %s/sub/%s %s\n' "$name" "$base_url" "$token" "$uuid"
+    printf '%s %s/sub/%s\n' "$name" "$base_url" "$token"
     rows=$((rows + 1))
   done
 
@@ -4580,6 +4580,69 @@ bulk_delete_user_core() {
   echo -e "${GREEN}✓ Bulk user удален: $profile_name${NC}"
 }
 
+_bulk_list_batches() {
+  local pf batch
+  for pf in "$PROFILES_DIR"/*.json; do
+    [[ -f "$pf" ]] || continue
+    jq -e '.bulk_managed == true and .bulk_seed != true' "$pf" >/dev/null 2>&1 || continue
+    batch=$(jq -r '.bulk_batch_id // ""' "$pf" 2>/dev/null)
+    [[ -n "$batch" ]] && echo "$batch"
+  done | sort -u
+}
+
+_bulk_batch_user_count() {
+  local batch="$1" pf pf_batch count=0
+  for pf in "$PROFILES_DIR"/*.json; do
+    [[ -f "$pf" ]] || continue
+    jq -e '.bulk_managed == true and .bulk_seed != true' "$pf" >/dev/null 2>&1 || continue
+    pf_batch=$(jq -r '.bulk_batch_id // ""' "$pf" 2>/dev/null)
+    [[ "$pf_batch" == "$batch" ]] && count=$((count + 1))
+  done
+  echo "$count"
+}
+
+_bulk_select_batch_for_print() {
+  local batches=()
+  local batch
+  while IFS= read -r batch; do
+    [[ -n "$batch" ]] && batches+=("$batch")
+  done < <(_bulk_list_batches)
+
+  if [[ ${#batches[@]} -eq 0 ]]; then
+    echo -e "${YELLOW}Bulk batches не найдены${NC}"
+    sleep 1
+    return 1
+  fi
+
+  echo -e "${YELLOW}Выберите batch для вывода URL:${NC}"
+  echo -e "${CYAN} 1)${NC} all"
+
+  local i=2
+  for batch in "${batches[@]}"; do
+    local count
+    count=$(_bulk_batch_user_count "$batch")
+    echo -e "${CYAN} $i)${NC} $batch ${BLUE}[$count users]${NC}"
+    ((i++))
+  done
+
+  echo -e "${CYAN} 0)${NC} Назад"
+  echo -n -e "${YELLOW}Batch: ${NC}"
+  local choice
+  read -r choice
+  choice=${choice:-1}
+  [[ "$choice" == "0" ]] && return 1
+  if [[ "$choice" == "1" ]]; then
+    SELECTED_BULK_BATCH=""
+    return 0
+  fi
+  if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ $choice -lt 2 ]] || [[ $choice -gt $((${#batches[@]} + 1)) ]]; then
+    echo -e "${RED}Неверный выбор${NC}"
+    sleep 1
+    return 1
+  fi
+  SELECTED_BULK_BATCH="${batches[$((choice - 2))]}"
+}
+
 _bulk_list_user_profiles() {
   local pf profile
   for pf in "$PROFILES_DIR"/*.json; do
@@ -4677,10 +4740,9 @@ bulk_happ_users_menu() {
         read -r _
         ;;
       2)
-        echo -n -e "${YELLOW}Batch ID для вывода URL [Enter=all]: ${NC}"
-        local print_batch
-        read -r print_batch
-        bulk_print_users_urls_core "$print_batch"
+        if _bulk_select_batch_for_print; then
+          bulk_print_users_urls_core "$SELECTED_BULK_BATCH"
+        fi
         echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
         read -r _
         ;;

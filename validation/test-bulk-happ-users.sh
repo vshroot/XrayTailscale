@@ -132,11 +132,15 @@ type bulk_delete_user_core >/dev/null 2>&1 || fail "missing bulk_delete_user_cor
 type bulk_happ_users_menu >/dev/null 2>&1 || fail "missing bulk_happ_users_menu"
 type _bulk_seed_profile_file >/dev/null 2>&1 || fail "missing _bulk_seed_profile_file"
 type _bulk_seed_ready >/dev/null 2>&1 || fail "missing _bulk_seed_ready"
+type _bulk_list_batches >/dev/null 2>&1 || fail "missing _bulk_list_batches"
+type _bulk_select_batch_for_print >/dev/null 2>&1 || fail "missing _bulk_select_batch_for_print"
 type _list_visible_profile_names >/dev/null 2>&1 || fail "missing _list_visible_profile_names"
 
 ! grep -q '^BULK_DIR=' xraytailscale || fail "BULK_DIR constant should not be required for print-only output"
 grep -q '15) bulk_happ_users_menu' xraytailscale || fail "main menu option 15 must route to bulk HAPP users"
 grep -q 'Show/print user URLs' xraytailscale || fail "bulk menu must expose print URLs action"
+grep -q '_bulk_select_batch_for_print' xraytailscale || fail "bulk menu must use numbered batch selection"
+! grep -q 'Batch ID для вывода URL' xraytailscale || fail "bulk menu must not require typing batch id manually"
 ! grep -q 'Export users CSV' xraytailscale || fail "bulk menu must not advertise CSV export"
 ! _list_visible_profile_names | grep -q '^_bulk_seed$' || fail "bulk seed must be hidden from ordinary profile lists"
 
@@ -144,8 +148,10 @@ generate_output_file="$WORKDIR/generate.out"
 bulk_generate_users_core "user" "3" "bulk-test" > "$generate_output_file"
 generate_output=$(cat "$generate_output_file")
 grep -q '^Batch: bulk-test$' <<< "$generate_output" || fail "bulk generation must print batch id"
-grep -Eq '^user-001[[:space:]]+https://vpn\.example\.com/sub/[a-f0-9]{32}[[:space:]]+' <<< "$generate_output" \
+grep -Eq '^user-001[[:space:]]+https://vpn\.example\.com/sub/[a-f0-9]{32}$' <<< "$generate_output" \
   || fail "bulk generation must print user subscription URLs"
+! grep -Eq '^user-001[[:space:]]+https://vpn\.example\.com/sub/[a-f0-9]{32}[[:space:]]+[0-9a-fA-F-]{36}$' <<< "$generate_output" \
+  || fail "bulk generation output must not include UUID"
 
 [[ "$SAFE_RESTART_COUNT" == "1" ]] || fail "bulk generation must restart Xray once"
 for name in user-001 user-002 user-003; do
@@ -166,6 +172,10 @@ done
 [[ "$(_list_visible_profile_names | wc -l | tr -d ' ')" == "3" ]] \
   || fail "visible profile list must include generated users but hide bulk seed"
 ! _list_visible_profile_names | grep -q '^_bulk_seed$' || fail "bulk seed became visible after generation"
+[[ "$(_bulk_list_batches)" == "bulk-test" ]] || fail "bulk batches list must include generated batch"
+SELECTED_BULK_BATCH="not-set"
+_bulk_select_batch_for_print < <(printf '2\n') >/dev/null
+[[ "$SELECTED_BULK_BATCH" == "bulk-test" ]] || fail "batch selection by number must set selected batch"
 
 for port in 37174 39000; do
   [[ "$(jq -r --argjson port "$port" '.inbounds[] | select(.port == $port) | .settings.clients | length' "$CONFIG_FILE")" == "4" ]] \
@@ -183,8 +193,11 @@ print_output_file="$WORKDIR/print.out"
 bulk_print_users_urls_core "bulk-test" > "$print_output_file"
 print_output=$(cat "$print_output_file")
 grep -q '^Batch: bulk-test$' <<< "$print_output" || fail "print URLs must include batch id"
-grep -Eq '^user-003[[:space:]]+https://vpn\.example\.com/sub/[a-f0-9]{32}[[:space:]]+' <<< "$print_output" \
+grep -Eq '^name[[:space:]]+subscription_url$' <<< "$print_output" || fail "print URLs header must not include UUID"
+grep -Eq '^user-003[[:space:]]+https://vpn\.example\.com/sub/[a-f0-9]{32}$' <<< "$print_output" \
   || fail "print URLs must show existing generated users"
+! grep -Eq '^user-003[[:space:]]+https://vpn\.example\.com/sub/[a-f0-9]{32}[[:space:]]+[0-9a-fA-F-]{36}$' <<< "$print_output" \
+  || fail "print URLs must not include UUID"
 
 old_uuid=$(jq -r '.uuid' "$PROFILES_DIR/user-001.json")
 old_token=$(jq -r '.sub_token' "$PROFILES_DIR/user-001.json")
