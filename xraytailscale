@@ -331,6 +331,7 @@ _live_route_metadata_for_client() {
         .inbounds[]? as $in
         | select($in.port == $p)
         | select(($in.streamSettings.network // "") == $network)
+        | select(if $transport == "xhttp" then (($in.streamSettings.xhttpSettings.path // "") | startswith("/")) else true end)
         | select(any($in.settings.clients[]?; (.id // "") == $uuid and ((.flow // "") == $flow)))
         | [
             ($in.streamSettings.realitySettings.serverNames[0] // ""),

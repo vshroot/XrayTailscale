@@ -77,6 +77,22 @@ cat > "$CONFIG_FILE" <<'JSON'
           "shortIds": ["feed9876"]
         }
       }
+    },
+    {
+      "port": 34567,
+      "settings": {
+        "clients": [{"id": "77777777-7777-4777-8777-777777777777", "flow": ""}],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": {"mode": "stream-one", "path": ""},
+        "realitySettings": {
+          "serverNames": ["www.ozon.ru"],
+          "fingerprint": "chrome",
+          "shortIds": ["cafe9876"]
+        }
+      }
     }
   ]
 }
@@ -171,5 +187,27 @@ if _generate_vless_urls_for_profile "$PROFILES_DIR/missing-client.json" > "$WORK
   fail "URL generation must reject routes whose UUID is absent from live inbound clients"
 fi
 [[ ! -s "$WORKDIR/missing-client.out" ]] || fail "missing-client URL output must be empty"
+
+cat > "$PROFILES_DIR/empty-live-xhttp-path.json" <<'JSON'
+{
+  "name": "empty-live-xhttp-path",
+  "uuid": "77777777-7777-4777-8777-777777777777",
+  "routes": [
+    {
+      "label": "xhttp-legacy",
+      "transport": "xhttp",
+      "port": 34567,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome",
+      "xhttp_path": "/xhttp-profile-only"
+    }
+  ]
+}
+JSON
+
+if _generate_vless_urls_for_profile "$PROFILES_DIR/empty-live-xhttp-path.json" > "$WORKDIR/empty-live-xhttp-path.out"; then
+  fail "URL generation must reject XHTTP routes whose live inbound path is empty"
+fi
+[[ ! -s "$WORKDIR/empty-live-xhttp-path.out" ]] || fail "empty-live-xhttp-path URL output must be empty"
 
 echo "✓ VLESS URL generation checks passed"

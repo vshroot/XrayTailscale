@@ -421,6 +421,110 @@ done
 missing_regular_urls=$(XRAYTAILSCALE_SERVER_ADDR_OVERRIDE="vpn.example.com" _generate_vless_urls_for_profile "$PROFILES_DIR/regular-missing-client.json") \
   || fail "live-port repaired ordinary subscription must generate live VLESS URLs"
 grep -q '^vless://' <<< "$missing_regular_urls" || fail "live-port repaired ordinary subscription must generate live VLESS URLs"
+
+jq '
+  .inbounds += [
+    {
+      "listen": "0.0.0.0",
+      "port": 41000,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{"id": "77777777-7777-4777-8777-777777777777", "flow": ""}],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "xhttpSettings": {"mode": "stream-one", "path": ""},
+        "realitySettings": {
+          "serverNames": ["www.ozon.ru"],
+          "fingerprint": "chrome",
+          "shortIds": ["ea7e0001"]
+        }
+      },
+      "tag": "inbound-41000"
+    },
+    {
+      "listen": "0.0.0.0",
+      "port": 41001,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{"id": "77777777-7777-4777-8777-777777777777", "flow": "xtls-rprx-vision"}],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "serverNames": ["www.ozon.ru"],
+          "fingerprint": "chrome",
+          "shortIds": ["ea7e0002"]
+        }
+      },
+      "tag": "inbound-41001"
+    }
+  ]
+' "$CONFIG_FILE" > "$WORKDIR/config-empty-live-path.json" \
+  || fail "failed to add empty-live-path inbounds fixture"
+mv "$WORKDIR/config-empty-live-path.json" "$CONFIG_FILE"
+
+cat > "$PROFILES_DIR/regular-empty-live-path.json" <<'JSON'
+{
+  "name": "regular-empty-live-path",
+  "uuid": "77777777-7777-4777-8777-777777777777",
+  "schema_version": 3,
+  "multi_route": true,
+  "primary_route": "xhttp-legacy",
+  "sub_token": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "created": "2026-07-24 12:45:00",
+  "routes": [
+    {
+      "label": "xhttp-legacy",
+      "transport": "xhttp",
+      "port": 41000,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome",
+      "xhttp_path": "/xhttp-profile-only"
+    },
+    {
+      "label": "tcp-vision",
+      "transport": "tcp",
+      "port": 41001,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome"
+    }
+  ],
+  "transport": "xhttp",
+  "port": 41000,
+  "fingerprint": "chrome",
+  "sni": "www.ozon.ru",
+  "xhttp_path": "/xhttp-profile-only",
+  "pq_enabled": false
+}
+JSON
+
+SAFE_RESTART_COUNT=0
+repair_stale_subscription_profiles_core >/dev/null
+[[ "$SAFE_RESTART_COUNT" == "1" ]] \
+  || fail "ordinary repair must restart Xray when subscribed XHTTP profile has empty live inbound path"
+jq -e '
+  .name == "regular-empty-live-path"
+  and .uuid == "77777777-7777-4777-8777-777777777777"
+  and .sub_token == "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  and (.routes | length == 2)
+  and .routes[0].port == 37174
+  and .routes[0].xhttp_path == "/xhttp-seed"
+' "$PROFILES_DIR/regular-empty-live-path.json" >/dev/null \
+  || fail "ordinary repair must resync empty-live-path profile to seed routes without changing credentials"
+for port in 37174 39000; do
+  jq -e --argjson port "$port" '
+    .inbounds[] | select(.port == $port) | .settings.clients[] | select(.id == "77777777-7777-4777-8777-777777777777")
+  ' "$CONFIG_FILE" >/dev/null || fail "empty-live-path ordinary repair must add UUID to seed inbound $port"
+done
+empty_path_regular_urls=$(XRAYTAILSCALE_SERVER_ADDR_OVERRIDE="vpn.example.com" _generate_vless_urls_for_profile "$PROFILES_DIR/regular-empty-live-path.json") \
+  || fail "empty-live-path repaired ordinary subscription must generate live VLESS URLs"
+grep -q 'type=xhttp&path=%2Fxhttp-seed&mode=stream-one#regular-empty-live-path-xhttp-legacy' <<< "$empty_path_regular_urls" \
+  || fail "empty-live-path repaired ordinary subscription must use seed XHTTP path"
 SAFE_RESTART_COUNT=0
 
 generate_output_file="$WORKDIR/generate.out"
@@ -448,7 +552,7 @@ done
   || fail "generated users must have unique UUIDs"
 [[ "$(jq -r '.sub_token' "$PROFILES_DIR/user-001.json")" != "$(jq -r '.sub_token' "$PROFILES_DIR/user-002.json")" ]] \
   || fail "generated users must have unique sub_tokens"
-[[ "$(_list_visible_profile_names | wc -l | tr -d ' ')" == "7" ]] \
+[[ "$(_list_visible_profile_names | wc -l | tr -d ' ')" == "8" ]] \
   || fail "visible profile list must include repaired and generated users but hide bulk seed"
 ! _list_visible_profile_names | grep -q '^_bulk_seed$' || fail "bulk seed became visible after generation"
 bulk_batches=$(_bulk_list_batches)
@@ -460,8 +564,8 @@ _bulk_select_batch_for_print < <(printf '2\n') >/dev/null
 [[ "$SELECTED_BULK_BATCH" == "bulk-test" ]] || fail "batch selection by number must set selected batch"
 
 for port in 37174 39000; do
-  [[ "$(jq -r --argjson port "$port" '.inbounds[] | select(.port == $port) | .settings.clients | length' "$CONFIG_FILE")" == "8" ]] \
-    || fail "port $port must have seed plus four repaired profiles plus three generated clients"
+  [[ "$(jq -r --argjson port "$port" '.inbounds[] | select(.port == $port) | .settings.clients | length' "$CONFIG_FILE")" == "9" ]] \
+    || fail "port $port must have seed plus five repaired profiles plus three generated clients"
 done
 jq -e --arg uuid "$(jq -r '.uuid' "$PROFILES_DIR/user-001.json")" '
   .inbounds[] | select(.port == 39000) | .settings.clients[] | select(.id == $uuid and .flow == "xtls-rprx-vision")
