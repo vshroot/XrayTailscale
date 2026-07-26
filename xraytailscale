@@ -294,6 +294,74 @@ read_profile_transport_metadata() {
 #         PQ-профиль без $VLESS_ENCRYPTION_FILE.
 # Args: $1 = absolute path к profile JSON.
 # Используется generate_connection() в интерактиве и subhttp.sh в Plan 7.2.
+_route_expected_network() {
+  case "$1" in
+    tcp|tcp-utls|tcp-xudp|tcp-mux) echo "tcp" ;;
+    grpc) echo "grpc" ;;
+    xhttp) echo "xhttp" ;;
+    *) return 1 ;;
+  esac
+}
+
+_route_expected_flow() {
+  case "$1" in
+    tcp|tcp-utls|tcp-xudp) echo "xtls-rprx-vision" ;;
+    tcp-mux|grpc|xhttp) echo "" ;;
+    *) return 1 ;;
+  esac
+}
+
+_live_route_metadata_for_client() {
+  local uuid="$1"
+  local transport="$2"
+  local port="$3"
+  [[ "$uuid" =~ ^[0-9a-fA-F-]{36}$ && "$port" =~ ^[0-9]+$ ]] || return 1
+
+  local expected_network expected_flow
+  expected_network=$(_route_expected_network "$transport") || return 1
+  expected_flow=$(_route_expected_flow "$transport") || return 1
+
+  jq -er \
+    --argjson p "$port" \
+    --arg uuid "$uuid" \
+    --arg network "$expected_network" \
+    --arg flow "$expected_flow" \
+    --arg transport "$transport" '
+      first(
+        .inbounds[]? as $in
+        | select($in.port == $p)
+        | select(($in.streamSettings.network // "") == $network)
+        | select(any($in.settings.clients[]?; (.id // "") == $uuid and ((.flow // "") == $flow)))
+        | [
+            ($in.streamSettings.realitySettings.serverNames[0] // ""),
+            ($in.streamSettings.realitySettings.fingerprint // ""),
+            (if $transport == "grpc" then ($in.streamSettings.grpcSettings.serviceName // "") else "" end),
+            (if $transport == "xhttp" then ($in.streamSettings.xhttpSettings.path // "") else "" end),
+            ($in.settings.decryption // "none")
+          ]
+      ) // empty
+      | join("|")
+    ' "$CONFIG_FILE" 2>/dev/null
+}
+
+_profile_route_live_metadata() {
+  local profile_file="$1"
+  local route_index="${2:-}"
+  [[ -f "$profile_file" ]] || return 1
+
+  local uuid transport port
+  uuid=$(jq -r '.uuid // ""' "$profile_file") || return 1
+  if [[ -n "$route_index" ]]; then
+    transport=$(jq -r --argjson i "$route_index" '.routes[$i].transport // empty' "$profile_file") || return 1
+    port=$(jq -r --argjson i "$route_index" '.routes[$i].port // empty' "$profile_file") || return 1
+  else
+    transport=$(jq -r '.transport // empty' "$profile_file") || return 1
+    port=$(jq -r '.port // empty' "$profile_file") || return 1
+  fi
+
+  _live_route_metadata_for_client "$uuid" "$transport" "$port"
+}
+
 _generate_vless_url_pure() {
   local profile_file="$1"
   local route_index="${2:-}"
@@ -337,11 +405,23 @@ _generate_vless_url_pure() {
   fi
   encoded_xhttp_path=$(jq -nr --arg path "$xhttp_path" '$path|@uri')
 
-  # Live-config guard: profile JSON без соответствующего inbound в config.json — сирота.
-  # Не выдаём такой vless:// в subscription, иначе клиент получает нерабочий маршрут.
-  if ! jq -e --argjson p "$port" '.inbounds[] | select(.port == $p)' "$CONFIG_FILE" >/dev/null 2>&1; then
-    return 1
-  fi
+  # Live-config guard: route usable only when the inbound has this profile UUID with
+  # the expected flow. Metadata comes from live config.json to avoid stale profile JSON.
+  local live_metadata live_sni live_fingerprint live_grpc_service_name live_xhttp_path live_decryption
+  live_metadata=$(_live_route_metadata_for_client "$uuid" "$transport" "$port") || return 1
+  IFS='|' read -r live_sni live_fingerprint live_grpc_service_name live_xhttp_path live_decryption <<< "$live_metadata"
+  [[ -n "$live_sni" && "$live_sni" != "null" ]] && sni="$live_sni"
+  [[ -n "$live_fingerprint" && "$live_fingerprint" != "null" ]] && fingerprint="$live_fingerprint"
+  case "$transport" in
+    grpc)
+      [[ -n "$live_grpc_service_name" && "$live_grpc_service_name" != "null" ]] && grpc_service_name="$live_grpc_service_name"
+      ;;
+    xhttp)
+      [[ "$live_xhttp_path" == "null" ]] && live_xhttp_path=""
+      xhttp_path="$live_xhttp_path"
+      encoded_xhttp_path=$(jq -nr --arg path "$xhttp_path" '$path|@uri')
+      ;;
+  esac
 
   # short_id — читаем из config.json по порту (зеркало логики generate_connection)
   local short_id
@@ -369,6 +449,11 @@ _generate_vless_url_pure() {
         pq_enabled=$(jq -r --argjson i "$route_index" '.routes[$i].pq_enabled // false' "$profile_file" 2>/dev/null)
       else
         pq_enabled=$(jq -r '.pq_enabled // false' "$profile_file" 2>/dev/null)
+      fi
+      if [[ -n "$live_decryption" && "$live_decryption" != "none" && "$live_decryption" != "null" ]]; then
+        pq_enabled=true
+      else
+        pq_enabled=false
       fi
       if [[ "$pq_enabled" == "true" ]]; then
         [[ -f "$VLESS_ENCRYPTION_FILE" ]] || return 1
@@ -452,23 +537,18 @@ _profile_live_route_count() {
   route_count=$(_profile_route_count "$profile_file")
   if [[ "$route_count" =~ ^[0-9]+$ ]] && [[ "$route_count" -gt 0 ]]; then
     local live=0
-    local ports
-    ports=$(jq -r '.routes[]?.port // empty' "$profile_file" 2>/dev/null)
-    local port
-    while IFS= read -r port; do
-      [[ "$port" =~ ^[0-9]+$ ]] || continue
-      if jq -e --argjson p "$port" '.inbounds[]? | select(.port == $p)' "$CONFIG_FILE" >/dev/null 2>&1; then
+    local i
+    for ((i=0; i<route_count; i++)); do
+      if _profile_route_live_metadata "$profile_file" "$i" >/dev/null 2>&1; then
         ((live++))
       fi
-    done <<< "$ports"
+    done
     echo "$live"
     [[ "$live" -gt 0 ]]
     return
   fi
 
-  local port
-  port=$(jq -r '.port // empty' "$profile_file" 2>/dev/null)
-  if [[ "$port" =~ ^[0-9]+$ ]] && jq -e --argjson p "$port" '.inbounds[]? | select(.port == $p)' "$CONFIG_FILE" >/dev/null 2>&1; then
+  if _profile_route_live_metadata "$profile_file" >/dev/null 2>&1; then
     echo 1
     return 0
   fi
@@ -4463,7 +4543,7 @@ _repair_stale_subscription_profiles_core() {
   fi
 
   local repair_profiles=()
-  local pf live_count token uuid
+  local pf route_count live_count token uuid needs_repair
   for pf in "$PROFILES_DIR"/*.json; do
     [[ -f "$pf" ]] || continue
     _profile_is_bulk_seed_file "$pf" && continue
@@ -4474,9 +4554,19 @@ _repair_stale_subscription_profiles_core() {
       uuid=$(jq -r '.uuid // ""' "$pf" 2>/dev/null)
       [[ "$token" =~ ^[a-f0-9]{32}$ && "$uuid" =~ ^[0-9a-fA-F-]{36}$ ]] || continue
     fi
+    route_count=$(_profile_route_count "$pf" 2>/dev/null || true)
+    route_count="${route_count##*$'\n'}"
     live_count=$(_profile_live_route_count "$pf" 2>/dev/null || true)
     live_count="${live_count##*$'\n'}"
-    if [[ "$live_count" =~ ^[0-9]+$ && "$live_count" -eq 0 ]]; then
+    needs_repair=0
+    if [[ "$route_count" =~ ^[0-9]+$ && "$route_count" -gt 0 ]]; then
+      if [[ "$live_count" =~ ^[0-9]+$ && "$live_count" -lt "$route_count" ]]; then
+        needs_repair=1
+      fi
+    elif [[ "$live_count" =~ ^[0-9]+$ && "$live_count" -eq 0 ]]; then
+      needs_repair=1
+    fi
+    if [[ "$needs_repair" -eq 1 ]]; then
       repair_profiles+=("$pf")
     fi
   done

@@ -58,12 +58,12 @@ The manager is interactive. The most important options are:
 | `4` | Manage profile SNI, fingerprint, port, and advanced settings. |
 | `8` | Upgrade a legacy profile to post-quantum XHTTP. |
 | `9` | Create or manage a HAPP subscription profile. |
-| `10` | Update Xray-core. |
-| `11` | Manage bypass routing rules. |
-| `12` | Install and configure Tailscale as an exit node. |
-| `13` | Configure cascade routing through an upstream node. |
-| `14` | Create an outbound-server node on a separate overseas VPS. |
-| `15` | Generate and manage bulk HAPP multi-route users. |
+| `10` | Generate and manage bulk HAPP multi-route users. |
+| `11` | Update Xray-core. |
+| `12` | Manage bypass routing rules. |
+| `13` | Install and configure Tailscale as an exit node. |
+| `14` | Configure cascade routing through an upstream node. |
+| `15` | Create an outbound-server node on a separate overseas VPS. |
 
 ## HAPP Subscription Setup
 
@@ -131,7 +131,7 @@ Each user gets a unique `uuid` and `sub_token`, but all users reuse the same mul
 
 If the hidden `_bulk_seed` profile points to ports that no longer exist in the live Xray config, the manager recreates the seed automatically before generating a new batch.
 
-If existing subscription URLs return `410 Gone`, repair stale HAPP profiles without changing their URLs:
+If existing subscription URLs return `410 Gone` or imported profiles fail with a TLS handshake error, repair stale HAPP profiles without changing their URLs:
 
 ```bash
 sudo xraytailscale subscription-repair

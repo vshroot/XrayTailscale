@@ -32,23 +32,50 @@ cat > "$CONFIG_FILE" <<'JSON'
   "inbounds": [
     {
       "port": 12345,
+      "settings": {
+        "clients": [{"id": "11111111-2222-3333-4444-555555555555", "flow": ""}],
+        "decryption": "none"
+      },
       "streamSettings": {
         "network": "xhttp",
-        "realitySettings": {"shortIds": ["abcd1234"]}
+        "xhttpSettings": {"mode": "stream-one", "path": "/xhttp-test"},
+        "realitySettings": {
+          "serverNames": ["www.ozon.ru"],
+          "fingerprint": "chrome",
+          "shortIds": ["abcd1234"]
+        }
       }
     },
     {
       "port": 12346,
+      "settings": {
+        "clients": [{"id": "11111111-2222-3333-4444-555555555555", "flow": ""}],
+        "decryption": "mlkem768x25519plus.native.test-decryption"
+      },
       "streamSettings": {
         "network": "xhttp",
-        "realitySettings": {"shortIds": ["beef5678"]}
+        "xhttpSettings": {"mode": "stream-one", "path": "/xhttp-pq"},
+        "realitySettings": {
+          "serverNames": ["www.ozon.ru"],
+          "fingerprint": "chrome",
+          "shortIds": ["beef5678"]
+        }
       }
     },
     {
       "port": 23456,
+      "settings": {
+        "clients": [{"id": "11111111-2222-3333-4444-555555555555", "flow": ""}],
+        "decryption": "none"
+      },
       "streamSettings": {
         "network": "grpc",
-        "realitySettings": {"shortIds": ["feed9876"]}
+        "grpcSettings": {"serviceName": "svc-test"},
+        "realitySettings": {
+          "serverNames": ["www.cloudflare.com"],
+          "fingerprint": "chrome",
+          "shortIds": ["feed9876"]
+        }
       }
     }
   ]
@@ -98,5 +125,51 @@ grep -q 'encryption=mlkem768x25519plus.native.test-encryption' <<< "$urls" || fa
 grep -q 'type=xhttp&path=%2Fxhttp-pq&mode=stream-one#sample-xhttp-pq' <<< "$urls" || fail "PQ XHTTP URL must include mode=stream-one"
 ! grep -q '&host=' <<< "$urls" || fail "XHTTP URLs must not force Host header"
 grep -q 'type=grpc&serviceName=svc-test&mode=gun#sample-grpc' <<< "$urls" || fail "gRPC URL must include mode=gun"
+
+cat > "$PROFILES_DIR/stale-metadata.json" <<'JSON'
+{
+  "name": "stale-metadata",
+  "uuid": "11111111-2222-3333-4444-555555555555",
+  "routes": [
+    {
+      "label": "xhttp-legacy",
+      "transport": "xhttp",
+      "port": 12345,
+      "sni": "stale.example.com",
+      "fingerprint": "firefox",
+      "xhttp_path": "/xhttp-stale"
+    }
+  ]
+}
+JSON
+
+stale_metadata_urls=$(_generate_vless_urls_for_profile "$PROFILES_DIR/stale-metadata.json") \
+  || fail "live metadata URL generation failed"
+grep -q 'sni=www.ozon.ru' <<< "$stale_metadata_urls" || fail "URL generation must use live inbound SNI"
+grep -q 'fp=chrome' <<< "$stale_metadata_urls" || fail "URL generation must use live inbound fingerprint"
+grep -q 'type=xhttp&path=%2Fxhttp-test&mode=stream-one#stale-metadata-xhttp-legacy' <<< "$stale_metadata_urls" \
+  || fail "URL generation must use live inbound XHTTP path"
+
+cat > "$PROFILES_DIR/missing-client.json" <<'JSON'
+{
+  "name": "missing-client",
+  "uuid": "99999999-9999-4999-8999-999999999999",
+  "routes": [
+    {
+      "label": "xhttp-legacy",
+      "transport": "xhttp",
+      "port": 12345,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome",
+      "xhttp_path": "/xhttp-test"
+    }
+  ]
+}
+JSON
+
+if _generate_vless_urls_for_profile "$PROFILES_DIR/missing-client.json" > "$WORKDIR/missing-client.out"; then
+  fail "URL generation must reject routes whose UUID is absent from live inbound clients"
+fi
+[[ ! -s "$WORKDIR/missing-client.out" ]] || fail "missing-client URL output must be empty"
 
 echo "✓ VLESS URL generation checks passed"

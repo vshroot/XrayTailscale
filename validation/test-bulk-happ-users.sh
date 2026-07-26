@@ -323,6 +323,104 @@ grep -q '^vless://' <<< "$legacy_urls" || fail "repaired bulk user subscription 
 regular_urls=$(XRAYTAILSCALE_SERVER_ADDR_OVERRIDE="vpn.example.com" _generate_vless_urls_for_profile "$PROFILES_DIR/regular-001.json") \
   || fail "repaired ordinary subscription must generate live VLESS URLs"
 grep -q '^vless://' <<< "$regular_urls" || fail "repaired ordinary subscription must generate live VLESS URLs"
+
+cat > "$PROFILES_DIR/bulk-missing-client.json" <<'JSON'
+{
+  "name": "bulk-missing-client",
+  "uuid": "55555555-5555-4555-8555-555555555555",
+  "schema_version": 3,
+  "multi_route": true,
+  "bulk_managed": true,
+  "bulk_batch_id": "missing-client-batch",
+  "primary_route": "xhttp-legacy",
+  "sub_token": "cccccccccccccccccccccccccccccccc",
+  "created": "2026-07-24 12:35:00",
+  "routes": [
+    {
+      "label": "xhttp-legacy",
+      "transport": "xhttp",
+      "port": 37174,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome",
+      "xhttp_path": "/xhttp-seed"
+    },
+    {
+      "label": "tcp-vision",
+      "transport": "tcp",
+      "port": 39000,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome"
+    }
+  ],
+  "transport": "xhttp",
+  "port": 37174,
+  "fingerprint": "chrome",
+  "sni": "www.ozon.ru",
+  "xhttp_path": "/xhttp-seed",
+  "pq_enabled": false
+}
+JSON
+
+SAFE_RESTART_COUNT=0
+bulk_repair_stale_users_core >/dev/null
+[[ "$SAFE_RESTART_COUNT" == "1" ]] \
+  || fail "bulk repair must restart Xray when a live-port bulk profile is missing inbound clients"
+for port in 37174 39000; do
+  jq -e --argjson port "$port" '
+    .inbounds[] | select(.port == $port) | .settings.clients[] | select(.id == "55555555-5555-4555-8555-555555555555")
+  ' "$CONFIG_FILE" >/dev/null || fail "live-port bulk repair must add missing UUID to inbound $port"
+done
+missing_bulk_urls=$(XRAYTAILSCALE_SERVER_ADDR_OVERRIDE="vpn.example.com" _generate_vless_urls_for_profile "$PROFILES_DIR/bulk-missing-client.json") \
+  || fail "live-port repaired bulk user subscription must generate live VLESS URLs"
+grep -q '^vless://' <<< "$missing_bulk_urls" || fail "live-port repaired bulk user subscription must generate live VLESS URLs"
+
+cat > "$PROFILES_DIR/regular-missing-client.json" <<'JSON'
+{
+  "name": "regular-missing-client",
+  "uuid": "66666666-6666-4666-8666-666666666666",
+  "schema_version": 3,
+  "multi_route": true,
+  "primary_route": "xhttp-legacy",
+  "sub_token": "dddddddddddddddddddddddddddddddd",
+  "created": "2026-07-24 12:40:00",
+  "routes": [
+    {
+      "label": "xhttp-legacy",
+      "transport": "xhttp",
+      "port": 37174,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome",
+      "xhttp_path": "/xhttp-seed"
+    },
+    {
+      "label": "tcp-vision",
+      "transport": "tcp",
+      "port": 39000,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome"
+    }
+  ],
+  "transport": "xhttp",
+  "port": 37174,
+  "fingerprint": "chrome",
+  "sni": "www.ozon.ru",
+  "xhttp_path": "/xhttp-seed",
+  "pq_enabled": false
+}
+JSON
+
+SAFE_RESTART_COUNT=0
+repair_stale_subscription_profiles_core >/dev/null
+[[ "$SAFE_RESTART_COUNT" == "1" ]] \
+  || fail "ordinary repair must restart Xray when a live-port subscribed profile is missing inbound clients"
+for port in 37174 39000; do
+  jq -e --argjson port "$port" '
+    .inbounds[] | select(.port == $port) | .settings.clients[] | select(.id == "66666666-6666-4666-8666-666666666666")
+  ' "$CONFIG_FILE" >/dev/null || fail "live-port ordinary repair must add missing UUID to inbound $port"
+done
+missing_regular_urls=$(XRAYTAILSCALE_SERVER_ADDR_OVERRIDE="vpn.example.com" _generate_vless_urls_for_profile "$PROFILES_DIR/regular-missing-client.json") \
+  || fail "live-port repaired ordinary subscription must generate live VLESS URLs"
+grep -q '^vless://' <<< "$missing_regular_urls" || fail "live-port repaired ordinary subscription must generate live VLESS URLs"
 SAFE_RESTART_COUNT=0
 
 generate_output_file="$WORKDIR/generate.out"
@@ -350,19 +448,20 @@ done
   || fail "generated users must have unique UUIDs"
 [[ "$(jq -r '.sub_token' "$PROFILES_DIR/user-001.json")" != "$(jq -r '.sub_token' "$PROFILES_DIR/user-002.json")" ]] \
   || fail "generated users must have unique sub_tokens"
-[[ "$(_list_visible_profile_names | wc -l | tr -d ' ')" == "5" ]] \
+[[ "$(_list_visible_profile_names | wc -l | tr -d ' ')" == "7" ]] \
   || fail "visible profile list must include repaired and generated users but hide bulk seed"
 ! _list_visible_profile_names | grep -q '^_bulk_seed$' || fail "bulk seed became visible after generation"
 bulk_batches=$(_bulk_list_batches)
 grep -q '^bulk-test$' <<< "$bulk_batches" || fail "bulk batches list must include generated batch"
 grep -q '^legacy-batch$' <<< "$bulk_batches" || fail "bulk batches list must include repaired legacy batch"
+grep -q '^missing-client-batch$' <<< "$bulk_batches" || fail "bulk batches list must include live-port repaired batch"
 SELECTED_BULK_BATCH="not-set"
 _bulk_select_batch_for_print < <(printf '2\n') >/dev/null
 [[ "$SELECTED_BULK_BATCH" == "bulk-test" ]] || fail "batch selection by number must set selected batch"
 
 for port in 37174 39000; do
-  [[ "$(jq -r --argjson port "$port" '.inbounds[] | select(.port == $port) | .settings.clients | length' "$CONFIG_FILE")" == "6" ]] \
-    || fail "port $port must have seed plus two repaired profiles plus three generated clients"
+  [[ "$(jq -r --argjson port "$port" '.inbounds[] | select(.port == $port) | .settings.clients | length' "$CONFIG_FILE")" == "8" ]] \
+    || fail "port $port must have seed plus four repaired profiles plus three generated clients"
 done
 jq -e --arg uuid "$(jq -r '.uuid' "$PROFILES_DIR/user-001.json")" '
   .inbounds[] | select(.port == 39000) | .settings.clients[] | select(.id == $uuid and .flow == "xtls-rprx-vision")
