@@ -75,7 +75,7 @@ The `routes` array points to shared inbound ports and transport metadata. Each u
 
 If the hidden seed profile exists but references ports that are no longer present in the live Xray config, the manager recreates `_bulk_seed` before generating a new batch.
 
-If existing bulk users reference stale ports and their subscription endpoint returns `410 Gone`, `bulk_repair_stale_users_core` rewrites those bulk-managed profile routes to the current seed routes, preserves `uuid`/`sub_token`, adds the UUIDs to live inbounds, and restarts Xray once.
+If existing users reference stale ports and their subscription endpoint returns `410 Gone`, `repair_stale_subscription_profiles_core` rewrites stale profile routes to the current seed routes, preserves `uuid`/`sub_token`, adds the UUIDs to live inbounds, and restarts Xray once. The `bulk-repair` CLI command remains a compatibility alias for this broader repair path.
 
 The manager prints generated URLs immediately after successful creation:
 

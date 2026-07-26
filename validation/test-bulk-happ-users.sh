@@ -177,11 +177,12 @@ type _bulk_seed_ready >/dev/null 2>&1 || fail "missing _bulk_seed_ready"
 type _bulk_list_batches >/dev/null 2>&1 || fail "missing _bulk_list_batches"
 type _bulk_select_batch_for_print >/dev/null 2>&1 || fail "missing _bulk_select_batch_for_print"
 type bulk_repair_stale_users_core >/dev/null 2>&1 || fail "missing bulk_repair_stale_users_core"
+type repair_stale_subscription_profiles_core >/dev/null 2>&1 || fail "missing repair_stale_subscription_profiles_core"
 type _list_visible_profile_names >/dev/null 2>&1 || fail "missing _list_visible_profile_names"
 
 ! grep -q '^BULK_DIR=' xraytailscale || fail "BULK_DIR constant should not be required for print-only output"
 grep -q '10) bulk_happ_users_menu' xraytailscale || fail "main menu option 10 must route to bulk HAPP users"
-grep -q 'bulk-repair)' xraytailscale || fail "CLI must expose bulk-repair subcommand"
+grep -q 'bulk-repair|subscription-repair)' xraytailscale || fail "CLI must expose bulk-repair and subscription-repair subcommands"
 grep -q 'Show/print user URLs' xraytailscale || fail "bulk menu must expose print URLs action"
 grep -q '_bulk_select_batch_for_print' xraytailscale || fail "bulk menu must use numbered batch selection"
 ! grep -q 'Batch ID для вывода URL' xraytailscale || fail "bulk menu must not require typing batch id manually"
@@ -260,8 +261,36 @@ cat > "$PROFILES_DIR/legacy-001.json" <<'JSON'
 }
 JSON
 
-bulk_repair_stale_users_core >/dev/null
-[[ "$SAFE_RESTART_COUNT" == "1" ]] || fail "stale bulk user repair must restart Xray once"
+cat > "$PROFILES_DIR/regular-001.json" <<'JSON'
+{
+  "name": "regular-001",
+  "uuid": "44444444-4444-4444-8444-444444444444",
+  "schema_version": 3,
+  "multi_route": true,
+  "primary_route": "stale-xhttp",
+  "sub_token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "created": "2026-07-24 12:25:00",
+  "routes": [
+    {
+      "label": "stale-xhttp",
+      "transport": "xhttp",
+      "port": 58888,
+      "sni": "www.ozon.ru",
+      "fingerprint": "chrome",
+      "xhttp_path": "/xhttp-stale-regular"
+    }
+  ],
+  "transport": "xhttp",
+  "port": 58888,
+  "fingerprint": "chrome",
+  "sni": "www.ozon.ru",
+  "xhttp_path": "/xhttp-stale-regular",
+  "pq_enabled": false
+}
+JSON
+
+repair_stale_subscription_profiles_core >/dev/null
+[[ "$SAFE_RESTART_COUNT" == "1" ]] || fail "stale subscription profile repair must restart Xray once"
 jq -e --slurpfile cfg "$CONFIG_FILE" '
   .name == "legacy-001"
   and .uuid == "33333333-3333-4333-8333-333333333333"
@@ -271,14 +300,29 @@ jq -e --slurpfile cfg "$CONFIG_FILE" '
   and all((.routes // [])[]; .port as $p | any($cfg[0].inbounds[]?; .port == $p))
   and .port == .routes[0].port
 ' "$PROFILES_DIR/legacy-001.json" >/dev/null || fail "stale bulk user must be synced to live seed routes without changing credentials"
+jq -e --slurpfile cfg "$CONFIG_FILE" '
+  .name == "regular-001"
+  and .uuid == "44444444-4444-4444-8444-444444444444"
+  and .sub_token == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  and (.bulk_managed // false) == false
+  and (.routes | length == 2)
+  and all((.routes // [])[]; .port as $p | any($cfg[0].inbounds[]?; .port == $p))
+  and .port == .routes[0].port
+' "$PROFILES_DIR/regular-001.json" >/dev/null || fail "ordinary stale subscription profile must be synced to live seed routes without changing credentials"
 for port in 37174 39000; do
   jq -e --argjson port "$port" '
     .inbounds[] | select(.port == $port) | .settings.clients[] | select(.id == "33333333-3333-4333-8333-333333333333")
   ' "$CONFIG_FILE" >/dev/null || fail "repaired bulk user UUID must be added to live inbound $port"
+  jq -e --argjson port "$port" '
+    .inbounds[] | select(.port == $port) | .settings.clients[] | select(.id == "44444444-4444-4444-8444-444444444444")
+  ' "$CONFIG_FILE" >/dev/null || fail "repaired ordinary profile UUID must be added to live inbound $port"
 done
 legacy_urls=$(XRAYTAILSCALE_SERVER_ADDR_OVERRIDE="vpn.example.com" _generate_vless_urls_for_profile "$PROFILES_DIR/legacy-001.json") \
   || fail "repaired bulk user subscription must generate live VLESS URLs"
 grep -q '^vless://' <<< "$legacy_urls" || fail "repaired bulk user subscription must generate live VLESS URLs"
+regular_urls=$(XRAYTAILSCALE_SERVER_ADDR_OVERRIDE="vpn.example.com" _generate_vless_urls_for_profile "$PROFILES_DIR/regular-001.json") \
+  || fail "repaired ordinary subscription must generate live VLESS URLs"
+grep -q '^vless://' <<< "$regular_urls" || fail "repaired ordinary subscription must generate live VLESS URLs"
 SAFE_RESTART_COUNT=0
 
 generate_output_file="$WORKDIR/generate.out"
@@ -306,7 +350,7 @@ done
   || fail "generated users must have unique UUIDs"
 [[ "$(jq -r '.sub_token' "$PROFILES_DIR/user-001.json")" != "$(jq -r '.sub_token' "$PROFILES_DIR/user-002.json")" ]] \
   || fail "generated users must have unique sub_tokens"
-[[ "$(_list_visible_profile_names | wc -l | tr -d ' ')" == "4" ]] \
+[[ "$(_list_visible_profile_names | wc -l | tr -d ' ')" == "5" ]] \
   || fail "visible profile list must include repaired and generated users but hide bulk seed"
 ! _list_visible_profile_names | grep -q '^_bulk_seed$' || fail "bulk seed became visible after generation"
 bulk_batches=$(_bulk_list_batches)
@@ -317,8 +361,8 @@ _bulk_select_batch_for_print < <(printf '2\n') >/dev/null
 [[ "$SELECTED_BULK_BATCH" == "bulk-test" ]] || fail "batch selection by number must set selected batch"
 
 for port in 37174 39000; do
-  [[ "$(jq -r --argjson port "$port" '.inbounds[] | select(.port == $port) | .settings.clients | length' "$CONFIG_FILE")" == "5" ]] \
-    || fail "port $port must have seed plus repaired legacy user plus three generated clients"
+  [[ "$(jq -r --argjson port "$port" '.inbounds[] | select(.port == $port) | .settings.clients | length' "$CONFIG_FILE")" == "6" ]] \
+    || fail "port $port must have seed plus two repaired profiles plus three generated clients"
 done
 jq -e --arg uuid "$(jq -r '.uuid' "$PROFILES_DIR/user-001.json")" '
   .inbounds[] | select(.port == 39000) | .settings.clients[] | select(.id == $uuid and .flow == "xtls-rprx-vision")

@@ -4451,12 +4451,29 @@ _bulk_sync_user_profile_to_seed_routes() {
   ' "$profile_file"
 }
 
-bulk_repair_stale_users_core() {
+_repair_stale_subscription_profiles_core() {
+  local scope="${1:-bulk}"
+  local repair_label="stale bulk users"
+  local backup_label="bulk_repair_stale_users"
+  local tmp_prefix="bulk-repair"
+  if [[ "$scope" == "all" ]]; then
+    repair_label="stale subscription profiles"
+    backup_label="subscription_repair_stale_profiles"
+    tmp_prefix="subscription-repair"
+  fi
+
   local repair_profiles=()
-  local pf live_count
+  local pf live_count token uuid
   for pf in "$PROFILES_DIR"/*.json; do
     [[ -f "$pf" ]] || continue
-    jq -e '.bulk_managed == true and .bulk_seed != true' "$pf" >/dev/null 2>&1 || continue
+    _profile_is_bulk_seed_file "$pf" && continue
+    if [[ "$scope" == "bulk" ]]; then
+      jq -e '.bulk_managed == true and .bulk_seed != true' "$pf" >/dev/null 2>&1 || continue
+    else
+      token=$(jq -r '.sub_token // ""' "$pf" 2>/dev/null)
+      uuid=$(jq -r '.uuid // ""' "$pf" 2>/dev/null)
+      [[ "$token" =~ ^[a-f0-9]{32}$ && "$uuid" =~ ^[0-9a-fA-F-]{36}$ ]] || continue
+    fi
     live_count=$(_profile_live_route_count "$pf" 2>/dev/null || true)
     live_count="${live_count##*$'\n'}"
     if [[ "$live_count" =~ ^[0-9]+$ && "$live_count" -eq 0 ]]; then
@@ -4476,11 +4493,11 @@ bulk_repair_stale_users_core() {
     return 1
   fi
 
-  backup_config "bulk_repair_stale_users" || return 1
+  backup_config "$backup_label" || return 1
 
   local backup_dir users_tmp
-  backup_dir=$(mktemp -d /tmp/xraytailscale-bulk-repair.XXXXXX) || return 1
-  users_tmp=$(mktemp /tmp/xraytailscale-bulk-repair-users.XXXXXX) || {
+  backup_dir=$(mktemp -d "/tmp/xraytailscale-${tmp_prefix}.XXXXXX") || return 1
+  users_tmp=$(mktemp "/tmp/xraytailscale-${tmp_prefix}-users.XXXXXX") || {
     rm -rf "$backup_dir"
     return 1
   }
@@ -4489,14 +4506,15 @@ bulk_repair_stale_users_core() {
     cp "$pf" "$backup_dir/$(basename "$pf")" || {
       rm -rf "$backup_dir"
       rm -f "$users_tmp"
-      echo -e "${RED}✗ Не удалось сохранить backup stale bulk profile${NC}"
+      echo -e "${RED}✗ Не удалось сохранить backup ${repair_label}${NC}"
       return 1
     }
   done
 
-  local name uuid
+  local name
   for pf in "${repair_profiles[@]}"; do
     name=$(jq -r '.name // empty' "$pf" 2>/dev/null)
+    [[ -z "$name" ]] && name=$(basename "$pf" .json)
     uuid=$(jq -r '.uuid // empty' "$pf" 2>/dev/null)
     if [[ -z "$name" || ! "$uuid" =~ ^[0-9a-fA-F-]{36}$ ]]; then
       for pf in "${repair_profiles[@]}"; do
@@ -4504,7 +4522,7 @@ bulk_repair_stale_users_core() {
       done
       rm -rf "$backup_dir"
       rm -f "$users_tmp"
-      echo -e "${RED}✗ Stale bulk profile без валидного name/UUID${NC}"
+      echo -e "${RED}✗ ${repair_label}: profile без валидного name/UUID${NC}"
       return 1
     fi
     if ! _bulk_sync_user_profile_to_seed_routes "$pf" "$routes_json"; then
@@ -4513,7 +4531,7 @@ bulk_repair_stale_users_core() {
       done
       rm -rf "$backup_dir"
       rm -f "$users_tmp"
-      echo -e "${RED}✗ Не удалось синхронизировать stale bulk profile routes${NC}"
+      echo -e "${RED}✗ Не удалось синхронизировать ${repair_label} routes${NC}"
       return 1
     fi
     jq -n --arg name "$name" --arg uuid "$uuid" '{name:$name, uuid:$uuid}' >> "$users_tmp" || {
@@ -4542,7 +4560,7 @@ bulk_repair_stale_users_core() {
     done
     rm -rf "$backup_dir"
     rm -f "$users_tmp"
-    echo -e "${RED}✗ Не удалось добавить repaired bulk UUID в live inbounds${NC}"
+    echo -e "${RED}✗ Не удалось добавить repaired UUID в live inbounds${NC}"
     return 1
   fi
 
@@ -4554,13 +4572,21 @@ bulk_repair_stale_users_core() {
     fix_xray_permissions
     rm -rf "$backup_dir"
     rm -f "$users_tmp"
-    echo -e "${RED}✗ Xray не принял repair stale bulk users — profile JSON восстановлены${NC}"
+    echo -e "${RED}✗ Xray не принял repair ${repair_label} — profile JSON восстановлены${NC}"
     return 1
   fi
 
   rm -rf "$backup_dir"
   rm -f "$users_tmp"
-  echo -e "${GREEN}✓ Stale bulk users восстановлены: ${#repair_profiles[@]}${NC}"
+  echo -e "${GREEN}✓ ${repair_label} восстановлены: ${#repair_profiles[@]}${NC}"
+}
+
+bulk_repair_stale_users_core() {
+  _repair_stale_subscription_profiles_core "bulk"
+}
+
+repair_stale_subscription_profiles_core() {
+  _repair_stale_subscription_profiles_core "all"
 }
 
 bulk_print_users_urls_core() {
@@ -8543,9 +8569,9 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
       shift
       probe_test_command
       ;;
-    bulk-repair)
+    bulk-repair|subscription-repair)
       shift
-      bulk_repair_stale_users_core
+      repair_stale_subscription_profiles_core
       ;;
     ""|menu)
       main_menu
@@ -8555,7 +8581,8 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
       echo -e "${YELLOW}Использование:${NC}"
       echo -e "  ${CYAN}sudo xraytailscale${NC}         — открыть меню"
       echo -e "  ${CYAN}sudo xraytailscale update${NC}  — обновить Xray-core"
-      echo -e "  ${CYAN}sudo xraytailscale bulk-repair${NC}  — восстановить stale bulk HAPP profiles"
+      echo -e "  ${CYAN}sudo xraytailscale subscription-repair${NC}  — восстановить stale HAPP profiles"
+      echo -e "  ${CYAN}sudo xraytailscale bulk-repair${NC}  — alias для subscription-repair"
       echo -e "  ${CYAN}sudo xraytailscale probe-test${NC}  — проверить доступность SNI с VPS"
       exit 1
       ;;

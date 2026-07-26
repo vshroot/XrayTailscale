@@ -131,11 +131,13 @@ Each user gets a unique `uuid` and `sub_token`, but all users reuse the same mul
 
 If the hidden `_bulk_seed` profile points to ports that no longer exist in the live Xray config, the manager recreates the seed automatically before generating a new batch.
 
-If existing bulk subscription URLs return `410 Gone`, repair stale bulk profiles without changing their URLs:
+If existing subscription URLs return `410 Gone`, repair stale HAPP profiles without changing their URLs:
 
 ```bash
-sudo xraytailscale bulk-repair
+sudo xraytailscale subscription-repair
 ```
+
+`bulk-repair` remains available as a compatibility alias.
 
 After generation the manager prints the generated subscription URLs immediately:
 
