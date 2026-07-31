@@ -70,18 +70,6 @@ journalctl --rotate > /dev/null 2>&1
 journalctl --vacuum-time=1s > /dev/null 2>&1
 echo -e "${GREEN}✓ Логи очищены${NC}\n"
 
-# Опционально: удаление BBR настроек
-echo -n -e "${YELLOW}Удалить настройки BBR из sysctl.conf? (y/N): ${NC}"
-read remove_bbr
-
-if [[ "$remove_bbr" =~ ^[yYдД]$ ]]; then
-    sed -i '/# BBR TCP Congestion Control Optimization/,/net.ipv4.tcp_wmem=4096 65536 2500000/d' /etc/sysctl.conf
-    sysctl -p > /dev/null 2>&1
-    echo -e "${GREEN}✓ Настройки BBR удалены${NC}\n"
-else
-    echo -e "${CYAN}✓ Настройки BBR оставлены${NC}\n"
-fi
-
 clear
 echo -e "${GREEN}"
 echo '═══════════════════════════════════════════════════════════'

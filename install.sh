@@ -700,38 +700,9 @@ fi
 echo -e "${GREEN}✓ Firewall настроен${NC}"
 echo -e "${CYAN}  Открытые порты: 22, 80, 443, 8443, 2053, 2083, 2087, 8080, 2096, 8880, 9443${NC}\n"
 
-# [8/10] Оптимизация TCP (BBR)
-echo -e "${BLUE}[8/10]${NC} ${YELLOW}Настройка BBR TCP Congestion Control...${NC}"
-if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
-  cat >> /etc/sysctl.conf << 'EOF'
-# BBR TCP Congestion Control Optimization
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
-net.ipv4.tcp_fastopen=3
-net.ipv4.tcp_slow_start_after_idle=0
-net.ipv4.tcp_notsent_lowat=16384
-net.ipv4.tcp_rmem=4096 87380 16777216
-net.ipv4.tcp_wmem=4096 65536 16777216
-net.core.rmem_max=16777216
-net.core.wmem_max=16777216
-net.core.rmem_default=1048576
-net.core.wmem_default=1048576
-net.ipv4.ip_local_port_range=1024 65535
-net.ipv4.tcp_max_tw_buckets=2000000
-net.ipv4.tcp_fin_timeout=10
-net.ipv4.tcp_keepalive_time=600
-net.ipv4.tcp_keepalive_intvl=30
-net.ipv4.tcp_keepalive_probes=3
-net.ipv4.tcp_mtu_probing=1
-net.ipv4.tcp_syncookies=1
-net.core.netdev_max_backlog=16384
-net.ipv4.tcp_max_syn_backlog=8192
-EOF
-  sysctl -p > /dev/null 2>&1
-  echo -e "${GREEN}✓ BBR включен и настроен${NC}\n"
-else
-  echo -e "${CYAN}✓ BBR уже настроен${NC}\n"
-fi
+# [8/10] Host TCP tuning
+echo -e "${BLUE}[8/10]${NC} ${YELLOW}Host TCP tuning не изменяется установщиком${NC}"
+echo -e "${CYAN}✓ Системные TCP/sysctl настройки оставлены под управлением оператора VPS${NC}\n"
 
 # [9/10] Загрузка данных
 echo -e "${BLUE}[9/10]${NC} ${YELLOW}Загрузка данных приложения...${NC}"

@@ -15,7 +15,9 @@ The project is designed for one-person or small private deployments. It installs
 - Optional Tailscale exit-node configuration.
 - Optional cascade routing through a separate upstream VLESS Reality node.
 - UFW firewall rules for SSH, HTTPS, subscription ports, and Xray routes.
-- BBR TCP tuning and geodata files for routing.
+- Geodata files for routing.
+
+XrayTailscale does not enable or rewrite host TCP/sysctl tuning on fresh installs. If an older project install left project-owned BBR tuning or a project-owned bare UDP/443 block in the Xray config, the manager migrates those legacy changes away while preserving operator-owned firewall and routing rules.
 
 ## Requirements
 
@@ -93,6 +95,8 @@ https://your-vps-ip/sub/<token>
 
 Import that URL into HAPP. The subscription endpoint serves a conservative text list of VLESS routes for HAPP and a v2ray-compatible base64 body for clients such as v2rayNG or v2rayN.
 
+The HAPP settings menu also lets you set a custom subscription server name. If it is empty, the generated HAPP profile uses the profile name.
+
 The generated multi-route profile can include:
 
 - TCP Reality / Vision route.
@@ -102,6 +106,8 @@ The generated multi-route profile can include:
 - XHTTP post-quantum route with `mlkem768x25519plus`.
 
 If the subscription URL leaks, revoke it from the HAPP subscription menu. Revocation rotates the profile token.
+
+HAPP routing JSON is optional. Enable it only when you need client-side routing rules from the subscription, because conflicting routing profiles in HAPP can override the client's local routing decisions.
 
 ## Bulk HAPP Users
 
@@ -205,6 +211,8 @@ On the main VPS, choose:
 
 Enter the upstream values, then enable cascade mode. XrayTailscale stores the upstream config in `/usr/local/etc/xray/upstreams/cascade.json`, adds `cascade-upstream` and `cascade-fragment` outbounds, and switches only the default catch-all `tcp,udp` route to the cascade outbound. Existing bypass rules stay above the catch-all rule and continue to go direct.
 
+You can also paste a complete upstream VLESS Reality URL instead of entering the fields manually. TCP Reality/Vision and XHTTP Reality upstream URLs are supported. When cascade mode is already enabled, changing the upstream immediately reapplies the live Xray config with rollback on failure.
+
 Disabling cascade removes the cascade outbounds and returns the catch-all route to `direct`. Existing client profiles, HAPP subscriptions, XHTTP paths, Reality keys, and Tailscale settings are not changed.
 
 ## Updates
@@ -220,6 +228,8 @@ Force update from the stable branch:
 ```bash
 sudo xraytailscale-update main
 ```
+
+The updater keeps an exact pre-update Xray config backup and restores it if post-update validation or restart fails.
 
 Update only Xray-core:
 
@@ -289,9 +299,14 @@ bash -n xraytailscale install.sh update.sh uninstall.sh
 bash validation/test-vless-url-generation.sh
 bash validation/test-bulk-happ-users.sh
 bash validation/test-cascade-routing.sh
+bash validation/test-happ-server-name.sh
 bash validation/test-happ-subscription-static.sh
+bash validation/test-host-network-cleanup.sh
 bash validation/test-multiroute-xhttp-path-generation.sh
+bash validation/test-project-update-rollback.sh
+bash validation/test-transaction-rollback-hardening.sh
 bash validation/test-xhttp-path-sync-migration.sh
+bash validation/test-xhttp-cascade-upstream-import.sh
 bash validation/test-update-xray-core-sync.sh
 bash validation/test-mutation-safety-static.sh
 bash validation/test-tailscale-exit-node-static.sh

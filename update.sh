@@ -320,13 +320,27 @@ fi
 echo -e "${YELLOW}Создание резервной копии...${NC}"
 BACKUP_DIR="/usr/local/etc/xray/backup_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+UPDATE_CONFIG_BACKUP="$BACKUP_DIR/config.json"
 cp /usr/local/bin/xraytailscale "$BACKUP_DIR/" 2>/dev/null
 cp -r /usr/local/etc/xray/profiles "$BACKUP_DIR/" 2>/dev/null
-cp /usr/local/etc/xray/config.json "$BACKUP_DIR/" 2>/dev/null
+cp /usr/local/etc/xray/config.json "$UPDATE_CONFIG_BACKUP" 2>/dev/null
 cp /usr/local/etc/xray/.private_key "$BACKUP_DIR/" 2>/dev/null
 cp /usr/local/etc/xray/.public_key "$BACKUP_DIR/" 2>/dev/null
 cp /usr/local/etc/xray/scripts/update.sh "$BACKUP_DIR/update.sh.bak" 2>/dev/null
 echo -e "${GREEN}✓ Резервная копия: $BACKUP_DIR${NC}\n"
+
+_restore_update_config_backup() {
+  if [[ ! -s "$UPDATE_CONFIG_BACKUP" ]]; then
+    echo -e "${RED}✗ Session backup config.json не найден: $UPDATE_CONFIG_BACKUP${NC}"
+    return 1
+  fi
+  echo -e "${YELLOW}Восстановление config.json из session backup...${NC}"
+  cp "$UPDATE_CONFIG_BACKUP" /usr/local/etc/xray/config.json || return 1
+  chown xray:xray /usr/local/etc/xray/config.json 2>/dev/null || true
+  chmod 600 /usr/local/etc/xray/config.json
+  echo -e "${GREEN}✓ config.json восстановлен из $UPDATE_CONFIG_BACKUP${NC}"
+}
 
 # Сохранение информации о текущей ветке
 echo "$GITHUB_BRANCH" > /usr/local/etc/xray/.current_branch 2>/dev/null
@@ -776,7 +790,11 @@ _cleanup_xray_backups() {
 # ═══════════════════════════════════════════════════════════
 
 # Force-uninstall AdGuard Home (deprecated в v2.0) — должен выполниться ПЕРЕД DNS migration.
-_adguard_force_uninstall_if_present
+if ! _adguard_force_uninstall_if_present; then
+  _restore_update_config_backup || true
+  echo -e "${RED}✗ AdGuard cleanup failed — update прерван, config.json восстановлен из session backup${NC}"
+  exit 1
+fi
 
 # ═══════════════════════════════════════════════════════════
 # МИГРАЦИЯ DNS (AdGuard для блокировки рекламы)
@@ -825,36 +843,6 @@ if [[ -f "$CONFIG_FILE" ]]; then
     echo -e "${GREEN}  ✓ AdGuard DNS уже настроен${NC}"
   fi
 
-  # Миграция: блокировка QUIC (UDP/443) для эффективной блокировки рекламы
-  echo -e "${YELLOW}Проверка блокировки QUIC...${NC}"
-  if ! jq -e '.routing.rules[] | select(.network == "udp" and .port == 443)' "$CONFIG_FILE" > /dev/null 2>&1; then
-    echo -e "${CYAN}  → Добавление блокировки QUIC (UDP/443)${NC}"
-
-    # Добавляем правило блокировки QUIC перед последним правилом (direct)
-    QUIC_RULE='{"type": "field", "network": "udp", "port": 443, "outboundTag": "block"}'
-
-    TMP_FILE=$(mktemp /tmp/xray-cfg.XXXXXX) || {
-      echo -e "${YELLOW}  ⚠ mktemp failed (QUIC правило пропущено)${NC}"
-      true
-    }
-    if [[ -n "$TMP_FILE" ]] && jq --argjson rule "$QUIC_RULE" '
-      .routing.rules = [.routing.rules[:-1][], $rule, .routing.rules[-1]]
-    ' "$CONFIG_FILE" > "$TMP_FILE" 2>/dev/null \
-       && [[ -s "$TMP_FILE" ]] \
-       && xray run -test -config "$TMP_FILE" 2>&1 | grep -q "^Configuration OK\.$"; then
-      mv "$TMP_FILE" "$CONFIG_FILE"
-      # Restore mode/owner (mktemp создаёт с mode 600, mv наследует root)
-      chmod 644 "$CONFIG_FILE"
-      chown xray:xray "$CONFIG_FILE" 2>/dev/null || true
-      echo -e "${GREEN}  ✓ QUIC заблокирован (реклама не сможет обойти DNS)${NC}"
-    else
-      rm -f "$TMP_FILE"
-      echo -e "${YELLOW}  ⚠ Не удалось добавить правило QUIC (size-check или xray test failed, конфиг без изменений)${NC}"
-    fi
-  else
-    echo -e "${GREEN}  ✓ QUIC уже заблокирован${NC}"
-  fi
-  echo ""
 fi
 
 # Перезапуск Xray (если работает)
@@ -864,16 +852,7 @@ if systemctl is-active --quiet xray; then
   # Guard #1: файл существует и не пуст
   if [[ ! -f /usr/local/etc/xray/config.json || ! -s /usr/local/etc/xray/config.json ]]; then
     echo -e "${RED}✗ config.json отсутствует или пуст после миграций${NC}"
-    LATEST_BACKUP=$(ls -t /usr/local/etc/xray/backups/config.json.* 2>/dev/null | head -1)
-    if [[ -n "$LATEST_BACKUP" && -s "$LATEST_BACKUP" ]]; then
-      echo -e "${YELLOW}Восстановление из $LATEST_BACKUP...${NC}"
-      cp "$LATEST_BACKUP" /usr/local/etc/xray/config.json
-      chown xray:xray /usr/local/etc/xray/config.json
-      chmod 644 /usr/local/etc/xray/config.json
-      echo -e "${GREEN}✓ config.json восстановлен из backup${NC}"
-    else
-      echo -e "${RED}✗ Backup не найден в /usr/local/etc/xray/backups/${NC}"
-    fi
+    _restore_update_config_backup || true
     echo -e "${RED}Update прерван. Xray продолжает работать на старом конфиге.${NC}"
     exit 1
   fi
@@ -884,19 +863,8 @@ if systemctl is-active --quiet xray; then
     echo -e "${YELLOW}Вывод xray:${NC}"
     xray run -test -config /usr/local/etc/xray/config.json 2>&1 | head -20
 
-    # Restore latest backup (REQ-D04)
-    LATEST_BACKUP=$(ls -t /usr/local/etc/xray/backups/config.json.* 2>/dev/null | head -1)
-    if [[ -n "$LATEST_BACKUP" && -s "$LATEST_BACKUP" ]]; then
-      echo -e "${YELLOW}Восстановление из $LATEST_BACKUP...${NC}"
-      cp "$LATEST_BACKUP" /usr/local/etc/xray/config.json
-      chown xray:xray /usr/local/etc/xray/config.json
-      chmod 644 /usr/local/etc/xray/config.json
-      echo -e "${GREEN}✓ config.json восстановлен из backup${NC}"
-      echo -e "${RED}Update прерван. Xray продолжает работать на старом конфиге.${NC}"
-    else
-      echo -e "${RED}✗ Backup не найден в /usr/local/etc/xray/backups/${NC}"
-      echo -e "${RED}Update прерван. Конфиг возможно повреждён, проверьте вручную.${NC}"
-    fi
+    _restore_update_config_backup || true
+    echo -e "${RED}Update прерван. Xray продолжает работать на старом конфиге.${NC}"
     exit 1
   fi
   echo -e "${GREEN}✓ config.json прошёл validation${NC}"
@@ -909,7 +877,10 @@ if systemctl is-active --quiet xray; then
     echo -e "${GREEN}✓ Xray перезапущен${NC}\n"
   else
     echo -e "${RED}✗ Ошибка перезапуска Xray${NC}"
+    _restore_update_config_backup || true
+    systemctl restart xray >/dev/null 2>&1 || true
     echo -e "${YELLOW}Логи: journalctl -u xray -n 50${NC}\n"
+    exit 1
   fi
 fi
 

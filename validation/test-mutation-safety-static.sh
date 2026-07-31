@@ -71,38 +71,38 @@ extract_fn xraytailscale main_menu > "$tmpdir/main_menu"
 
 echo "Checking operator mutation safety invariants"
 
-assert_contains "$tmpdir/delete_profile_menu" 'backup_config "delete_profile_$profile_name"'
-assert_contains "$tmpdir/delete_profile_menu" 'if safe_restart_xray; then'
-assert_order "$tmpdir/delete_profile_menu" 'backup_config "delete_profile_$profile_name"' 'if safe_restart_xray; then'
-assert_order "$tmpdir/delete_profile_menu" 'if safe_restart_xray; then' 'rm -f "$profile_file"'
-assert_order "$tmpdir/delete_profile_menu" 'if safe_restart_xray; then' 'rm -f "$PROFILES_DIR/$profile_name.json"'
-assert_order "$tmpdir/delete_profile_menu" 'if safe_restart_xray; then' 'close_firewall_port "$p"'
-assert_order "$tmpdir/delete_profile_menu" 'if safe_restart_xray; then' 'close_firewall_port "$port"'
+assert_contains "$tmpdir/delete_profile_menu" 'backup_config "delete_profile_$profile_name" rollback_config'
+assert_contains "$tmpdir/delete_profile_menu" 'if safe_restart_xray "$rollback_config"; then'
+assert_order "$tmpdir/delete_profile_menu" 'backup_config "delete_profile_$profile_name" rollback_config' 'if safe_restart_xray "$rollback_config"; then'
+assert_order "$tmpdir/delete_profile_menu" 'if safe_restart_xray "$rollback_config"; then' 'rm -f "$profile_file"'
+assert_order "$tmpdir/delete_profile_menu" 'if safe_restart_xray "$rollback_config"; then' 'rm -f "$PROFILES_DIR/$profile_name.json"'
+assert_order "$tmpdir/delete_profile_menu" 'if safe_restart_xray "$rollback_config"; then' 'close_firewall_port "$p"'
+assert_order "$tmpdir/delete_profile_menu" 'if safe_restart_xray "$rollback_config"; then' 'close_firewall_port "$port"'
 echo "  ok delete_profile_menu"
 
-assert_contains "$tmpdir/change_sni_menu" 'backup_config "change_sni_$selected"'
-assert_contains "$tmpdir/change_sni_menu" 'if ! safe_restart_xray; then'
-assert_order "$tmpdir/change_sni_menu" 'update_transport_settings_for_sni "$port" "$new_sni" "$CONFIG_FILE"' 'if ! safe_restart_xray; then'
-assert_order "$tmpdir/change_sni_menu" 'if ! safe_restart_xray; then' 'update_all_profiles_on_port "$port" "sni" "$new_sni"'
-assert_not_contains "$tmpdir/change_sni_menu" '  safe_restart_xray'
+assert_contains "$tmpdir/change_sni_menu" 'backup_config "change_sni_$selected" rollback_config'
+assert_contains "$tmpdir/change_sni_menu" 'if ! safe_restart_xray "$rollback_config"; then'
+assert_order "$tmpdir/change_sni_menu" 'update_transport_settings_for_sni "$port" "$new_sni" "$CONFIG_FILE"' 'if ! safe_restart_xray "$rollback_config"; then'
+assert_order "$tmpdir/change_sni_menu" 'if ! safe_restart_xray "$rollback_config"; then' 'update_all_profiles_on_port "$port" "sni" "$new_sni"'
+assert_not_contains "$tmpdir/change_sni_menu" 'safe_restart_xray;'
 echo "  ok change_sni_menu"
 
-assert_contains "$tmpdir/change_fingerprint_menu" 'backup_config "change_fingerprint_$selected"'
-assert_contains "$tmpdir/change_fingerprint_menu" 'if ! safe_restart_xray; then'
-assert_order "$tmpdir/change_fingerprint_menu" 'select(.port == $port) | .streamSettings.realitySettings.fingerprint' 'if ! safe_restart_xray; then'
-assert_order "$tmpdir/change_fingerprint_menu" 'if ! safe_restart_xray; then' 'update_all_profiles_on_port "$port" "fingerprint" "$new_fp"'
-assert_not_contains "$tmpdir/change_fingerprint_menu" '  safe_restart_xray'
+assert_contains "$tmpdir/change_fingerprint_menu" 'backup_config "change_fingerprint_$selected" rollback_config'
+assert_contains "$tmpdir/change_fingerprint_menu" 'if ! safe_restart_xray "$rollback_config"; then'
+assert_order "$tmpdir/change_fingerprint_menu" 'select(.port == $port) | .streamSettings.realitySettings.fingerprint' 'if ! safe_restart_xray "$rollback_config"; then'
+assert_order "$tmpdir/change_fingerprint_menu" 'if ! safe_restart_xray "$rollback_config"; then' 'update_all_profiles_on_port "$port" "fingerprint" "$new_fp"'
+assert_not_contains "$tmpdir/change_fingerprint_menu" 'safe_restart_xray;'
 echo "  ok change_fingerprint_menu"
 
-assert_contains "$tmpdir/change_port_menu" 'backup_config "change_port_$profile_name"'
-assert_contains "$tmpdir/change_port_menu" 'if ! safe_restart_xray; then'
-assert_order "$tmpdir/change_port_menu" 'backup_config "change_port_$profile_name"' 'if ! safe_restart_xray; then'
-assert_order "$tmpdir/change_port_menu" 'if ! safe_restart_xray; then' 'update_all_profiles_port_reference "$old_port" "$new_port"'
-assert_order "$tmpdir/change_port_menu" 'if ! safe_restart_xray; then' 'close_firewall_port "$old_port"'
-assert_not_contains "$tmpdir/change_port_menu" '  safe_restart_xray'
+assert_contains "$tmpdir/change_port_menu" 'backup_config "change_port_$profile_name" rollback_config'
+assert_contains "$tmpdir/change_port_menu" 'if ! safe_restart_xray "$rollback_config"; then'
+assert_order "$tmpdir/change_port_menu" 'backup_config "change_port_$profile_name" rollback_config' 'if ! safe_restart_xray "$rollback_config"; then'
+assert_order "$tmpdir/change_port_menu" 'if ! safe_restart_xray "$rollback_config"; then' 'update_all_profiles_port_reference "$old_port" "$new_port"'
+assert_order "$tmpdir/change_port_menu" 'if ! safe_restart_xray "$rollback_config"; then' 'close_firewall_port "$old_port"'
+assert_not_contains "$tmpdir/change_port_menu" 'safe_restart_xray;'
 echo "  ok change_port_menu"
 
-assert_order "$tmpdir/upgrade_profile_to_pq_menu" 'if ! safe_restart_xray; then' "'.transport = \"xhttp\" | .schema_version = 2 | .pq_enabled = true | .xhttp_path = \$path'"
+assert_order "$tmpdir/upgrade_profile_to_pq_menu" 'if ! safe_restart_xray "$rollback_config"; then' "'.transport = \"xhttp\" | .schema_version = 2 | .pq_enabled = true | .xhttp_path = \$path'"
 assert_not_contains "$tmpdir/upgrade_profile_to_pq_menu" 'Profile JSON МОЖЕТ'
 echo "  ok upgrade_profile_to_pq_menu"
 

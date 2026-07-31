@@ -21,6 +21,8 @@ CONFIG_FILE="/usr/local/etc/xray/config.json"
 PROFILES_DIR="/usr/local/etc/xray/profiles"
 DATA_DIR="/usr/local/etc/xray/data"
 UPSTREAMS_DIR="/usr/local/etc/xray/upstreams"
+XRAY_BACKUPS_DIR="/usr/local/etc/xray/backups"
+XRAY_BIN="/usr/local/bin/xray"
 PRIVATE_KEY_FILE="/usr/local/etc/xray/.private_key"
 PUBLIC_KEY_FILE="/usr/local/etc/xray/.public_key"
 VLESS_DECRYPTION_FILE="/usr/local/etc/xray/.vless_decryption"
@@ -29,6 +31,13 @@ SNI_LIST="$DATA_DIR/sni_list.txt"
 ASCII_ART="$DATA_DIR/ascii_art.txt"
 TAILSCALE_SYSCTL_FILE="/etc/sysctl.d/99-xraytailscale-tailscale.conf"
 CASCADE_ACTIVE_FILE="/usr/local/etc/xray/.cascade_active"
+LEGACY_TCP_TUNING_FILE="/etc/sysctl.d/99-xraytailscale-tcp.conf"
+LEGACY_XRAYEBATOR_TCP_TUNING_FILE="/etc/sysctl.d/99-xrayebator-tcp.conf"
+SYSTEM_SYSCTL_CONF="/etc/sysctl.conf"
+TCP_CC_ACTIVE_FILE="/proc/sys/net/ipv4/tcp_congestion_control"
+TCP_CC_AVAILABLE_FILE="/proc/sys/net/ipv4/tcp_available_congestion_control"
+HOST_TUNING_MIGRATION_MARKER="/usr/local/etc/xray/.host_tcp_tuning_removed_v3"
+SYSCTL_SCAN_PATHS="/etc/sysctl.conf:/etc/sysctl.d:/usr/lib/sysctl.d:/lib/sysctl.d"
 GITHUB_USER="${GITHUB_USER:-vshroot}"
 GITHUB_REPO="${GITHUB_REPO:-XrayTailscale}"
 GITHUB_BRANCH="${GITHUB_BRANCH:-main}"
@@ -752,23 +761,94 @@ safe_jq_write() {
   fi
 }
 
-# Создание бэкапа config.json перед миграцией
-# Args: $1=migration_name (optional, for logging)
+# Создание бэкапа config.json перед мутацией.
+# Args: $1=operation_name, $2=optional caller variable receiving the exact path.
 backup_config() {
-  local migration_name=${1:-"manual"}
-  local backup_dir="/usr/local/etc/xray/backups"
+  local operation_name=${1:-"manual"}
+  local result_var=${2:-}
+  local backup_dir="$XRAY_BACKUPS_DIR"
+  local safe_operation_name
+
+  if [[ -n "$result_var" && ! "$result_var" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    echo -e "${RED}  ✗ Некорректное имя переменной результата backup_config${NC}"
+    return 1
+  fi
+  [[ -n "$result_var" ]] && printf -v "$result_var" '%s' ""
+
+  safe_operation_name=$(printf '%s' "$operation_name" | tr -c 'a-zA-Z0-9_.-' '_')
   mkdir -p "$backup_dir"
   chmod 700 "$backup_dir" 2>/dev/null
   chown xray:xray "$backup_dir" 2>/dev/null
-  local backup_file="$backup_dir/config_$(date +%Y%m%d_%H%M%S)_${migration_name}.json"
+  local backup_file="$backup_dir/config_$(date +%Y%m%d_%H%M%S)_$$_${RANDOM}_${safe_operation_name}.json"
   if ! cp "$CONFIG_FILE" "$backup_file"; then
     echo -e "${RED}  ✗ Не удалось создать бэкап config.json: $backup_file${NC}"
     return 1
   fi
   chmod 600 "$backup_file" 2>/dev/null
   chown xray:xray "$backup_file" 2>/dev/null
+  [[ -n "$result_var" ]] && printf -v "$result_var" '%s' "$backup_file"
   echo -e "${CYAN}  -> Бэкап конфига: $(basename "$backup_file")${NC}"
   return 0
+}
+
+_restore_config_backup() {
+  local backup_file=${1:-}
+
+  if [[ -z "$backup_file" || ! -f "$backup_file" || ! -s "$backup_file" ]]; then
+    echo -e "${RED}  ✗ Точный бэкап для отката отсутствует: ${backup_file:-не задан}${NC}"
+    return 1
+  fi
+  if ! cp "$backup_file" "$CONFIG_FILE"; then
+    echo -e "${RED}  ✗ Не удалось восстановить config.json из $(basename "$backup_file")${NC}"
+    return 1
+  fi
+  chmod 600 "$CONFIG_FILE" 2>/dev/null
+  chown xray:xray "$CONFIG_FILE" 2>/dev/null
+  echo -e "${GREEN}  ✓ Конфиг восстановлен из: $(basename "$backup_file")${NC}"
+  return 0
+}
+
+_snapshot_profiles() {
+  local result_var=${1:-}
+  local snapshot_dir
+
+  if [[ ! "$result_var" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    echo -e "${RED}  ✗ Некорректное имя переменной результата _snapshot_profiles${NC}"
+    return 1
+  fi
+  printf -v "$result_var" '%s' ""
+
+  snapshot_dir=$(mktemp -d /tmp/xraytailscale-profiles.XXXXXX) || return 1
+  if [[ -d "$PROFILES_DIR" ]] && ! cp -a "$PROFILES_DIR/." "$snapshot_dir/"; then
+    rm -rf -- "$snapshot_dir"
+    echo -e "${RED}  ✗ Не удалось создать снимок profile JSON${NC}"
+    return 1
+  fi
+  printf -v "$result_var" '%s' "$snapshot_dir"
+  return 0
+}
+
+_restore_profiles_snapshot() {
+  local snapshot_dir=${1:-}
+
+  if [[ "$snapshot_dir" != /tmp/xraytailscale-profiles.* || ! -d "$snapshot_dir" ]]; then
+    echo -e "${RED}  ✗ Некорректный снимок profile JSON: ${snapshot_dir:-не задан}${NC}"
+    return 1
+  fi
+  mkdir -p "$PROFILES_DIR"
+  if ! cp -a "$snapshot_dir/." "$PROFILES_DIR/"; then
+    echo -e "${RED}  ✗ Не удалось восстановить profile JSON${NC}"
+    return 1
+  fi
+  echo -e "${GREEN}  ✓ Profile JSON восстановлены${NC}"
+  return 0
+}
+
+_discard_profiles_snapshot() {
+  local snapshot_dir=${1:-}
+  if [[ "$snapshot_dir" == /tmp/xraytailscale-profiles.* && -d "$snapshot_dir" ]]; then
+    rm -rf -- "$snapshot_dir"
+  fi
 }
 
 ensure_xray_runtime_user() {
@@ -851,41 +931,30 @@ SVCEOF
   return 1
 }
 
-# Безопасный перезапуск Xray с валидацией конфига
+# Безопасный перезапуск Xray с валидацией конфига.
+# Args: $1=exact rollback config backup path.
 # Returns: 0=success, 1=failure (validation/restart failed; rollback attempted)
 safe_restart_xray() {
-  if [[ ! -x /usr/local/bin/xray ]]; then
-    echo -e "${RED}  ✗ Бинарник /usr/local/bin/xray не найден${NC}"
+  local rollback_config=${1:-}
+
+  if [[ ! -x "$XRAY_BIN" ]]; then
+    echo -e "${RED}  ✗ Бинарник $XRAY_BIN не найден${NC}"
     return 1
   fi
 
   if [[ ! -f "$CONFIG_FILE" || ! -s "$CONFIG_FILE" ]]; then
     echo -e "${RED}  ✗ config.json отсутствует или пустой — Xray НЕ перезапущен${NC}"
-    local latest_backup
-    latest_backup=$(ls -t /usr/local/etc/xray/backups/config_*.json 2>/dev/null | head -1)
-    if [[ -n "$latest_backup" ]]; then
-      echo -e "${YELLOW}  -> Восстанавливаю конфиг из бэкапа...${NC}"
-      cp "$latest_backup" "$CONFIG_FILE"
-      echo -e "${GREEN}  ✓ Конфиг восстановлен из: $(basename "$latest_backup")${NC}"
-    fi
+    _restore_config_backup "$rollback_config" || true
     return 1
   fi
 
   local test_output
-  test_output=$(/usr/local/bin/xray run -test -config "$CONFIG_FILE" 2>&1)
+  test_output=$("$XRAY_BIN" run -test -format json -config "$CONFIG_FILE" 2>&1)
 
   if ! grep -qx "Configuration OK." <<< "$test_output"; then
     echo -e "${RED}  ✗ Конфиг не прошёл валидацию -- Xray НЕ перезапущен${NC}"
     echo -e "${YELLOW}  Ошибка: ${test_output}${NC}"
-
-    # Rollback: restore from latest backup if exists
-    local latest_backup
-    latest_backup=$(ls -t /usr/local/etc/xray/backups/config_*.json 2>/dev/null | head -1)
-    if [[ -n "$latest_backup" ]]; then
-      echo -e "${YELLOW}  -> Восстанавливаю конфиг из бэкапа...${NC}"
-      cp "$latest_backup" "$CONFIG_FILE"
-      echo -e "${GREEN}  ✓ Конфиг восстановлен из: $(basename "$latest_backup")${NC}"
-    fi
+    _restore_config_backup "$rollback_config" || true
     return 1
   fi
 
@@ -901,15 +970,12 @@ safe_restart_xray() {
     return 0
   else
     echo -e "${RED}  ✗ Xray не запустился после перезапуска${NC}"
-    local latest_backup
-    latest_backup=$(ls -t /usr/local/etc/xray/backups/config_*.json 2>/dev/null | head -1)
-    if [[ -n "$latest_backup" ]]; then
-      echo -e "${YELLOW}  -> Откатываю config.json и пробую вернуть старую конфигурацию...${NC}"
-      cp "$latest_backup" "$CONFIG_FILE"
+    if _restore_config_backup "$rollback_config"; then
+      echo -e "${YELLOW}  -> Пробую вернуть старую конфигурацию...${NC}"
       systemctl restart xray
       sleep 1
       if systemctl is-active --quiet xray; then
-        echo -e "${GREEN}  ✓ Xray восстановлен на предыдущем конфиге: $(basename "$latest_backup")${NC}"
+        echo -e "${GREEN}  ✓ Xray восстановлен на предыдущем конфиге${NC}"
       else
         echo -e "${RED}  ✗ Откат конфига не поднял Xray — требуется ручная проверка${NC}"
       fi
@@ -1109,6 +1175,242 @@ update_all_profiles_port_reference() {
   [[ "$ok" == "true" ]]
 }
 
+_is_known_legacy_tcp_tuning_file() {
+  local path="$1"
+  [[ -f "$path" && ! -L "$path" ]] || return 1
+
+  local content minimal_xts minimal_xeb
+  content=$(<"$path") || return 1
+  minimal_xts=$'# XrayTailscale minimal TCP tuning\nnet.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr'
+  minimal_xeb=$'# Xrayebator minimal TCP tuning\nnet.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr'
+
+  [[ "$content" == "$minimal_xts" || "$content" == "$minimal_xeb" ]]
+}
+
+_strip_legacy_tcp_tuning_block() {
+  local source_file="$1"
+  local target_file="$2"
+
+  awk '
+    function is_known_key(line) {
+      return line ~ /^net\.(core\.(default_qdisc|rmem_max|wmem_max|rmem_default|wmem_default|netdev_max_backlog)|ipv4\.(tcp_congestion_control|tcp_fastopen|tcp_slow_start_after_idle|tcp_notsent_lowat|tcp_rmem|tcp_wmem|ip_local_port_range|tcp_max_tw_buckets|tcp_fin_timeout|tcp_keepalive_time|tcp_keepalive_intvl|tcp_keepalive_probes|tcp_mtu_probing|tcp_syncookies|tcp_max_syn_backlog))=/
+    }
+    $0 == "# BBR TCP Congestion Control Optimization" {
+      if (inside || found) {
+        bad = 1
+      }
+      inside = 1
+      found = 1
+      next
+    }
+    inside && is_known_key($0) { next }
+    inside && $0 ~ /^[[:space:]]*$/ {
+      inside = 0
+      next
+    }
+    inside {
+      bad = 1
+      inside = 0
+    }
+    { print }
+    END {
+      if (bad) {
+        exit 2
+      }
+      if (!found) {
+        exit 1
+      }
+    }
+  ' "$source_file" > "$target_file"
+}
+
+_find_persistent_bbr_sources() {
+  local scan_paths="${1:-$SYSCTL_SCAN_PATHS}"
+  local -a paths
+  local path candidate
+  IFS=':' read -r -a paths <<< "$scan_paths"
+
+  for path in "${paths[@]}"; do
+    if [[ -f "$path" && ! -L "$path" ]]; then
+      if grep -Eq '^[[:space:]]*net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr([[:space:]]*(#.*)?)?$' "$path"; then
+        printf '%s\n' "$path"
+      fi
+      continue
+    fi
+    [[ -d "$path" && ! -L "$path" ]] || continue
+    for candidate in "$path"/*.conf; do
+      [[ -f "$candidate" && ! -L "$candidate" ]] || continue
+      if grep -Eq '^[[:space:]]*net\.ipv4\.tcp_congestion_control[[:space:]]*=[[:space:]]*bbr([[:space:]]*(#.*)?)?$' "$candidate"; then
+        printf '%s\n' "$candidate"
+      fi
+    done
+  done
+}
+
+migrate_remove_legacy_tcp_tuning_v3() {
+  local marker="${1:-$HOST_TUNING_MIGRATION_MARKER}"
+  local legacy_file="${2:-$LEGACY_TCP_TUNING_FILE}"
+  local sysctl_conf="${3:-$SYSTEM_SYSCTL_CONF}"
+  local active_file="${4:-$TCP_CC_ACTIVE_FILE}"
+  local available_file="${5:-$TCP_CC_AVAILABLE_FILE}"
+  local scan_paths="${6:-$SYSCTL_SCAN_PATHS}"
+  local expected_uid="${7:-0}"
+
+  if [[ -L "$marker" ]]; then
+    echo -e "${RED}  ✗ Migration marker не должен быть symlink: $marker${NC}"
+    return 1
+  fi
+  [[ -f "$marker" ]] && return 0
+  if [[ -e "$marker" ]]; then
+    echo -e "${RED}  ✗ Migration marker имеет неожиданный тип: $marker${NC}"
+    return 1
+  fi
+
+  echo -e "${MAGENTA}[migration] Удаление legacy BBR/TCP tuning${NC}"
+
+  local backup_dir=""
+  local candidate=""
+  local current_cc=""
+  local available_cc=""
+  local target_cc=""
+  local remaining_sources=""
+  local strip_rc=0
+  local unsafe_config=0
+  local legacy_candidate
+
+  for legacy_candidate in "$legacy_file" "$LEGACY_XRAYEBATOR_TCP_TUNING_FILE"; do
+    [[ -n "$legacy_candidate" ]] || continue
+    if [[ -e "$legacy_candidate" || -L "$legacy_candidate" ]]; then
+      if [[ -L "$legacy_candidate" || ! -f "$legacy_candidate" ]] \
+         || [[ "$(stat -c %u "$legacy_candidate" 2>/dev/null)" != "$expected_uid" ]] \
+         || ! _is_known_legacy_tcp_tuning_file "$legacy_candidate"; then
+        echo -e "${RED}  ✗ Неизвестный или изменённый файл оставлен без изменений: $legacy_candidate${NC}"
+        unsafe_config=1
+      else
+        mkdir -p "$XRAY_BACKUPS_DIR" || return 1
+        if [[ -z "$backup_dir" ]]; then
+          backup_dir=$(mktemp -d "$XRAY_BACKUPS_DIR/host-tuning-v3.XXXXXX") || return 1
+          chmod 0700 "$backup_dir"
+        fi
+        cp -a -- "$legacy_candidate" "$backup_dir/$(basename "$legacy_candidate")" || return 1
+        rm -f -- "$legacy_candidate" || return 1
+        echo -e "${GREEN}  ✓ Удалён legacy sysctl.d-файл: $legacy_candidate${NC}"
+      fi
+    fi
+  done
+
+  if [[ -e "$sysctl_conf" || -L "$sysctl_conf" ]]; then
+    if [[ -L "$sysctl_conf" || ! -f "$sysctl_conf" ]] \
+       || [[ "$(stat -c %u "$sysctl_conf" 2>/dev/null)" != "$expected_uid" ]]; then
+      echo -e "${RED}  ✗ Небезопасный системный конфиг оставлен без изменений: $sysctl_conf${NC}"
+      unsafe_config=1
+    else
+      candidate=$(mktemp "$(dirname "$sysctl_conf")/.xraytailscale-sysctl.XXXXXX") || return 1
+      _strip_legacy_tcp_tuning_block "$sysctl_conf" "$candidate" || strip_rc=$?
+      if [[ "$strip_rc" -eq 0 ]]; then
+        if [[ -z "$backup_dir" ]]; then
+          mkdir -p "$XRAY_BACKUPS_DIR" || { rm -f -- "$candidate"; return 1; }
+          backup_dir=$(mktemp -d "$XRAY_BACKUPS_DIR/host-tuning-v3.XXXXXX") || {
+            rm -f -- "$candidate"
+            return 1
+          }
+          chmod 0700 "$backup_dir"
+        fi
+        cp -a -- "$sysctl_conf" "$backup_dir/sysctl.conf" || {
+          rm -f -- "$candidate"
+          return 1
+        }
+        mv -f -- "$candidate" "$sysctl_conf" || {
+          rm -f -- "$candidate"
+          return 1
+        }
+        echo -e "${GREEN}  ✓ Удалён legacy-блок XrayTailscale из sysctl.conf${NC}"
+      elif [[ "$strip_rc" -eq 1 ]]; then
+        rm -f -- "$candidate"
+      else
+        rm -f -- "$candidate"
+        unsafe_config=1
+        echo -e "${RED}  ✗ Legacy sysctl-блок изменён вручную; файл оставлен без изменений${NC}"
+      fi
+    fi
+  fi
+
+  if [[ ! -r "$active_file" || ! -r "$available_file" ]]; then
+    echo -e "${RED}  ✗ Ядро не предоставляет congestion-control state${NC}"
+    return 1
+  fi
+  current_cc=$(<"$active_file")
+  available_cc=$(<"$available_file")
+
+  if [[ "$current_cc" == "bbr" ]]; then
+    if [[ " $available_cc " == *" cubic "* ]]; then
+      target_cc="cubic"
+    elif [[ " $available_cc " == *" reno "* ]]; then
+      target_cc="reno"
+    else
+      echo -e "${RED}  ✗ Не найден безопасный congestion-control fallback (cubic/reno)${NC}"
+      return 1
+    fi
+
+    if ! sysctl -q -w "net.ipv4.tcp_congestion_control=$target_cc"; then
+      echo -e "${RED}  ✗ Не удалось переключить congestion control на $target_cc${NC}"
+      [[ -n "$backup_dir" ]] && echo -e "${YELLOW}    Persistent-настройки удалены; backup: $backup_dir${NC}"
+      return 1
+    fi
+    current_cc=$(<"$active_file")
+    if [[ "$current_cc" == "bbr" ]]; then
+      echo -e "${RED}  ✗ Congestion control остался BBR после переключения${NC}"
+      return 1
+    fi
+    echo -e "${GREEN}  ✓ Активный congestion control: $current_cc${NC}"
+  fi
+
+  remaining_sources=$(_find_persistent_bbr_sources "$scan_paths")
+  if [[ -n "$remaining_sources" ]]; then
+    echo -e "${RED}  ✗ BBR задан сторонним sysctl-конфигом; файл не изменён:${NC}"
+    printf '%s\n' "$remaining_sources" | sed 's/^/    /'
+    echo -e "${YELLOW}    Удалите настройку вручную; migration повторится при следующем запуске.${NC}"
+    return 1
+  fi
+
+  if [[ "$unsafe_config" -ne 0 ]]; then
+    echo -e "${YELLOW}  ⚠ Часть persistent-конфигов требует ручной проверки; marker не установлен.${NC}"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$marker")" || return 1
+  if ! touch "$marker"; then
+    echo -e "${RED}  ✗ Не удалось записать migration marker: $marker${NC}"
+    return 1
+  fi
+  chown xray:xray "$marker" 2>/dev/null || true
+  chmod 0640 "$marker" 2>/dev/null || true
+  echo -e "${GREEN}  ✓ Legacy BBR/TCP tuning полностью отключён${NC}"
+  return 0
+}
+
+migrate_legacy_managed_udp443_block_v3() {
+  local count
+  count=$(jq '[.routing.rules[]? | select(. == {"type":"field","network":"udp","port":443,"outboundTag":"block"})] | length' "$CONFIG_FILE" 2>/dev/null || echo 0)
+  if [[ ! "$count" =~ ^[0-9]+$ || "$count" -eq 0 ]]; then
+    echo -e "${GREEN}✓ Legacy bare UDP/443 block отсутствует${NC}"
+    return 1
+  fi
+
+  if safe_jq_write '
+    .routing.rules = [
+      .routing.rules[]?
+      | select(. != {"type":"field","network":"udp","port":443,"outboundTag":"block"})
+    ]
+  ' "$CONFIG_FILE"; then
+    echo -e "${GREEN}✓ Legacy bare UDP/443 block удалён${NC}"
+    return 0
+  fi
+
+  echo -e "${RED}✗ Не удалось удалить legacy bare UDP/443 block${NC}"
+  return 2
+}
+
 # run_migration <marker_basename> <description> <fn_name>
 # Centralized migration runner: backup → run fn → safe_restart → touch marker.
 # Marker is created ONLY if all phases succeed (idempotency guarantee).
@@ -1149,10 +1451,9 @@ run_migration() {
 
   echo -e "${MAGENTA}[migration] ${description}${NC}"
 
-  # Step 1: backup BEFORE any mutation (centralized per REQ-D07).
-  # safe_restart_xray's auto-rollback использует latest backup, поэтому
-  # backup ДОЛЖЕН быть создан до того, как fn начнёт мутировать config.
-  if ! backup_config "$marker_basename"; then
+  # Step 1: backup BEFORE any mutation and keep this exact path for rollback.
+  local rollback_config=""
+  if ! backup_config "$marker_basename" rollback_config; then
     echo -e "${RED}  ✗ Migration aborted: не удалось создать бэкап${NC}"
     return 1
   fi
@@ -1164,7 +1465,7 @@ run_migration() {
   case $fn_rc in
     0)
       # Changed config — needs restart
-      if safe_restart_xray; then
+      if safe_restart_xray "$rollback_config"; then
         touch "$marker"
         chown xray:xray "$marker" 2>/dev/null || true
         echo -e "${GREEN}  ✓ Migration applied: ${marker_basename}${NC}"
@@ -1360,6 +1661,10 @@ _migrate_xhttp_path_sync_2026() {
 
   echo -e "${GREEN}✓ XHTTP path sync не требуется${NC}"
   return 1
+}
+
+_migrate_xhttp_route_path_repair_2026() {
+  _migrate_xhttp_path_sync_2026
 }
 
 _migrate_xhttp_reality_stream_one_2026() {
@@ -2227,14 +2532,15 @@ _apply_bypass_rule() {
     fi
   done <<< "$domains_raw"
 
-  backup_config "bypass_routing_add"
+  local rollback_config=""
+  backup_config "bypass_routing_add" rollback_config || return 2
   # safe_jq_write routing.rules: PREPEND нового bypass-правила.
   if safe_jq_write \
       --argjson domains "$normalized_json" \
       '.routing.rules = [{"type":"field","domain":$domains,"outboundTag":"direct"}] + .routing.rules' \
       "$CONFIG_FILE"; then
     fix_xray_permissions
-    if safe_restart_xray; then
+    if safe_restart_xray "$rollback_config"; then
       return 0
     fi
     return 2
@@ -2244,7 +2550,8 @@ _apply_bypass_rule() {
 
 _bypass_remove_rule() {
   local d="domain:$1"
-  backup_config "bypass_routing_remove"
+  local rollback_config=""
+  backup_config "bypass_routing_remove" rollback_config || return 2
   # safe_jq_write routing.rules: удалить domain из bypass-правил.
   if safe_jq_write \
       --arg d "$d" \
@@ -2258,7 +2565,7 @@ _bypass_remove_rule() {
         end
       ]' "$CONFIG_FILE"; then
     fix_xray_permissions
-    if safe_restart_xray; then
+    if safe_restart_xray "$rollback_config"; then
       return 0
     fi
     return 2
@@ -2267,7 +2574,8 @@ _bypass_remove_rule() {
 }
 
 _bypass_reset_all() {
-  backup_config "bypass_routing_reset"
+  local rollback_config=""
+  backup_config "bypass_routing_reset" rollback_config || return 2
   # safe_jq_write routing.rules: удалить только domain bypass-правила.
   if safe_jq_write '
       .routing.rules = [
@@ -2275,7 +2583,7 @@ _bypass_reset_all() {
         select(.outboundTag != "direct" or (.network // null) != null or (.port // null) != null or (((.domain // []) | length) == 0))
       ]' "$CONFIG_FILE"; then
     fix_xray_permissions
-    if safe_restart_xray; then
+    if safe_restart_xray "$rollback_config"; then
       return 0
     fi
     return 2
@@ -2895,6 +3203,7 @@ fi
 
 # Fallback-defaults если .happ_defaults.env отсутствует или не задаёт переменную.
 HAPP_PROFILE_UPDATE_INTERVAL="${HAPP_PROFILE_UPDATE_INTERVAL:-24}"
+HAPP_SERVER_NAME="${HAPP_SERVER_NAME:-}"
 HAPP_SUPPORT_URL="${HAPP_SUPPORT_URL:-https://github.com/vshroot/XrayTailscale}"
 HAPP_WEB_URL="${HAPP_WEB_URL:-https://github.com/vshroot/XrayTailscale}"
 HAPP_ANNOUNCE_FILE="${HAPP_ANNOUNCE_FILE:-/usr/local/etc/xray/announce.txt}"
@@ -3041,7 +3350,11 @@ prepare_happ_vless_urls() {
 }
 
 # HAPP metadata: profile-title и announce — base64 UTF-8 без переносов (-w0).
-profile_title_b64=$(printf '%s' "$profile_name" | base64 -w0)
+subscription_title="${HAPP_SERVER_NAME:-}"
+if [[ -z "$subscription_title" ]]; then
+  subscription_title="$profile_name"
+fi
+profile_title_b64=$(printf '%s' "$subscription_title" | base64 -w0)
 ANNOUNCE_FILE="$HAPP_ANNOUNCE_FILE"
 ANNOUNCE_HEADER=""
 ANNOUNCE_COMMENT=""
@@ -3140,6 +3453,9 @@ HAPP_SUPPORT_URL="https://github.com/vshroot/XrayTailscale"
 
 # URL веб-страницы профиля (HAPP покажет в info клиента):
 HAPP_WEB_URL="https://github.com/vshroot/XrayTailscale"
+
+# Отображаемое имя subscription в HAPP. Пусто = использовать имя profile JSON.
+HAPP_SERVER_NAME=""
 
 # Интервал автообновления подписки в часах (HAPP читает как hint):
 HAPP_PROFILE_UPDATE_INTERVAL=24
@@ -4117,7 +4433,7 @@ happ_settings_menu() {
   while true; do
     show_ascii
     # Локальный source — читаем текущие значения.
-    local HAPP_SUPPORT_URL HAPP_WEB_URL HAPP_PROFILE_UPDATE_INTERVAL HAPP_ANNOUNCE_FILE HAPP_ROUTING_JSON_FILE
+    local HAPP_SERVER_NAME HAPP_SUPPORT_URL HAPP_WEB_URL HAPP_PROFILE_UPDATE_INTERVAL HAPP_ANNOUNCE_FILE HAPP_ROUTING_JSON_FILE
     # shellcheck disable=SC1090
     source "$env_file"
 
@@ -4125,23 +4441,25 @@ happ_settings_menu() {
     echo -e "${BLUE}    НАСТРОЙКИ HAPP METADATA                   ${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${CYAN} 1)${NC} HAPP_SUPPORT_URL = ${YELLOW}${HAPP_SUPPORT_URL:-(не задано)}${NC}"
-    echo -e "${CYAN} 2)${NC} HAPP_WEB_URL = ${YELLOW}${HAPP_WEB_URL:-(не задано)}${NC}"
-    echo -e "${CYAN} 3)${NC} HAPP_PROFILE_UPDATE_INTERVAL = ${YELLOW}${HAPP_PROFILE_UPDATE_INTERVAL:-24}${NC} часов"
-    echo -e "${CYAN} 4)${NC} HAPP_ANNOUNCE_FILE = ${YELLOW}${HAPP_ANNOUNCE_FILE:-(не задано)}${NC}"
-    echo -e "${CYAN} 5)${NC} HAPP_ROUTING_JSON_FILE = ${YELLOW}${HAPP_ROUTING_JSON_FILE:-(не задано)}${NC}"
+    echo -e "${CYAN} 1)${NC} HAPP_SERVER_NAME = ${YELLOW}${HAPP_SERVER_NAME:-(имя профиля)}${NC}"
+    echo -e "${CYAN} 2)${NC} HAPP_SUPPORT_URL = ${YELLOW}${HAPP_SUPPORT_URL:-(не задано)}${NC}"
+    echo -e "${CYAN} 3)${NC} HAPP_WEB_URL = ${YELLOW}${HAPP_WEB_URL:-(не задано)}${NC}"
+    echo -e "${CYAN} 4)${NC} HAPP_PROFILE_UPDATE_INTERVAL = ${YELLOW}${HAPP_PROFILE_UPDATE_INTERVAL:-24}${NC} часов"
+    echo -e "${CYAN} 5)${NC} HAPP_ANNOUNCE_FILE = ${YELLOW}${HAPP_ANNOUNCE_FILE:-(не задано)}${NC}"
+    echo -e "${CYAN} 6)${NC} HAPP_ROUTING_JSON_FILE = ${YELLOW}${HAPP_ROUTING_JSON_FILE:-(не задано)}${NC}"
     echo -e "${CYAN} 0)${NC} Назад"
     echo ""
-    echo -n -e "${YELLOW}Изменить (1-5, 0=назад): ${NC}"
+    echo -n -e "${YELLOW}Изменить (1-6, 0=назад): ${NC}"
     local choice
     read -r choice
     case "$choice" in
       0) return ;;
-      1) _happ_edit_field "$env_file" "HAPP_SUPPORT_URL" "$HAPP_SUPPORT_URL" ;;
-      2) _happ_edit_field "$env_file" "HAPP_WEB_URL" "$HAPP_WEB_URL" ;;
-      3) _happ_edit_field "$env_file" "HAPP_PROFILE_UPDATE_INTERVAL" "$HAPP_PROFILE_UPDATE_INTERVAL" ;;
-      4) _happ_edit_field "$env_file" "HAPP_ANNOUNCE_FILE" "$HAPP_ANNOUNCE_FILE" ;;
-      5) _happ_edit_field "$env_file" "HAPP_ROUTING_JSON_FILE" "$HAPP_ROUTING_JSON_FILE" ;;
+      1) _happ_edit_field "$env_file" "HAPP_SERVER_NAME" "$HAPP_SERVER_NAME" ;;
+      2) _happ_edit_field "$env_file" "HAPP_SUPPORT_URL" "$HAPP_SUPPORT_URL" ;;
+      3) _happ_edit_field "$env_file" "HAPP_WEB_URL" "$HAPP_WEB_URL" ;;
+      4) _happ_edit_field "$env_file" "HAPP_PROFILE_UPDATE_INTERVAL" "$HAPP_PROFILE_UPDATE_INTERVAL" ;;
+      5) _happ_edit_field "$env_file" "HAPP_ANNOUNCE_FILE" "$HAPP_ANNOUNCE_FILE" ;;
+      6) _happ_edit_field "$env_file" "HAPP_ROUTING_JSON_FILE" "$HAPP_ROUTING_JSON_FILE" ;;
       *) echo -e "${RED}✗ Некорректный выбор${NC}"; sleep 1 ;;
     esac
   done
@@ -4180,6 +4498,13 @@ _happ_edit_field() {
   chmod 644 "$env_file"
   chown xray:xray "$env_file" 2>/dev/null || true
   echo -e "${GREEN}✓ ${key} обновлено (рестарт subhttp не требуется — source на каждый request)${NC}"
+  if [[ -f /usr/local/etc/xray/.subscription_installed ]]; then
+    if install_subscription_server >/dev/null 2>&1; then
+      echo -e "${GREEN}subscription handler регенерирован${NC}"
+    else
+      echo -e "${YELLOW}Регенерация subscription handler не удалась — переустановите подписку через меню${NC}"
+    fi
+  fi
   sleep 1
 }
 
@@ -4584,7 +4909,9 @@ _repair_stale_subscription_profiles_core() {
     return 1
   fi
 
-  backup_config "$backup_label" || return 1
+  local rollback_config="" profiles_snapshot=""
+  backup_config "$backup_label" rollback_config || return 1
+  _snapshot_profiles profiles_snapshot || return 1
 
   local backup_dir users_tmp
   backup_dir=$(mktemp -d "/tmp/xraytailscale-${tmp_prefix}.XXXXXX") || return 1
@@ -4656,10 +4983,11 @@ _repair_stale_subscription_profiles_core() {
   fi
 
   fix_xray_permissions
-  if ! safe_restart_xray; then
+  if ! safe_restart_xray "$rollback_config"; then
     for pf in "${repair_profiles[@]}"; do
       cp "$backup_dir/$(basename "$pf")" "$pf" 2>/dev/null || true
     done
+    _restore_profiles_snapshot "$profiles_snapshot" >/dev/null 2>&1 || true
     fix_xray_permissions
     rm -rf "$backup_dir"
     rm -f "$users_tmp"
@@ -4669,6 +4997,7 @@ _repair_stale_subscription_profiles_core() {
 
   rm -rf "$backup_dir"
   rm -f "$users_tmp"
+  _discard_profiles_snapshot "$profiles_snapshot"
   echo -e "${GREEN}✓ ${repair_label} восстановлены: ${#repair_profiles[@]}${NC}"
 }
 
@@ -4760,9 +5089,11 @@ bulk_generate_users_core() {
   users_json=$(_bulk_build_users_json "$prefix" "$count" "$batch_id") || return 1
   created=$(date +%Y-%m-%d\ %H:%M:%S)
 
-  if ! backup_config "bulk_generate_${batch_id}"; then
+  local rollback_config="" profiles_snapshot=""
+  if ! backup_config "bulk_generate_${batch_id}" rollback_config; then
     return 1
   fi
+  _snapshot_profiles profiles_snapshot || return 1
 
   local generated_profiles=()
   local row uuid sub_token
@@ -4785,12 +5116,14 @@ bulk_generate_users_core() {
   fi
 
   fix_xray_permissions
-  if ! safe_restart_xray; then
+  if ! safe_restart_xray "$rollback_config"; then
     rm -f "${generated_profiles[@]}" 2>/dev/null || true
+    _restore_profiles_snapshot "$profiles_snapshot" >/dev/null 2>&1 || true
     echo -e "${RED}✗ Xray не принял bulk config — профили удалены, config должен быть откачен safe_restart_xray${NC}"
     return 1
   fi
 
+  _discard_profiles_snapshot "$profiles_snapshot"
   echo -e "${GREEN}✓ Bulk users создано: $count${NC}"
   bulk_print_users_urls_core "$batch_id"
 }
@@ -4838,7 +5171,8 @@ bulk_delete_user_core() {
     return 1
   fi
 
-  backup_config "bulk_delete_${profile_name}" || return 1
+  local rollback_config=""
+  backup_config "bulk_delete_${profile_name}" rollback_config || return 1
   if ! safe_jq_write --arg uuid "$uuid" --argjson ports "$ports_json" '
       .inbounds |= map(
         if ((.port // null) as $p | ($ports | index($p)) != null) then
@@ -4853,7 +5187,7 @@ bulk_delete_user_core() {
   fi
 
   fix_xray_permissions
-  if ! safe_restart_xray; then
+  if ! safe_restart_xray "$rollback_config"; then
     echo -e "${RED}✗ Xray не перезапустился — profile JSON оставлен на месте${NC}"
     return 1
   fi
@@ -5284,7 +5618,7 @@ _cascade_enabled() {
 }
 
 _cascade_print_status() {
-  local upstream_file
+  local upstream_file transport
   upstream_file=$(_cascade_config_file)
   if _cascade_enabled; then
     echo -e "${GREEN}Каскад: включен${NC}"
@@ -5293,65 +5627,280 @@ _cascade_print_status() {
   fi
 
   if [[ -f "$upstream_file" ]]; then
-    echo -e "${CYAN}Upstream:${NC} $(jq -r '.address' "$upstream_file"):$(jq -r '.port' "$upstream_file") sni=$(jq -r '.sni' "$upstream_file")"
+    transport=$(jq -r '.transport // "tcp"' "$upstream_file" 2>/dev/null)
+    echo -e "${CYAN}Upstream:${NC} $(jq -r '.address' "$upstream_file"):$(jq -r '.port' "$upstream_file") transport=${transport} sni=$(jq -r '.sni' "$upstream_file")"
   else
     echo -e "${YELLOW}Upstream не настроен${NC}"
   fi
 }
 
-_cascade_build_outbound_json() {
-  local upstream_file=$1
-  local address port uuid sni fingerprint public_key short_id flow packet_encoding
-  address=$(jq -r '.address' "$upstream_file")
-  port=$(jq -r '.port' "$upstream_file")
-  uuid=$(jq -r '.uuid' "$upstream_file")
-  sni=$(jq -r '.sni' "$upstream_file")
-  fingerprint=$(jq -r '.fingerprint // "chrome"' "$upstream_file")
-  public_key=$(jq -r '.public_key' "$upstream_file")
-  short_id=$(jq -r '.short_id' "$upstream_file")
-  flow=$(jq -r '.flow // "xtls-rprx-vision"' "$upstream_file")
-  packet_encoding=$(jq -r '.packet_encoding // empty' "$upstream_file")
+_cascade_uri_decode() {
+  local value="${1//+/ }"
+  printf '%b' "${value//%/\\x}"
+}
 
-  jq -cn \
+_cascade_query_param() {
+  local query="$1"
+  shift
+  local pair key value wanted
+  local -a pairs=()
+  IFS='&' read -r -a pairs <<< "$query"
+  for pair in "${pairs[@]}"; do
+    [[ -z "$pair" ]] && continue
+    key=$(_cascade_uri_decode "${pair%%=*}")
+    if [[ "$pair" == *=* ]]; then
+      value=$(_cascade_uri_decode "${pair#*=}")
+    else
+      value=""
+    fi
+    for wanted in "$@"; do
+      if [[ "$key" == "$wanted" ]]; then
+        printf '%s\n' "$value"
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+_cascade_parse_vless_uri() {
+  local uri=$1
+  if [[ "$uri" != vless://* ]]; then
+    echo -e "${RED}✗ Ожидается ссылка vless://${NC}" >&2
+    return 1
+  fi
+
+  local rest authority query uuid server address port
+  rest="${uri#vless://}"
+  rest="${rest%%#*}"
+  if [[ "$rest" == *\?* ]]; then
+    authority="${rest%%\?*}"
+    query="${rest#*\?}"
+  else
+    authority="$rest"
+    query=""
+  fi
+
+  if [[ "$authority" != *@* ]]; then
+    echo -e "${RED}✗ В VLESS-ссылке отсутствует UUID или адрес${NC}" >&2
+    return 1
+  fi
+  uuid="${authority%%@*}"
+  server="${authority#*@}"
+
+  if [[ "$server" =~ ^\[([^]]+)\]:([0-9]+)$ ]]; then
+    address="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[2]}"
+  elif [[ "$server" =~ ^(.+):([0-9]+)$ ]]; then
+    address="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[2]}"
+  else
+    echo -e "${RED}✗ Не удалось разобрать host:port из VLESS-ссылки${NC}" >&2
+    return 1
+  fi
+
+  local encryption security transport sni fingerprint public_key short_id
+  local flow packet_encoding xhttp_path xhttp_host xhttp_mode
+  encryption=$(_cascade_query_param "$query" encryption 2>/dev/null || true)
+  encryption="${encryption:-none}"
+  security=$(_cascade_query_param "$query" security 2>/dev/null || true)
+  transport=$(_cascade_query_param "$query" type 2>/dev/null || true)
+  transport="${transport:-tcp}"
+  sni=$(_cascade_query_param "$query" sni serverName 2>/dev/null || true)
+  fingerprint=$(_cascade_query_param "$query" fp 2>/dev/null || true)
+  fingerprint="${fingerprint:-chrome}"
+  public_key=$(_cascade_query_param "$query" pbk publicKey 2>/dev/null || true)
+  short_id=$(_cascade_query_param "$query" sid shortId 2>/dev/null || true)
+  flow=$(_cascade_query_param "$query" flow 2>/dev/null || true)
+  packet_encoding=$(_cascade_query_param "$query" packetEncoding packetencoding 2>/dev/null || true)
+  xhttp_path=$(_cascade_query_param "$query" path 2>/dev/null || true)
+  xhttp_path="${xhttp_path:-/}"
+  xhttp_host=$(_cascade_query_param "$query" host 2>/dev/null || true)
+  [[ -z "$xhttp_host" ]] && xhttp_host="$sni"
+  xhttp_mode=$(_cascade_query_param "$query" mode 2>/dev/null || true)
+  xhttp_mode="${xhttp_mode:-auto}"
+
+  if [[ "$security" != "reality" ]]; then
+    echo -e "${RED}✗ Каскад поддерживает только security=reality${NC}" >&2
+    return 1
+  fi
+  if [[ "$encryption" != "none" ]]; then
+    echo -e "${RED}✗ Каскад поддерживает только encryption=none${NC}" >&2
+    return 1
+  fi
+  if [[ "$transport" != "tcp" && "$transport" != "xhttp" ]]; then
+    echo -e "${RED}✗ Поддерживаются upstream type=tcp и type=xhttp${NC}" >&2
+    return 1
+  fi
+
+  jq -n \
     --arg address "$address" \
     --argjson port "$port" \
     --arg uuid "$uuid" \
+    --arg transport "$transport" \
     --arg sni "$sni" \
-    --arg fp "$fingerprint" \
+    --arg fingerprint "$fingerprint" \
     --arg public_key "$public_key" \
     --arg short_id "$short_id" \
     --arg flow "$flow" \
-    --arg packet_encoding "$packet_encoding" '
+    --arg packet_encoding "$packet_encoding" \
+    --arg xhttp_path "$xhttp_path" \
+    --arg xhttp_host "$xhttp_host" \
+    --arg xhttp_mode "$xhttp_mode" '
+      {
+        version: 2,
+        tag: "cascade-upstream",
+        address: $address,
+        port: $port,
+        uuid: $uuid,
+        transport: $transport,
+        sni: $sni,
+        fingerprint: $fingerprint,
+        public_key: $public_key,
+        short_id: $short_id
+      }
+      + (if $transport == "tcp" then
+          (if $flow == "" then {} else {flow: $flow} end)
+          + (if $packet_encoding == "" then {} else {packet_encoding: $packet_encoding} end)
+        else
+          {
+            xhttp_path: $xhttp_path,
+            xhttp_host: $xhttp_host,
+            xhttp_mode: $xhttp_mode
+          }
+        end)
+    '
+}
+
+_cascade_validate_upstream_file() {
+  local upstream_file=$1
+  if ! jq -e . "$upstream_file" >/dev/null 2>&1; then
+    echo -e "${RED}✗ Upstream JSON повреждён${NC}"
+    return 1
+  fi
+
+  local address port uuid public_key short_id sni fingerprint transport flow packet_encoding
+  local xhttp_path xhttp_host xhttp_mode
+  address=$(jq -r '.address // empty' "$upstream_file")
+  port=$(jq -r '.port // empty' "$upstream_file")
+  uuid=$(jq -r '.uuid // empty' "$upstream_file")
+  public_key=$(jq -r '.public_key // empty' "$upstream_file")
+  short_id=$(jq -r '.short_id // ""' "$upstream_file")
+  sni=$(jq -r '.sni // empty' "$upstream_file")
+  fingerprint=$(jq -r '.fingerprint // "chrome"' "$upstream_file")
+  transport=$(jq -r '.transport // "tcp"' "$upstream_file")
+  flow=$(jq -r '.flow // ""' "$upstream_file")
+  packet_encoding=$(jq -r '.packet_encoding // ""' "$upstream_file")
+  xhttp_path=$(jq -r '.xhttp_path // "/"' "$upstream_file")
+  xhttp_host=$(jq -r '.xhttp_host // .sni // empty' "$upstream_file")
+  xhttp_mode=$(jq -r '.xhttp_mode // "auto"' "$upstream_file")
+
+  if [[ -z "$address" || "$address" =~ ^(localhost$|0\.0\.0\.0$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|::1$) ]]; then
+    echo -e "${RED}✗ Upstream address не должен быть локальным/private${NC}"
+    return 1
+  fi
+  if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ $port -lt 1 ]] || [[ $port -gt 65535 ]]; then
+    echo -e "${RED}✗ Некорректный порт${NC}"
+    return 1
+  fi
+  if [[ ! "$uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+    echo -e "${RED}✗ Некорректный UUID${NC}"
+    return 1
+  fi
+  if [[ ! "$public_key" =~ ^[A-Za-z0-9_-]{40,}$ ]]; then
+    echo -e "${RED}✗ Некорректный Reality publicKey${NC}"
+    return 1
+  fi
+  if [[ ! "$short_id" =~ ^[0-9a-fA-F]{0,16}$ ]] || (( ${#short_id} % 2 != 0 )); then
+    echo -e "${RED}✗ Некорректный shortId${NC}"
+    return 1
+  fi
+  if [[ -z "$sni" || ! "$sni" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+    echo -e "${RED}✗ Некорректный SNI${NC}"
+    return 1
+  fi
+  if [[ ! "$fingerprint" =~ ^(chrome|firefox|safari|ios|android|edge|qq|random|randomized)$ ]]; then
+    echo -e "${RED}✗ Некорректный fingerprint${NC}"
+    return 1
+  fi
+  if [[ "$transport" != "tcp" && "$transport" != "xhttp" ]]; then
+    echo -e "${RED}✗ transport поддерживает только tcp или xhttp${NC}"
+    return 1
+  fi
+  if [[ "$transport" == "tcp" ]]; then
+    if [[ -n "$flow" && "$flow" != "xtls-rprx-vision" ]]; then
+      echo -e "${RED}✗ Для TCP поддерживается только flow=xtls-rprx-vision или пустое значение${NC}"
+      return 1
+    fi
+    if [[ -n "$packet_encoding" && "$packet_encoding" != "xudp" ]]; then
+      echo -e "${RED}✗ packetEncoding поддерживает только xudp или пустое значение${NC}"
+      return 1
+    fi
+  else
+    if [[ "$xhttp_path" != /* ]]; then
+      echo -e "${RED}✗ XHTTP path должен начинаться с /${NC}"
+      return 1
+    fi
+    if [[ -z "$xhttp_host" || ! "$xhttp_host" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+      echo -e "${RED}✗ Некорректный XHTTP host${NC}"
+      return 1
+    fi
+    if [[ ! "$xhttp_mode" =~ ^(auto|packet-up|stream-up|stream-one)$ ]]; then
+      echo -e "${RED}✗ Некорректный XHTTP mode${NC}"
+      return 1
+    fi
+  fi
+}
+
+_cascade_build_outbound_json() {
+  local upstream_file=$1
+  _cascade_validate_upstream_file "$upstream_file" || return 1
+
+  jq -cn --slurpfile upstream "$upstream_file" '
+    $upstream[0] as $u |
+    ($u.transport // "tcp") as $transport |
     {
       tag: "cascade-upstream",
       protocol: "vless",
       settings: {
         vnext: [{
-          address: $address,
-          port: $port,
+          address: $u.address,
+          port: $u.port,
           users: [{
-            id: $uuid,
-            encryption: "none",
-            flow: $flow
-          } + (if $packet_encoding == "" then {} else {packetEncoding: $packet_encoding} end)]
+            id: $u.uuid,
+            encryption: "none"
+          }
+          + (if (($u.flow // "") | length) == 0 then {} else {flow: $u.flow} end)
+          + (if (($u.packet_encoding // "") | length) == 0 then {} else {packetEncoding: $u.packet_encoding} end)]
         }]
       },
-      streamSettings: {
-        network: "tcp",
+      streamSettings: ({
+        network: $transport,
         security: "reality",
         sockopt: {
-          dialerProxy: "cascade-fragment",
-          tcpFastOpen: true,
-          tcpNoDelay: true
+          dialerProxy: "cascade-fragment"
         },
         realitySettings: {
-          serverName: $sni,
-          fingerprint: $fp,
-          publicKey: $public_key,
-          shortId: $short_id,
+          serverName: $u.sni,
+          fingerprint: ($u.fingerprint // "chrome"),
+          publicKey: $u.public_key,
+          shortId: ($u.short_id // ""),
           spiderX: "/"
         }
       }
+      + (if $transport == "tcp" then {
+          sockopt: {
+            dialerProxy: "cascade-fragment",
+            tcpFastOpen: true,
+            tcpNoDelay: true
+          }
+        } else {
+          xhttpSettings: {
+            path: ($u.xhttp_path // "/"),
+            host: ($u.xhttp_host // $u.sni),
+            mode: ($u.xhttp_mode // "auto")
+          }
+        } end))
     }'
 }
 
@@ -5367,6 +5916,72 @@ _cascade_build_fragment_outbound_json() {
       }
     }
   }'
+}
+
+_cascade_apply_current_upstream() {
+  local reason=${1:-cascade_apply}
+  local upstream_file outbound_json fragment_json address old_address had_active=false
+  local rollback_config=""
+  upstream_file=$(_cascade_config_file)
+  [[ -f "$upstream_file" ]] || {
+    echo -e "${RED}✗ Сначала настройте upstream-ноду${NC}"
+    return 1
+  }
+  _cascade_validate_upstream_file "$upstream_file" || return 1
+  outbound_json=$(_cascade_build_outbound_json "$upstream_file") || return 1
+  fragment_json=$(_cascade_build_fragment_outbound_json) || return 1
+  address=$(jq -r '.address' "$upstream_file")
+  old_address=$(jq -r 'first(.outbounds[]? | select(.tag == "cascade-upstream") | .settings.vnext[0].address) // ""' "$CONFIG_FILE" 2>/dev/null)
+  [[ -f "$CASCADE_ACTIVE_FILE" ]] && had_active=true
+
+  backup_config "$reason" rollback_config || return 1
+  if ! safe_jq_write \
+      --argjson outbound "$outbound_json" \
+      --argjson fragment "$fragment_json" \
+      --arg address "$address" \
+      --arg old_address "$old_address" '
+      def is_ip($a):
+        (($a | test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")) or ($a | test(":")));
+      def upstream_direct_rule:
+        if is_ip($address) then
+          {"type":"field","ip":[$address],"outboundTag":"direct"}
+        else
+          {"type":"field","domain":["domain:" + $address],"outboundTag":"direct"}
+        end;
+      def direct_rule_matches($a):
+        if $a == "" then false
+        elif is_ip($a) then (((.ip // []) | index($a)) != null)
+        else (((.domain // []) | index("domain:" + $a)) != null)
+        end;
+      def upstream_direct_match:
+        (.outboundTag == "direct" and (direct_rule_matches($address) or direct_rule_matches($old_address)));
+      def catch_all:
+        (.type == "field" and (.network // "") == "tcp,udp"
+         and (.domain // null) == null and (.ip // null) == null and (.port // null) == null);
+      .outbounds = ((.outbounds // []) | map(select(.tag != "cascade-upstream" and .tag != "cascade-fragment"))) |
+      .outbounds += [$fragment, $outbound] |
+      .routing.rules = [
+        .routing.rules[]?
+        | select((upstream_direct_match or catch_all) | not)
+      ] |
+      .routing.rules = [upstream_direct_rule] + .routing.rules + [
+        {"type":"field","network":"tcp,udp","outboundTag":"cascade-upstream"}
+      ]
+    ' "$CONFIG_FILE"; then
+    echo -e "${RED}✗ Не удалось применить cascade config${NC}"
+    return 1
+  fi
+
+  fix_xray_permissions
+  if safe_restart_xray "$rollback_config"; then
+    touch "$CASCADE_ACTIVE_FILE"
+    chown xray:xray "$CASCADE_ACTIVE_FILE" 2>/dev/null || true
+    echo -e "${GREEN}✓ Активный каскад синхронизирован с upstream${NC}"
+    return 0
+  fi
+
+  [[ "$had_active" == "true" ]] || rm -f "$CASCADE_ACTIVE_FILE"
+  return 1
 }
 
 _cascade_validate_upstream_fields() {
@@ -5413,6 +6028,58 @@ configure_cascade_upstream() {
 
   _cascade_ensure_dir
 
+  local upstream_file previous cascade_was_enabled=false
+  upstream_file=$(_cascade_config_file)
+  previous=$(mktemp /tmp/xraytailscale-cascade-prev.XXXXXX) || return 1
+  if [[ -f "$upstream_file" ]]; then
+    cp "$upstream_file" "$previous"
+  else
+    : > "$previous"
+  fi
+  _cascade_enabled && cascade_was_enabled=true
+
+  echo -n -e "${YELLOW}Готовая VLESS URL зарубежной ноды [Enter=ручной ввод]: ${NC}"
+  local import_uri
+  read -r import_uri
+  if [[ -n "$import_uri" ]]; then
+    local parsed_tmp
+    parsed_tmp=$(mktemp /tmp/xraytailscale-cascade.XXXXXX) || {
+      rm -f "$previous"
+      return 1
+    }
+    if ! _cascade_parse_vless_uri "$import_uri" > "$parsed_tmp"; then
+      rm -f "$parsed_tmp" "$previous"
+      sleep 2
+      return 1
+    fi
+    if ! _cascade_validate_upstream_file "$parsed_tmp"; then
+      rm -f "$parsed_tmp" "$previous"
+      sleep 2
+      return 1
+    fi
+    mv "$parsed_tmp" "$upstream_file"
+    chmod 600 "$upstream_file" 2>/dev/null
+    chown xray:xray "$upstream_file" 2>/dev/null || true
+    if [[ "$cascade_was_enabled" == "true" ]]; then
+      echo -e "${CYAN}  → Каскад активен: применяю новую ноду...${NC}"
+      if ! _cascade_apply_current_upstream "cascade_reconfigure"; then
+        if [[ -s "$previous" ]]; then
+          cp "$previous" "$upstream_file"
+        else
+          rm -f "$upstream_file"
+        fi
+        rm -f "$previous"
+        echo -e "${RED}✗ Новая нода не применена; upstream-файл восстановлен${NC}"
+        return 1
+      fi
+    fi
+    rm -f "$previous"
+    echo -e "${GREEN}✓ Upstream сохранен: $upstream_file${NC}"
+    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    read -r _
+    return 0
+  fi
+
   local address port uuid public_key short_id sni fingerprint packet_encoding
   echo -n -e "${YELLOW}Host/IP зарубежной ноды: ${NC}"
   read -r address
@@ -5438,8 +6105,7 @@ configure_cascade_upstream() {
     return 1
   }
 
-  local upstream_file tmp
-  upstream_file=$(_cascade_config_file)
+  local tmp
   tmp=$(mktemp)
   if ! jq -n \
       --arg address "$address" \
@@ -5460,13 +6126,28 @@ configure_cascade_upstream() {
   chmod 600 "$upstream_file" 2>/dev/null
   chown xray:xray "$upstream_file" 2>/dev/null || true
 
+  if [[ "$cascade_was_enabled" == "true" ]]; then
+    echo -e "${CYAN}  → Каскад активен: применяю новую ноду...${NC}"
+    if ! _cascade_apply_current_upstream "cascade_reconfigure"; then
+      if [[ -s "$previous" ]]; then
+        cp "$previous" "$upstream_file"
+      else
+        rm -f "$upstream_file"
+      fi
+      rm -f "$previous"
+      echo -e "${RED}✗ Новая нода не применена; upstream-файл восстановлен${NC}"
+      return 1
+    fi
+  fi
+  rm -f "$previous"
+
   echo -e "${GREEN}✓ Upstream сохранен: $upstream_file${NC}"
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
   read -r _
 }
 
 enable_cascade_mode() {
-  local upstream_file outbound_json fragment_json address port uuid public_key short_id sni fingerprint packet_encoding
+  local upstream_file
   upstream_file=$(_cascade_config_file)
   if [[ ! -f "$upstream_file" ]]; then
     echo -e "${RED}✗ Сначала настройте upstream-ноду${NC}"
@@ -5474,68 +6155,13 @@ enable_cascade_mode() {
     return 1
   fi
 
-  address=$(jq -r '.address // ""' "$upstream_file" 2>/dev/null || echo "")
-  port=$(jq -r '.port // ""' "$upstream_file" 2>/dev/null || echo "")
-  uuid=$(jq -r '.uuid // ""' "$upstream_file" 2>/dev/null || echo "")
-  public_key=$(jq -r '.public_key // ""' "$upstream_file" 2>/dev/null || echo "")
-  short_id=$(jq -r '.short_id // ""' "$upstream_file" 2>/dev/null || echo "")
-  sni=$(jq -r '.sni // ""' "$upstream_file" 2>/dev/null || echo "")
-  fingerprint=$(jq -r '.fingerprint // "chrome"' "$upstream_file" 2>/dev/null || echo "chrome")
-  packet_encoding=$(jq -r '.packet_encoding // ""' "$upstream_file" 2>/dev/null || echo "")
-  _cascade_validate_upstream_fields "$address" "$port" "$uuid" "$public_key" "$short_id" "$sni" "$fingerprint" "$packet_encoding" || {
-    echo -e "${YELLOW}Исправьте upstream-настройки через пункт 1.${NC}"
-    sleep 2
-    return 1
-  }
-
-  outbound_json=$(_cascade_build_outbound_json "$upstream_file") || return 1
-  fragment_json=$(_cascade_build_fragment_outbound_json) || return 1
-
   echo -e "${YELLOW}Включить каскад: весь default tcp/udp трафик пойдет через cascade-upstream? (y/N): ${NC}"
   local confirm
   read -r confirm
   [[ "$confirm" =~ ^[yYдД]$ ]] || return 1
 
-  backup_config "cascade_enable" || return 1
-  if ! safe_jq_write --argjson outbound "$outbound_json" --argjson fragment "$fragment_json" --arg address "$address" '
-      def upstream_direct_rule:
-        if ($address | test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")) then
-          {"type":"field","ip":[$address],"outboundTag":"direct"}
-        else
-          {"type":"field","domain":["domain:" + $address],"outboundTag":"direct"}
-        end;
-      def quic_block_rule:
-        {"type":"field","network":"udp","port":443,"outboundTag":"block"};
-      def upstream_direct_match:
-        (.outboundTag == "direct" and (
-          (((.domain // []) | index("domain:" + $address)) != null) or
-          (((.ip // []) | index($address)) != null)
-        ));
-      def quic_block_match:
-        (.type == "field" and (.network // "") == "udp" and ((.port | tostring) == "443") and .outboundTag == "block");
-      def catch_all:
-        (.type == "field" and (.network // "") == "tcp,udp"
-         and (.domain // null) == null and (.ip // null) == null and (.port // null) == null);
-      .outbounds = ((.outbounds // []) | map(select(.tag != "cascade-upstream" and .tag != "cascade-fragment"))) |
-      .outbounds += [$fragment, $outbound] |
-      .routing.rules = [
-        .routing.rules[]?
-        | select((upstream_direct_match or quic_block_match or catch_all) | not)
-      ] |
-      .routing.rules = [upstream_direct_rule, quic_block_rule] + .routing.rules + [{"type":"field","network":"tcp,udp","outboundTag":"cascade-upstream"}]
-    ' "$CONFIG_FILE"; then
-    echo -e "${RED}✗ Не удалось применить cascade config${NC}"
-    return 1
-  fi
-  fix_xray_permissions
-  if safe_restart_xray; then
-    touch "$CASCADE_ACTIVE_FILE"
-    chown xray:xray "$CASCADE_ACTIVE_FILE" 2>/dev/null || true
-    echo -e "${GREEN}✓ Каскад включен${NC}"
-  else
-    rm -f "$CASCADE_ACTIVE_FILE"
-    return 1
-  fi
+  _cascade_apply_current_upstream "cascade_enable" || return 1
+  echo -e "${GREEN}✓ Каскад включен${NC}"
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
   read -r _
 }
@@ -5553,7 +6179,8 @@ disable_cascade_mode() {
     address=$(jq -r '.address // ""' "$upstream_file" 2>/dev/null || echo "")
   fi
 
-  backup_config "cascade_disable" || return 1
+  local rollback_config=""
+  backup_config "cascade_disable" rollback_config || return 1
   if ! safe_jq_write --arg address "$address" '
       def catch_all:
         (.type == "field" and (.network // "") == "tcp,udp"
@@ -5575,7 +6202,7 @@ disable_cascade_mode() {
     return 1
   fi
   fix_xray_permissions
-  if safe_restart_xray; then
+  if safe_restart_xray "$rollback_config"; then
     rm -f "$CASCADE_ACTIVE_FILE"
     echo -e "${GREEN}✓ Каскад отключен${NC}"
   else
@@ -5669,14 +6296,15 @@ setup_outbound_server_menu() {
   read -r confirm
   [[ "$confirm" =~ ^[yYдД]$ ]] || return 1
 
-  backup_config "outbound_server" || return 1
+  local rollback_config=""
+  backup_config "outbound_server" rollback_config || return 1
   if ! add_inbound "$uuid" "tcp" "$port" "$sni" "$fingerprint" "" ""; then
     echo -e "${RED}✗ Не удалось создать inbound зарубежной ноды${NC}"
     return 1
   fi
 
   fix_xray_permissions
-  if ! safe_restart_xray; then
+  if ! safe_restart_xray "$rollback_config"; then
     echo -e "${RED}✗ Xray не принял конфиг — выполнен авто-откат. Inbound не поднят.${NC}"
     return 1
   fi
@@ -5727,7 +6355,9 @@ main_menu() {
   run_migration "xhttp_drop_host_2026"                 "XHTTP: remove forced Host check" _migrate_xhttp_drop_host_2026      || ((migration_failures++))
   run_migration "xhttp_path_sync_2026"                 "XHTTP path sync для существующих профилей" _migrate_xhttp_path_sync_2026 || ((migration_failures++))
   run_migration "xhttp_path_sync_after_multiroute_fix_2026" "XHTTP path sync после фикса multi-route генерации" _migrate_xhttp_path_sync_2026 || ((migration_failures++))
+  run_migration "xhttp_route_path_repair_2026"         "XHTTP route path repair"        _migrate_xhttp_route_path_repair_2026 || ((migration_failures++))
   run_migration "xhttp_reality_stream_one_2026"        "XHTTP Reality mode stream-one"   _migrate_xhttp_reality_stream_one_2026 || ((migration_failures++))
+  run_migration "legacy_udp443_block_removed_v3"       "Remove legacy bare UDP/443 block" migrate_legacy_managed_udp443_block_v3 || ((migration_failures++))
   run_migration "routing_v132_migrated"                "Routing default direct rule"      migrate_routing_config             || ((migration_failures++))
   run_migration "xhttp_mode_migrated"                  "XHTTP mode stream→auto"           migrate_xhttp_mode                 || ((migration_failures++))
   run_migration "xhttp_extra_restored"                 "XHTTP extra anti-DPI restore"     migrate_xhttp_extra_restore        || ((migration_failures++))
@@ -5759,6 +6389,10 @@ main_menu() {
   run_migration "subhttp_stale_profiles_410_2026" "HAPP subscription: stale profile diagnostics" _migrate_subhttp_stale_profiles_410_2026 || ((migration_failures++))
   run_migration "subhttp_happ_xhttp_compat_2026" "HAPP subscription: XHTTP mode/no-limit compatibility" _migrate_subhttp_happ_xhttp_compat_2026 || ((migration_failures++))
   run_migration "subhttp_happ_legacy_xhttp_2026" "HAPP subscription: prefer legacy XHTTP route" _migrate_subhttp_happ_legacy_xhttp_2026 || ((migration_failures++))
+
+  if ! migrate_remove_legacy_tcp_tuning_v3; then
+    echo -e "${YELLOW}⚠ Legacy host TCP tuning cleanup не завершён. Проверьте sysctl-конфиги вручную.${NC}"
+  fi
 
   # Aggregate report (RESEARCH §«Error reporting»): чтобы пользователь не пропустил
   # failure среди скроллящегося TUI вывода.
@@ -6090,12 +6724,11 @@ create_profile_all_routes() {
     return 1
   fi
 
-  if ! backup_config "create_profile_$name"; then
+  local rollback_config=""
+  if ! backup_config "create_profile_$name" rollback_config; then
     rm -f "$PROFILES_DIR/$name.json"
     return 1
   fi
-  local rollback_config
-  rollback_config=$(ls -t /usr/local/etc/xray/backups/config_*_create_profile_"$name".json 2>/dev/null | head -1)
 
   local created_ports=()
   local route_json label transport sni fingerprint pq grpc xhttp
@@ -6110,7 +6743,7 @@ create_profile_all_routes() {
     xhttp=$(jq -r '.xhttp_path // ""' <<< "$route_json")
 
     if [[ "$transport" == "xhttp" && "$xhttp" != /* ]]; then
-      [[ -n "$rollback_config" ]] && cp "$rollback_config" "$CONFIG_FILE"
+      _restore_config_backup "$rollback_config" >/dev/null 2>&1 || true
       rm -f "$PROFILES_DIR/$name.json"
       echo -e "${RED}✗ XHTTP route ${label} собран без path; профиль удалён${NC}"
       return 1
@@ -6118,7 +6751,7 @@ create_profile_all_routes() {
 
     echo -e "${CYAN} → Маршрут ${label}: ${transport} :${port}${NC}"
     if ! add_inbound "$uuid" "$transport" "$port" "$sni" "$fingerprint" "$grpc" "$xhttp" "$pq"; then
-      [[ -n "$rollback_config" ]] && cp "$rollback_config" "$CONFIG_FILE"
+      _restore_config_backup "$rollback_config" >/dev/null 2>&1 || true
       rm -f "$PROFILES_DIR/$name.json"
       local p
       for p in "${created_ports[@]}"; do
@@ -6134,7 +6767,7 @@ create_profile_all_routes() {
     created_ports+=("$port")
   done < <(jq -c '.[]' <<< "$routes_json")
 
-  if ! safe_restart_xray; then
+  if ! safe_restart_xray "$rollback_config"; then
     rm -f "$PROFILES_DIR/$name.json"
     local p
     for p in "${created_ports[@]}"; do
@@ -6276,7 +6909,8 @@ create_profile() {
     return 1
   fi
 
-  if ! backup_config "create_profile_$name"; then
+  local rollback_config=""
+  if ! backup_config "create_profile_$name" rollback_config; then
     rm -f "$PROFILES_DIR/$name.json"
     return 1
   fi
@@ -6295,7 +6929,7 @@ create_profile() {
     return 1
   fi
 
-  if ! safe_restart_xray; then
+  if ! safe_restart_xray "$rollback_config"; then
     rm -f "$PROFILES_DIR/$name.json"
     close_firewall_port "$port"
     echo ""
@@ -6676,7 +7310,8 @@ delete_profile_menu() {
       local route_count
       route_count=$(_profile_route_count "$profile_file")
 
-      if ! backup_config "delete_profile_$profile_name"; then
+      local rollback_config=""
+      if ! backup_config "delete_profile_$profile_name" rollback_config; then
         echo ""
         echo -e "${RED}✗ Не удалось создать бэкап config.json — профиль НЕ удалён${NC}"
         echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
@@ -6705,7 +7340,7 @@ delete_profile_menu() {
         done < <(jq -r '.routes[].port' "$profile_file")
 
         if [[ "$config_ok" == "true" ]]; then
-          if safe_restart_xray; then
+          if safe_restart_xray "$rollback_config"; then
             rm -f "$profile_file"
             local p
             for p in "${route_ports[@]}"; do
@@ -6754,7 +7389,7 @@ delete_profile_menu() {
       fi
 
       if [[ "$config_ok" == "true" ]]; then
-        if safe_restart_xray; then
+        if safe_restart_xray "$rollback_config"; then
           rm -f "$PROFILES_DIR/$profile_name.json"
 
           # Close firewall port if not used by other profiles
@@ -7146,7 +7781,8 @@ change_sni_menu() {
     echo -n -e "${YELLOW}Применить SNI '$new_sni'? (y/N): ${NC}"
     read confirm
     if [[ "$confirm" =~ ^[yYдД]$ ]]; then
-      if ! backup_config "change_sni_$selected"; then
+      local rollback_config=""
+      if ! backup_config "change_sni_$selected" rollback_config; then
         echo -e "${RED}✗ Не удалось создать бэкап config.json${NC}"
         sleep 2
         return
@@ -7160,7 +7796,7 @@ change_sni_menu() {
       fi
 
       fix_xray_permissions
-      if ! safe_restart_xray; then
+      if ! safe_restart_xray "$rollback_config"; then
         echo -e "${RED}✗ Xray не перезапустился — config.json откачен, профили НЕ изменены${NC}"
         sleep 2
         return
@@ -7313,7 +7949,8 @@ change_sni_menu() {
     return
   fi
 
-  if ! backup_config "change_sni_$selected"; then
+  local rollback_config=""
+  if ! backup_config "change_sni_$selected" rollback_config; then
     echo -e "${RED}✗ Не удалось создать бэкап config.json${NC}"
     sleep 2
     return
@@ -7327,7 +7964,7 @@ change_sni_menu() {
   fi
 
   fix_xray_permissions
-  if ! safe_restart_xray; then
+  if ! safe_restart_xray "$rollback_config"; then
     echo -e "${RED}✗ Xray не перезапустился — config.json откачен, профили НЕ изменены${NC}"
     sleep 2
     return
@@ -7494,7 +8131,8 @@ change_fingerprint_menu() {
     return
   fi
 
-  if ! backup_config "change_fingerprint_$selected"; then
+  local rollback_config=""
+  if ! backup_config "change_fingerprint_$selected" rollback_config; then
     echo -e "${RED}✗ Не удалось создать бэкап config.json${NC}"
     sleep 2
     return
@@ -7510,7 +8148,7 @@ change_fingerprint_menu() {
   fi
 
   fix_xray_permissions
-  if ! safe_restart_xray; then
+  if ! safe_restart_xray "$rollback_config"; then
     echo -e "${RED}✗ Xray не перезапустился — config.json откачен, профили НЕ изменены${NC}"
     sleep 2
     return
@@ -7741,7 +8379,8 @@ change_port_menu() {
     return
   fi
 
-  if ! backup_config "change_port_$profile_name"; then
+  local rollback_config=""
+  if ! backup_config "change_port_$profile_name" rollback_config; then
     echo -e "${RED}✗ Не удалось создать бэкап config.json${NC}"
     sleep 2
     return
@@ -7807,7 +8446,7 @@ change_port_menu() {
   fi
 
   fix_xray_permissions
-  if ! safe_restart_xray; then
+  if ! safe_restart_xray "$rollback_config"; then
     echo -e "${RED}✗ Xray не перезапустился — config.json откачен, профили и firewall НЕ изменены${NC}"
     echo -n -e "${YELLOW}Нажмите Enter...${NC}"; read
     return
@@ -7987,17 +8626,29 @@ manage_profile_advanced_menu() {
     return
   fi
 
+  local rollback_config="" profiles_snapshot=""
+  _snapshot_profiles profiles_snapshot || {
+    echo -e "${RED}✗ Не удалось создать снимок profile JSON${NC}"
+    sleep 2
+    return
+  }
+
   if ! safe_jq_write \
       --argjson testpre "$testpre_val" \
       --argjson testseed "$testseed_json" \
       '. + {testpre: $testpre, testseed: $testseed}' \
       "$profile_file"; then
+    _discard_profiles_snapshot "$profiles_snapshot"
     echo -e "${RED}✗ Ошибка записи profile JSON${NC}"
     sleep 2
     return
   fi
 
-  backup_config "vision_seed"
+  backup_config "vision_seed" rollback_config || {
+    _restore_profiles_snapshot "$profiles_snapshot" >/dev/null 2>&1 || true
+    sleep 2
+    return
+  }
   if ! safe_jq_write \
       --argjson port "$port" \
       --arg uuid "$uuid" \
@@ -8005,13 +8656,20 @@ manage_profile_advanced_menu() {
       --argjson testseed "$testseed_json" \
       '(.inbounds[] | select(.port == $port) | .settings.clients[] | select(.id == $uuid)) |= (. + {testpre: $testpre, testseed: $testseed})' \
       "$CONFIG_FILE"; then
+    _restore_profiles_snapshot "$profiles_snapshot" >/dev/null 2>&1 || true
     echo -e "${RED}✗ Ошибка записи config.json${NC}"
     sleep 2
     return
   fi
 
   fix_xray_permissions
-  safe_restart_xray
+  if ! safe_restart_xray "$rollback_config"; then
+    _restore_profiles_snapshot "$profiles_snapshot" >/dev/null 2>&1 || true
+    echo -e "${RED}✗ Xray не перезапустился — profile JSON восстановлен${NC}"
+    sleep 2
+    return
+  fi
+  _discard_profiles_snapshot "$profiles_snapshot"
   echo -e "${GREEN}Vision Seed применен. testpre=${testpre_val}, testseed=${testseed_json}${NC}"
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
   read -r _
@@ -8414,7 +9072,8 @@ upgrade_profile_to_pq_menu() {
   echo -e "${CYAN}→ Phase 1b: бэкап и замена inbound в config.json${NC}"
 
   # Шаг A: бэкап (на случай ошибки)
-  backup_config "upgrade_profile_pq_$selected"
+  local rollback_config=""
+  backup_config "upgrade_profile_pq_$selected" rollback_config || return
 
   # Шаг B: читаем содержимое decryption ОДИН раз
   local VLESS_DECRYPTION
@@ -8498,7 +9157,7 @@ UPGEOF
 
   # Шаг F: восстановить permissions и рестарт с auto-rollback ДО profile JSON.
   fix_xray_permissions
-  if ! safe_restart_xray; then
+  if ! safe_restart_xray "$rollback_config"; then
     echo -e "${RED}✗ safe_restart_xray failed — config откачен на бэкап upgrade_profile_pq_$selected${NC}"
     echo -e "${YELLOW}  Profile JSON не менялся — состояние профилей сохранено.${NC}"
     sleep 3; return
@@ -8577,6 +9236,8 @@ uninstall_adguard_home() {
 
   echo ""
 
+  local rollback_config=""
+
   # Шаг 3: Остановка службы
   echo -e "${CYAN}Шаг 1/6: Остановка AdGuard Home...${NC}"
   systemctl stop AdGuardHome 2>/dev/null || true
@@ -8592,7 +9253,7 @@ uninstall_adguard_home() {
   # Шаг 5: Восстановление Xray DNS
   echo -e "${CYAN}Шаг 3/6: Восстановление Xray DNS...${NC}"
   if [[ -f "$CONFIG_FILE" ]]; then
-    backup_config "adguard_dns_restore"
+    backup_config "adguard_dns_restore" rollback_config || true
     if safe_jq_write '.dns = {
       "servers": [
         "https+local://1.1.1.1/dns-query",
@@ -8633,7 +9294,7 @@ uninstall_adguard_home() {
 
   # Перезапуск Xray
   echo -e "${CYAN}Шаг 6/6: Перезапуск Xray...${NC}"
-  safe_restart_xray
+  safe_restart_xray "$rollback_config"
 
   echo ""
   echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"

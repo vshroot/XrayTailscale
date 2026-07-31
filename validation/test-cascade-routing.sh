@@ -34,7 +34,7 @@ cat > "$CONFIG_FILE" <<'JSON'
   "routing": {
     "rules": [
       {"type":"field","domain":["domain:example.ru"],"outboundTag":"direct"},
-      {"type":"field","network":"udp","port":443,"outboundTag":"block"},
+      {"type":"field","network":"udp","port":443,"inboundTag":["operator-custom"],"outboundTag":"block"},
       {"type":"field","network":"tcp,udp","outboundTag":"direct"},
       {"type":"field","network":"tcp,udp","outboundTag":"direct"}
     ]
@@ -104,8 +104,8 @@ jq -e '.outbounds[] | select(.tag == "cascade-fragment" and .protocol == "freedo
   || fail "cascade fragment missing after enable"
 jq -e '.routing.rules[0] | select(.outboundTag == "direct" and .ip[0] == "203.0.113.10")' "$CONFIG_FILE" >/dev/null \
   || fail "upstream direct IP exception missing"
-jq -e '.routing.rules[1] | select(.network == "udp" and (.port|tostring) == "443" and .outboundTag == "block")' "$CONFIG_FILE" >/dev/null \
-  || fail "udp/443 block rule missing before cascade catch-all"
+jq -e '.routing.rules[] | select(.network == "udp" and (.port|tostring) == "443" and .inboundTag == ["operator-custom"] and .outboundTag == "block")' "$CONFIG_FILE" >/dev/null \
+  || fail "operator-scoped udp/443 block rule was not preserved"
 jq -e '.routing.rules[] | select(.domain[0] == "domain:example.ru" and .outboundTag == "direct")' "$CONFIG_FILE" >/dev/null \
   || fail "existing bypass direct rule was not preserved"
 jq -e '.routing.rules[] | select(.network == "tcp,udp" and .outboundTag == "cascade-upstream")' "$CONFIG_FILE" >/dev/null \
@@ -124,8 +124,8 @@ disable_cascade_mode < <(printf 'y\n\n')
   || fail "cascade upstream direct exception still present after disable"
 jq -e '.routing.rules[] | select(.network == "tcp,udp" and .outboundTag == "direct")' "$CONFIG_FILE" >/dev/null \
   || fail "catch-all was not restored to direct"
-jq -e '.routing.rules[] | select(.network == "udp" and (.port|tostring) == "443" and .outboundTag == "block")' "$CONFIG_FILE" >/dev/null \
-  || fail "baseline udp/443 block rule must be preserved after disable"
+jq -e '.routing.rules[] | select(.network == "udp" and (.port|tostring) == "443" and .inboundTag == ["operator-custom"] and .outboundTag == "block")' "$CONFIG_FILE" >/dev/null \
+  || fail "operator-scoped udp/443 block rule must be preserved after disable"
 [[ ! -f "$CASCADE_ACTIVE_FILE" ]] || fail "cascade active marker still present after disable"
 
 echo "✓ Cascade routing checks passed"

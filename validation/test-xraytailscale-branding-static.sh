@@ -32,9 +32,13 @@ grep -q 'source /usr/local/bin/xraytailscale' xraytailscale || fail "subhttp han
 grep -q '_refresh_legacy_ascii_art()' xraytailscale || fail "xraytailscale must refresh legacy cached ASCII art"
 grep -q 'grep -q "Киса" "$ASCII_ART"' xraytailscale || fail "legacy cached ASCII art must be detected"
 
-if rg -n "${old_lower}|${old_title}|${old_upper}" \
+legacy_matches=$(rg -n "${old_lower}|${old_title}|${old_upper}" \
     --glob '!validation/test-xraytailscale-branding-static.sh' \
-    --glob '!.git/**' .; then
+    --glob '!.git/**' . || true)
+legacy_matches=$(printf '%s\n' "$legacy_matches" | grep -Ev \
+  'LEGACY_XRAYEBATOR_TCP_TUNING_FILE|minimal_xeb|for legacy_candidate in "\$legacy_file" "\$LEGACY_XRAYEBATOR_TCP_TUNING_FILE"' || true)
+if [[ -n "$legacy_matches" ]]; then
+  printf '%s\n' "$legacy_matches"
   fail "old Xrayebator naming remains"
 fi
 
