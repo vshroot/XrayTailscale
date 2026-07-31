@@ -87,10 +87,11 @@ assert_order "$tmpdir/change_sni_menu" 'if ! safe_restart_xray "$rollback_config
 assert_not_contains "$tmpdir/change_sni_menu" 'safe_restart_xray;'
 echo "  ok change_sni_menu"
 
-assert_contains "$tmpdir/change_fingerprint_menu" 'backup_config "change_fingerprint_$selected" rollback_config'
-assert_contains "$tmpdir/change_fingerprint_menu" 'if ! safe_restart_xray "$rollback_config"; then'
-assert_order "$tmpdir/change_fingerprint_menu" 'select(.port == $port) | .streamSettings.realitySettings.fingerprint' 'if ! safe_restart_xray "$rollback_config"; then'
-assert_order "$tmpdir/change_fingerprint_menu" 'if ! safe_restart_xray "$rollback_config"; then' 'update_all_profiles_on_port "$port" "fingerprint" "$new_fp"'
+assert_contains "$tmpdir/change_fingerprint_menu" 'update_profile_fingerprint "$profile_file" "$route_index" "$new_fp"'
+assert_not_contains "$tmpdir/change_fingerprint_menu" 'backup_config "change_fingerprint_$selected" rollback_config'
+assert_not_contains "$tmpdir/change_fingerprint_menu" 'streamSettings.realitySettings.fingerprint'
+assert_not_contains "$tmpdir/change_fingerprint_menu" 'update_all_profiles_on_port "$port" "fingerprint" "$new_fp"'
+assert_not_contains "$tmpdir/change_fingerprint_menu" 'safe_restart_xray "$rollback_config"'
 assert_not_contains "$tmpdir/change_fingerprint_menu" 'safe_restart_xray;'
 echo "  ok change_fingerprint_menu"
 

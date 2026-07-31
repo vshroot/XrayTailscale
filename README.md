@@ -105,6 +105,8 @@ The generated multi-route profile can include:
 - XHTTP legacy fallback route.
 - XHTTP post-quantum route with `mlkem768x25519plus`.
 
+For new profiles, the default client TLS fingerprint is `firefox`. Existing profiles keep their stored fingerprint, including legacy `chrome` values. Changing a profile or route fingerprint updates only the profile metadata used by generated URLs and subscriptions; it does not restart Xray and does not affect other users sharing the same inbound port.
+
 If the subscription URL leaks, revoke it from the HAPP subscription menu. Revocation rotates the profile token.
 
 HAPP routing JSON is optional. Enable it only when you need client-side routing rules from the subscription, because conflicting routing profiles in HAPP can override the client's local routing decisions.
@@ -296,6 +298,7 @@ From the repository root:
 
 ```bash
 bash -n xraytailscale install.sh update.sh uninstall.sh
+bash validation/test-client-only-fingerprint.sh
 bash validation/test-vless-url-generation.sh
 bash validation/test-bulk-happ-users.sh
 bash validation/test-cascade-routing.sh

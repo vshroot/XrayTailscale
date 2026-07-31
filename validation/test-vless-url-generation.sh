@@ -162,7 +162,7 @@ JSON
 stale_metadata_urls=$(_generate_vless_urls_for_profile "$PROFILES_DIR/stale-metadata.json") \
   || fail "live metadata URL generation failed"
 grep -q 'sni=www.ozon.ru' <<< "$stale_metadata_urls" || fail "URL generation must use live inbound SNI"
-grep -q 'fp=chrome' <<< "$stale_metadata_urls" || fail "URL generation must use live inbound fingerprint"
+grep -q 'fp=firefox' <<< "$stale_metadata_urls" || fail "URL generation must use profile fingerprint"
 grep -q 'type=xhttp&path=%2Fxhttp-test&mode=stream-one#stale-metadata-xhttp-legacy' <<< "$stale_metadata_urls" \
   || fail "URL generation must use live inbound XHTTP path"
 

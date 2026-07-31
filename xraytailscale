@@ -38,6 +38,7 @@ TCP_CC_ACTIVE_FILE="/proc/sys/net/ipv4/tcp_congestion_control"
 TCP_CC_AVAILABLE_FILE="/proc/sys/net/ipv4/tcp_available_congestion_control"
 HOST_TUNING_MIGRATION_MARKER="/usr/local/etc/xray/.host_tcp_tuning_removed_v3"
 SYSCTL_SCAN_PATHS="/etc/sysctl.conf:/etc/sysctl.d:/usr/lib/sysctl.d:/lib/sysctl.d"
+DEFAULT_CLIENT_FINGERPRINT="firefox"
 GITHUB_USER="${GITHUB_USER:-vshroot}"
 GITHUB_REPO="${GITHUB_REPO:-XrayTailscale}"
 GITHUB_BRANCH="${GITHUB_BRANCH:-main}"
@@ -344,7 +345,6 @@ _live_route_metadata_for_client() {
         | select(any($in.settings.clients[]?; (.id // "") == $uuid and ((.flow // "") == $flow)))
         | [
             ($in.streamSettings.realitySettings.serverNames[0] // ""),
-            ($in.streamSettings.realitySettings.fingerprint // ""),
             (if $transport == "grpc" then ($in.streamSettings.grpcSettings.serviceName // "") else "" end),
             (if $transport == "xhttp" then ($in.streamSettings.xhttpSettings.path // "") else "" end),
             ($in.settings.decryption // "none")
@@ -388,13 +388,13 @@ _generate_vless_url_pure() {
   if [[ -n "$route_index" ]]; then
     transport=$(jq -r --argjson i "$route_index" '.routes[$i].transport // empty' "$profile_file") || return 1
     port=$(jq -r --argjson i "$route_index" '.routes[$i].port // empty' "$profile_file") || return 1
-    fingerprint=$(jq -r --argjson i "$route_index" '.routes[$i].fingerprint // .fingerprint // "chrome"' "$profile_file")
+    fingerprint=$(jq -r --argjson i "$route_index" --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.routes[$i].fingerprint // .fingerprint // $default_fp' "$profile_file")
     sni=$(jq -r --argjson i "$route_index" '.routes[$i].sni // .sni // "www.ozon.ru"' "$profile_file")
     route_label=$(jq -r --argjson i "$route_index" '.routes[$i].label // .routes[$i].transport // empty' "$profile_file")
   else
     transport=$(jq -r '.transport' "$profile_file") || return 1
     port=$(jq -r '.port' "$profile_file") || return 1
-    fingerprint=$(jq -r '.fingerprint // "chrome"' "$profile_file")
+    fingerprint=$(jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.fingerprint // $default_fp' "$profile_file")
     sni=$(jq -r '.sni // "www.ozon.ru"' "$profile_file")
   fi
   [[ -n "$route_label" && "$route_label" != "null" ]] && profile_name="${profile_name}-${route_label}"
@@ -416,12 +416,12 @@ _generate_vless_url_pure() {
   encoded_xhttp_path=$(jq -nr --arg path "$xhttp_path" '$path|@uri')
 
   # Live-config guard: route usable only when the inbound has this profile UUID with
-  # the expected flow. Metadata comes from live config.json to avoid stale profile JSON.
-  local live_metadata live_sni live_fingerprint live_grpc_service_name live_xhttp_path live_decryption
+  # the expected flow. Server-side metadata repairs SNI/path/decryption, but client
+  # TLS fingerprint stays profile-owned and is emitted only in URLs/subscriptions.
+  local live_metadata live_sni live_grpc_service_name live_xhttp_path live_decryption
   live_metadata=$(_live_route_metadata_for_client "$uuid" "$transport" "$port") || return 1
-  IFS='|' read -r live_sni live_fingerprint live_grpc_service_name live_xhttp_path live_decryption <<< "$live_metadata"
+  IFS='|' read -r live_sni live_grpc_service_name live_xhttp_path live_decryption <<< "$live_metadata"
   [[ -n "$live_sni" && "$live_sni" != "null" ]] && sni="$live_sni"
-  [[ -n "$live_fingerprint" && "$live_fingerprint" != "null" ]] && fingerprint="$live_fingerprint"
   case "$transport" in
     grpc)
       [[ -n "$live_grpc_service_name" && "$live_grpc_service_name" != "null" ]] && grpc_service_name="$live_grpc_service_name"
@@ -1079,9 +1079,9 @@ select_route_for_profile() {
 
   echo ""
   echo -e "${YELLOW}Профиль содержит несколько маршрутов. Выберите маршрут для ${action_label}:${NC}\n"
-  jq -r '
+  jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '
     to_entries[] |
-    "  \(.key + 1)) \(.value.label // .value.transport): \(.value.transport) :\(.value.port) sni=\(.value.sni // "n/a") fp=\(.value.fingerprint // "chrome")"
+    "  \(.key + 1)) \(.value.label // .value.transport): \(.value.transport) :\(.value.port) sni=\(.value.sni // "n/a") fp=\(.value.fingerprint // $default_fp)"
   ' < <(jq '.routes // []' "$profile_file")
   echo -e "  ${CYAN}0)${NC} Назад"
   echo ""
@@ -1150,6 +1150,28 @@ update_all_profiles_on_port() {
     fi
   done
   [[ "$ok" == "true" ]]
+}
+
+# Update the client-side Reality fingerprint for exactly one profile route.
+# Fingerprint controls the client's TLS ClientHello and is not an inbound/port setting.
+# For route 0, keep the legacy top-level mirror in sync for older readers.
+update_profile_fingerprint() {
+  local profile_file=$1
+  local route_index=$2
+  local fingerprint=$3
+
+  if [[ -n "$route_index" ]]; then
+    safe_jq_write --argjson i "$route_index" --arg fp "$fingerprint" '
+      if (.routes[$i] // null) == null then
+        error("route not found")
+      else
+        .routes[$i].fingerprint = $fp |
+        if $i == 0 then .fingerprint = $fp else . end
+      end
+    ' "$profile_file"
+  else
+    safe_jq_write --arg fp "$fingerprint" '.fingerprint = $fp' "$profile_file"
+  fi
 }
 
 # Update the stored port for every profile/route that references old_port.
@@ -1491,6 +1513,61 @@ run_migration() {
       return 1
       ;;
   esac
+}
+
+# Remove the legacy server-side fingerprint field. Xray ignores this field for
+# REALITY inbounds: the effective fingerprint lives only in profile/client URLs.
+# Returns: 0=changed, 1=no-op, 2=write failure.
+_remove_ignored_reality_server_fingerprints() {
+  local config_file="${1:-$CONFIG_FILE}"
+  [[ -f "$config_file" ]] || return 1
+
+  if ! jq -e '
+    any(.inbounds[]?; ((.streamSettings.realitySettings? // {}) | has("fingerprint")))
+  ' "$config_file" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! safe_jq_write '
+    (.inbounds[]?
+      | select((.streamSettings.realitySettings? // {}) | has("fingerprint"))
+      | .streamSettings.realitySettings) |= del(.fingerprint)
+  ' "$config_file"; then
+    return 2
+  fi
+
+  return 0
+}
+
+# State-only migration: cleaning an ignored server field does not require an
+# Xray restart and existing profile fingerprints are intentionally preserved.
+migrate_client_fingerprint_state_2026() {
+  local marker="${1:-/usr/local/etc/xray/.client_fingerprint_state_2026}"
+  [[ -f "$marker" ]] && return 0
+
+  local rollback_config=""
+  backup_config "client_fingerprint_state_2026" rollback_config || return 1
+
+  local clean_rc=0
+  _remove_ignored_reality_server_fingerprints "$CONFIG_FILE" || clean_rc=$?
+  if [[ "$clean_rc" -ge 2 ]]; then
+    _restore_config_backup "$rollback_config" || true
+    echo -e "${RED}  ✗ Не удалось удалить устаревший server-side fingerprint${NC}"
+    return 1
+  fi
+
+  if ! touch "$marker"; then
+    _restore_config_backup "$rollback_config" || true
+    echo -e "${RED}  ✗ Не удалось записать migration marker: $marker${NC}"
+    return 1
+  fi
+  chown xray:xray "$marker" 2>/dev/null || true
+
+  if [[ "$clean_rc" -eq 0 ]]; then
+    fix_xray_permissions
+    echo -e "${GREEN}  ✓ Fingerprint переведён в client-only режим (профили сохранены)${NC}"
+  fi
+  return 0
 }
 
 migrate_transport_profile_metadata() {
@@ -4790,6 +4867,7 @@ _bulk_write_user_profile() {
     --arg sub_token "$sub_token" \
     --arg batch_id "$batch_id" \
     --arg created "$created" \
+    --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" \
     --argjson routes "$routes_json" \
     '{
       name: $name,
@@ -4806,7 +4884,7 @@ _bulk_write_user_profile() {
     + {
       transport: $routes[0].transport,
       port: $routes[0].port,
-      fingerprint: ($routes[0].fingerprint // "chrome"),
+      fingerprint: ($routes[0].fingerprint // $default_fp),
       sni: ($routes[0].sni // "www.ozon.ru")
     }
     + (if (($routes[0].xhttp_path // "") | length) > 0 then {xhttp_path: $routes[0].xhttp_path} else {} end)
@@ -4839,14 +4917,14 @@ _bulk_add_users_to_inbounds() {
 
 _bulk_sync_user_profile_to_seed_routes() {
   local profile_file="$1" routes_json="$2"
-  safe_jq_write --argjson routes "$routes_json" '
+  safe_jq_write --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" --argjson routes "$routes_json" '
     .routes = $routes
     | .schema_version = 3
     | .multi_route = true
     | .primary_route = ($routes[0].label // "xhttp-legacy")
     | .transport = ($routes[0].transport // .transport)
     | .port = ($routes[0].port // .port)
-    | .fingerprint = ($routes[0].fingerprint // "chrome")
+    | .fingerprint = ($routes[0].fingerprint // $default_fp)
     | .sni = ($routes[0].sni // "www.ozon.ru")
     | .pq_enabled = ($routes[0].pq_enabled // false)
     | if (($routes[0].xhttp_path // "") | length) > 0 then
@@ -5708,7 +5786,7 @@ _cascade_parse_vless_uri() {
   transport="${transport:-tcp}"
   sni=$(_cascade_query_param "$query" sni serverName 2>/dev/null || true)
   fingerprint=$(_cascade_query_param "$query" fp 2>/dev/null || true)
-  fingerprint="${fingerprint:-chrome}"
+  fingerprint="${fingerprint:-$DEFAULT_CLIENT_FINGERPRINT}"
   public_key=$(_cascade_query_param "$query" pbk publicKey 2>/dev/null || true)
   short_id=$(_cascade_query_param "$query" sid shortId 2>/dev/null || true)
   flow=$(_cascade_query_param "$query" flow 2>/dev/null || true)
@@ -5787,7 +5865,7 @@ _cascade_validate_upstream_file() {
   public_key=$(jq -r '.public_key // empty' "$upstream_file")
   short_id=$(jq -r '.short_id // ""' "$upstream_file")
   sni=$(jq -r '.sni // empty' "$upstream_file")
-  fingerprint=$(jq -r '.fingerprint // "chrome"' "$upstream_file")
+  fingerprint=$(jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.fingerprint // $default_fp' "$upstream_file")
   transport=$(jq -r '.transport // "tcp"' "$upstream_file")
   flow=$(jq -r '.flow // ""' "$upstream_file")
   packet_encoding=$(jq -r '.packet_encoding // ""' "$upstream_file")
@@ -5856,7 +5934,7 @@ _cascade_build_outbound_json() {
   local upstream_file=$1
   _cascade_validate_upstream_file "$upstream_file" || return 1
 
-  jq -cn --slurpfile upstream "$upstream_file" '
+  jq -cn --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" --slurpfile upstream "$upstream_file" '
     $upstream[0] as $u |
     ($u.transport // "tcp") as $transport |
     {
@@ -5882,7 +5960,7 @@ _cascade_build_outbound_json() {
         },
         realitySettings: {
           serverName: $u.sni,
-          fingerprint: ($u.fingerprint // "chrome"),
+          fingerprint: ($u.fingerprint // $default_fp),
           publicKey: $u.public_key,
           shortId: ($u.short_id // ""),
           spiderX: "/"
@@ -5985,7 +6063,7 @@ _cascade_apply_current_upstream() {
 }
 
 _cascade_validate_upstream_fields() {
-  local address=$1 port=$2 uuid=$3 public_key=$4 short_id=$5 sni=$6 fingerprint=${7:-chrome} packet_encoding=${8:-}
+  local address=$1 port=$2 uuid=$3 public_key=$4 short_id=$5 sni=$6 fingerprint=${7:-$DEFAULT_CLIENT_FINGERPRINT} packet_encoding=${8:-}
   if [[ -z "$address" || "$address" =~ ^(localhost$|0\.0\.0\.0$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[0-1])\.) ]]; then
     echo -e "${RED}✗ Upstream address не должен быть локальным/private${NC}"
     return 1
@@ -6094,9 +6172,9 @@ configure_cascade_upstream() {
   read -r short_id
   echo -n -e "${YELLOW}SNI зарубежной ноды: ${NC}"
   read -r sni
-  echo -n -e "${YELLOW}Fingerprint [chrome]: ${NC}"
+  echo -n -e "${YELLOW}Fingerprint [$DEFAULT_CLIENT_FINGERPRINT]: ${NC}"
   read -r fingerprint
-  fingerprint=${fingerprint:-chrome}
+  fingerprint=${fingerprint:-$DEFAULT_CLIENT_FINGERPRINT}
   echo -n -e "${YELLOW}packetEncoding [пусто для обычного tcp]: ${NC}"
   read -r packet_encoding
 
@@ -6278,9 +6356,9 @@ setup_outbound_server_menu() {
     return 1
   fi
 
-  echo -n -e "${YELLOW}Fingerprint [chrome]: ${NC}"
+  echo -n -e "${YELLOW}Fingerprint [$DEFAULT_CLIENT_FINGERPRINT]: ${NC}"
   read -r fingerprint
-  fingerprint=${fingerprint:-chrome}
+  fingerprint=${fingerprint:-$DEFAULT_CLIENT_FINGERPRINT}
   if [[ ! "$fingerprint" =~ ^(chrome|firefox|safari|ios|android|edge|qq|random|randomized)$ ]]; then
     echo -e "${RED}✗ Некорректный fingerprint${NC}"
     sleep 2
@@ -6312,7 +6390,7 @@ setup_outbound_server_menu() {
   local actual_sni actual_short_id actual_fp public_key address
   actual_sni=$(jq -r --argjson p "$port" '.inbounds[]? | select(.port == $p) | .streamSettings.realitySettings.serverNames[0] // empty' "$CONFIG_FILE" 2>/dev/null)
   actual_short_id=$(jq -r --argjson p "$port" '.inbounds[]? | select(.port == $p) | .streamSettings.realitySettings.shortIds[0] // empty' "$CONFIG_FILE" 2>/dev/null)
-  actual_fp=$(jq -r --argjson p "$port" '.inbounds[]? | select(.port == $p) | .streamSettings.realitySettings.fingerprint // "chrome"' "$CONFIG_FILE" 2>/dev/null)
+  actual_fp="$fingerprint"
   [[ -z "$actual_sni" ]] && actual_sni="$sni"
   [[ -z "$actual_fp" ]] && actual_fp="$fingerprint"
   public_key=$(cat "$PUBLIC_KEY_FILE" 2>/dev/null || true)
@@ -6351,6 +6429,7 @@ main_menu() {
 
   local migration_failures=0
 
+  migrate_client_fingerprint_state_2026 || ((migration_failures++))
   run_migration "xhttp_migrated"                       "XHTTP host/SNI sync"             migrate_xhttp_profiles             || ((migration_failures++))
   run_migration "xhttp_drop_host_2026"                 "XHTTP: remove forced Host check" _migrate_xhttp_drop_host_2026      || ((migration_failures++))
   run_migration "xhttp_path_sync_2026"                 "XHTTP path sync для существующих профилей" _migrate_xhttp_path_sync_2026 || ((migration_failures++))
@@ -6577,12 +6656,12 @@ create_profile_menu() {
 
   case $route_choice in
     1) create_profile_all_routes "$profile_name" ;;
-    2) create_profile "$profile_name" "tcp" "" "chrome" ;;
-    3) create_profile "$profile_name" "xhttp" "" "chrome" ;;
-    4) create_profile "$profile_name" "tcp-mux" "" "chrome" ;;
-    5) create_profile "$profile_name" "grpc" "" "chrome" ;;
+    2) create_profile "$profile_name" "tcp" "" "$DEFAULT_CLIENT_FINGERPRINT" ;;
+    3) create_profile "$profile_name" "xhttp" "" "$DEFAULT_CLIENT_FINGERPRINT" ;;
+    4) create_profile "$profile_name" "tcp-mux" "" "$DEFAULT_CLIENT_FINGERPRINT" ;;
+    5) create_profile "$profile_name" "grpc" "" "$DEFAULT_CLIENT_FINGERPRINT" ;;
     6) create_profile "$profile_name" "tcp-utls" "" "firefox" ;;
-    7) create_profile "$profile_name" "tcp-xudp" "" "chrome" "api-maps.yandex.ru" ;;
+    7) create_profile "$profile_name" "tcp-xudp" "" "$DEFAULT_CLIENT_FINGERPRINT" "api-maps.yandex.ru" ;;
     xorpub)
       # Hidden advanced opt-in (research §«Code Examples» #8 / D1 second-opinion).
       # xorpub mode = security theater в контексте Reality (codex+kimi подтвердили 2026-05-09).
@@ -6592,7 +6671,7 @@ create_profile_menu() {
       echo -e "${YELLOW}  Plan 6.2 не реализует отдельный xorpub-параметр vlessenc — профиль будет создан${NC}"
       echo -e "${YELLOW}  с дефолтным native ключом. xorpub-генерация — backlog (defer to v2.1).${NC}"
       sleep 3
-      create_profile "$profile_name" "xhttp" "" "chrome"
+      create_profile "$profile_name" "xhttp" "" "$DEFAULT_CLIENT_FINGERPRINT"
       ;;
   esac
 }
@@ -6651,23 +6730,23 @@ create_profile_all_routes() {
 
   defaults=$(build_transport_defaults "xhttp") || { rm -f "$routes_tmp"; return 1; }
   IFS='|' read -r port _ xhttp_path <<< "$defaults"
-  _append_route_json "xhttp-legacy" "xhttp" "$port" "$default_sni" "chrome" false "" "$xhttp_path" || { rm -f "$routes_tmp"; return 1; }
+  _append_route_json "xhttp-legacy" "xhttp" "$port" "$default_sni" "$DEFAULT_CLIENT_FINGERPRINT" false "" "$xhttp_path" || { rm -f "$routes_tmp"; return 1; }
 
   defaults=$(build_transport_defaults "xhttp") || { rm -f "$routes_tmp"; return 1; }
   IFS='|' read -r port _ xhttp_path <<< "$defaults"
-  _append_route_json "xhttp-pq" "xhttp" "$port" "$default_sni" "chrome" true "" "$xhttp_path" || { rm -f "$routes_tmp"; return 1; }
+  _append_route_json "xhttp-pq" "xhttp" "$port" "$default_sni" "$DEFAULT_CLIENT_FINGERPRINT" true "" "$xhttp_path" || { rm -f "$routes_tmp"; return 1; }
 
   defaults=$(build_transport_defaults "tcp-mux") || { rm -f "$routes_tmp"; return 1; }
   IFS='|' read -r port _ _ <<< "$defaults"
-  _append_route_json "tcp-mux" "tcp-mux" "$port" "$default_sni" "chrome" false "" "" || { rm -f "$routes_tmp"; return 1; }
+  _append_route_json "tcp-mux" "tcp-mux" "$port" "$default_sni" "$DEFAULT_CLIENT_FINGERPRINT" false "" "" || { rm -f "$routes_tmp"; return 1; }
 
   defaults=$(build_transport_defaults "grpc") || { rm -f "$routes_tmp"; return 1; }
   IFS='|' read -r port grpc_service_name _ <<< "$defaults"
-  _append_route_json "grpc" "grpc" "$port" "www.cloudflare.com" "chrome" false "$grpc_service_name" "" || { rm -f "$routes_tmp"; return 1; }
+  _append_route_json "grpc" "grpc" "$port" "www.cloudflare.com" "$DEFAULT_CLIENT_FINGERPRINT" false "$grpc_service_name" "" || { rm -f "$routes_tmp"; return 1; }
 
   defaults=$(build_transport_defaults "tcp") || { rm -f "$routes_tmp"; return 1; }
   IFS='|' read -r port _ _ <<< "$defaults"
-  _append_route_json "tcp-vision" "tcp" "$port" "$default_sni" "chrome" false "" "" || { rm -f "$routes_tmp"; return 1; }
+  _append_route_json "tcp-vision" "tcp" "$port" "$default_sni" "$DEFAULT_CLIENT_FINGERPRINT" false "" "" || { rm -f "$routes_tmp"; return 1; }
 
   defaults=$(build_transport_defaults "tcp-utls") || { rm -f "$routes_tmp"; return 1; }
   IFS='|' read -r port _ _ <<< "$defaults"
@@ -6675,7 +6754,7 @@ create_profile_all_routes() {
 
   defaults=$(build_transport_defaults "tcp-xudp") || { rm -f "$routes_tmp"; return 1; }
   IFS='|' read -r port _ _ <<< "$defaults"
-  _append_route_json "tcp-xudp" "tcp-xudp" "$port" "api-maps.yandex.ru" "chrome" false "" "" || { rm -f "$routes_tmp"; return 1; }
+  _append_route_json "tcp-xudp" "tcp-xudp" "$port" "api-maps.yandex.ru" "$DEFAULT_CLIENT_FINGERPRINT" false "" "" || { rm -f "$routes_tmp"; return 1; }
 
   local routes_json
   routes_json=$(jq -s '.' "$routes_tmp") || {
@@ -6737,7 +6816,7 @@ create_profile_all_routes() {
     transport=$(jq -r '.transport // ""' <<< "$route_json")
     port=$(jq -r '.port // empty' <<< "$route_json")
     sni=$(jq -r '.sni // ""' <<< "$route_json")
-    fingerprint=$(jq -r '.fingerprint // "chrome"' <<< "$route_json")
+    fingerprint=$(jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.fingerprint // $default_fp' <<< "$route_json")
     pq=$(jq -r '.pq_enabled // false' <<< "$route_json")
     grpc=$(jq -r '.grpc_service_name // ""' <<< "$route_json")
     xhttp=$(jq -r '.xhttp_path // ""' <<< "$route_json")
@@ -6984,7 +7063,7 @@ add_inbound() {
   local transport=$2
   local port=$3
   local sni=$4
-  local fingerprint=${5:-"chrome"}
+  local fingerprint=${5:-$DEFAULT_CLIENT_FINGERPRINT}
   local grpc_service_name=$6
   local xhttp_path=$7
   local pq_enabled=${8:-}
@@ -7065,26 +7144,6 @@ add_inbound() {
       done
     fi
 
-    # Синхронизация fingerprint с существующим inbound
-    local existing_fp=$(jq -r --argjson port "$port" \
-      '.inbounds[] | select(.port == $port) | .streamSettings.realitySettings.fingerprint' \
-      "$CONFIG_FILE" 2>/dev/null)
-
-    if [[ -n "$existing_fp" ]] && [[ "$existing_fp" != "$fingerprint" ]]; then
-      echo -e "${YELLOW}⚠ Fingerprint порта $port: ${CYAN}$existing_fp${YELLOW} (профиль будет обновлён)${NC}"
-      fingerprint="$existing_fp"
-      # Обновить fingerprint в только что созданном файле профиля
-      local fpf
-      for fpf in "$PROFILES_DIR"/*.json; do
-        [[ ! -f "$fpf" ]] && continue
-        local fpf_uuid=$(jq -r '.uuid' "$fpf" 2>/dev/null)
-        if [[ "$fpf_uuid" == "$uuid" ]]; then
-          safe_jq_write --arg fp "$existing_fp" '.fingerprint = $fp' "$fpf"
-          break
-        fi
-      done
-    fi
-
     local profile_file=""
     profile_file=$(find_profile_file_by_uuid "$uuid")
     if [[ -n "$profile_file" ]]; then
@@ -7143,8 +7202,7 @@ add_inbound() {
       "xver": 0,
       "serverNames": ["$sni"],
       "privateKey": "$PRIVATE_KEY",
-      "shortIds": ["$short_id"],
-      "fingerprint": "$fingerprint"
+      "shortIds": ["$short_id"]
     }
   },
   "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true},
@@ -7172,8 +7230,7 @@ TCPMUXEOF
       "xver": 0,
       "serverNames": ["$sni"],
       "privateKey": "$PRIVATE_KEY",
-      "shortIds": ["$short_id"],
-      "fingerprint": "$fingerprint"
+      "shortIds": ["$short_id"]
     }
   },
   "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true},
@@ -7202,8 +7259,7 @@ TCPEOF
       "xver": 0,
       "serverNames": ["$sni"],
       "privateKey": "$PRIVATE_KEY",
-      "shortIds": ["$short_id"],
-      "fingerprint": "$fingerprint"
+      "shortIds": ["$short_id"]
     }
   },
   "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true},
@@ -7247,8 +7303,7 @@ GRPCEOF
       "xver": 0,
       "serverNames": ["$sni"],
       "privateKey": "$PRIVATE_KEY",
-      "shortIds": ["$short_id"],
-      "fingerprint": "$fingerprint"
+      "shortIds": ["$short_id"]
     }
   },
   "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true},
@@ -7567,7 +7622,7 @@ generate_connection() {
   local uuid=$(jq -r '.uuid' "$profile_file")
   local transport=$(jq -r '.transport' "$profile_file")
   local port=$(jq -r '.port' "$profile_file")
-  local fingerprint=$(jq -r '.fingerprint // "chrome"' "$profile_file")
+  local fingerprint=$(jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.fingerprint // $default_fp' "$profile_file")
   local current_sni=$(jq -r '.sni // "www.ozon.ru"' "$profile_file")
   local clean_public_key=$(cat "$PUBLIC_KEY_FILE")
   # Phase 7 REQ-C10: pq_enabled lookup ВВЕРХ — нужен блокам печати manual-параметров
@@ -8007,7 +8062,7 @@ change_fingerprint_menu() {
   echo -e "${YELLOW}Выберите профиль для смены fingerprint:${NC}\n"
   local i=1
   for profile in "${profiles[@]}"; do
-    local fp=$(jq -r '.fingerprint // "chrome"' "$PROFILES_DIR/$profile.json" 2>/dev/null)
+    local fp=$(jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.fingerprint // $default_fp' "$PROFILES_DIR/$profile.json" 2>/dev/null)
     local port=$(jq -r '.port' "$PROFILES_DIR/$profile.json" 2>/dev/null)
     echo -e "${CYAN} $i)${NC} $profile ${BLUE}[порт:$port]${NC} ${YELLOW}[fp:$fp]${NC}"
     ((i++))
@@ -8039,19 +8094,19 @@ change_fingerprint_menu() {
     select_route_for_profile "$profile_file" "смены fingerprint" || return
     route_index="$SELECTED_ROUTE_INDEX"
     route_label=$(jq -r --argjson i "$route_index" '.routes[$i].label // .routes[$i].transport // ("route-" + ($i|tostring))' "$profile_file")
-    current_fp=$(jq -r --argjson i "$route_index" '.routes[$i].fingerprint // .fingerprint // "chrome"' "$profile_file")
+    current_fp=$(jq -r --argjson i "$route_index" --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.routes[$i].fingerprint // .fingerprint // $default_fp' "$profile_file")
     port=$(jq -r --argjson i "$route_index" '.routes[$i].port // empty' "$profile_file")
     target_label="$selected/$route_label"
   else
-    current_fp=$(jq -r '.fingerprint // "chrome"' "$profile_file")
+    current_fp=$(jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.fingerprint // $default_fp' "$profile_file")
     port=$(jq -r '.port' "$profile_file")
   fi
 
   echo ""
   echo -e "${CYAN}Текущий fingerprint '${target_label}':${NC} ${GREEN}$current_fp${NC}\n"
   echo -e "${YELLOW}Доступные fingerprint (эмуляция браузера):${NC}\n"
-  echo -e "${CYAN} 1)${NC} chrome    ${BLUE}(стандартный, широкая совместимость)${NC}"
-  echo -e "${CYAN} 2)${NC} firefox   ${GREEN}(рекомендуется при блокировках РКН)${NC}"
+  echo -e "${CYAN} 1)${NC} chrome    ${YELLOW}(legacy, может блокироваться)${NC}"
+  echo -e "${CYAN} 2)${NC} firefox   ${GREEN}(default, рекомендуется)${NC}"
   echo -e "${CYAN} 3)${NC} safari    ${BLUE}(для iOS/macOS клиентов)${NC}"
   echo -e "${CYAN} 4)${NC} edge      ${BLUE}(альтернатива chrome)${NC}"
   echo -e "${CYAN} 5)${NC} ios       ${BLUE}(для старых iOS устройств)${NC}"
@@ -8079,46 +8134,11 @@ change_fingerprint_menu() {
     return
   fi
 
-  # Check for shared inbound
-  local profiles_on_port=($(get_profiles_on_port "$port"))
-  local shared_inbound=false
-
-  if [[ ${#profiles_on_port[@]} -gt 1 ]]; then
-    shared_inbound=true
-
-    echo ""
-    echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║         ⚠ ВНИМАНИЕ: ОБЩИЙ INBOUND НА ПОРТУ $port        ║${NC}"
-    echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "${YELLOW}Следующие профили используют порт $port:${NC}"
-    echo ""
-
-    for p in "${profiles_on_port[@]}"; do
-      local pfp=$(jq -r '.fingerprint' "$PROFILES_DIR/$p.json")
-      echo -e "  ${CYAN}•${NC} ${YELLOW}$p${NC} (текущий fingerprint: $pfp)"
-    done
-
-    echo ""
-    echo -e "${MAGENTA}Смена fingerprint обновит ВСЕ эти профили!${NC}"
-    echo -e "${YELLOW}Все профили на порту $port будут использовать fingerprint: ${MAGENTA}$new_fp${NC}"
-    echo ""
-    echo -e "${CYAN}Xray Reality: fingerprint привязан к порту, а не к профилю.${NC}"
-    echo ""
-  fi
-
-  echo ""
-  echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║            ⚠ КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ ⚠               ║${NC}"
-  echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
   echo -e "${YELLOW}Смена fingerprint изменит TLS имитацию браузера.${NC}"
   echo ""
-  echo -e "${RED}Активные подключения '${target_label}' будут разорваны!${NC}"
-  echo ""
-  echo -e "${CYAN}После смены необходимо:${NC}"
-  echo -e "  ${BLUE}1.${NC} Получить НОВУЮ ссылку для профиля '$selected'"
-  echo -e "  ${BLUE}2.${NC} Обновить конфигурацию в клиентах"
+  echo -e "${CYAN}Xray перезапускаться не будет; другие маршруты и профили не изменятся.${NC}"
+  echo -e "${CYAN}После смены принудительно обновите подписку в HAPP или переимпортируйте ссылку.${NC}"
   echo ""
   echo -e "${MAGENTA}Новый fingerprint: ${YELLOW}$new_fp${NC}"
   echo ""
@@ -8131,31 +8151,9 @@ change_fingerprint_menu() {
     return
   fi
 
-  local rollback_config=""
-  if ! backup_config "change_fingerprint_$selected" rollback_config; then
-    echo -e "${RED}✗ Не удалось создать бэкап config.json${NC}"
-    sleep 2
-    return
-  fi
-
-  # Update config
-  if ! safe_jq_write --argjson port "$port" --arg fp "$new_fp" '
-    (.inbounds[] | select(.port == $port) | .streamSettings.realitySettings.fingerprint) |= $fp
-  ' "$CONFIG_FILE"; then
-    echo -e "${RED}✗ Ошибка обновления config.json${NC}"
-    sleep 2
-    return
-  fi
-
-  fix_xray_permissions
-  if ! safe_restart_xray "$rollback_config"; then
-    echo -e "${RED}✗ Xray не перезапустился — config.json откачен, профили НЕ изменены${NC}"
-    sleep 2
-    return
-  fi
-
-  # Update all profile/route JSON entries tied to this inbound port
-  if ! update_all_profiles_on_port "$port" "fingerprint" "$new_fp"; then
+  # Fingerprint is client-only state. The atomic profile write immediately
+  # changes the dynamically generated subscription without restarting Xray.
+  if ! update_profile_fingerprint "$profile_file" "$route_index" "$new_fp"; then
     echo -e "${RED}✗ Ошибка обновления профиля${NC}"
     sleep 2
     return
@@ -8164,9 +8162,7 @@ change_fingerprint_menu() {
   echo ""
   echo -e "${GREEN}✓ Fingerprint '${target_label}' изменен на: ${YELLOW}$new_fp${NC}"
   echo ""
-  echo -e "${MAGENTA}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${MAGENTA}║     Теперь получите новую ссылку для этого профиля!     ║${NC}"
-  echo -e "${MAGENTA}╚═══════════════════════════════════════════════════════════╝${NC}"
+  echo -e "${GREEN}✓ Подписка на сервере уже содержит новый fp=${new_fp}.${NC}"
   echo ""
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
   read
@@ -8307,7 +8303,6 @@ change_port_menu() {
   local target_inbound_tag=$(jq -r --argjson port "$new_port" '.inbounds[] | select(.port == $port) | .tag' "$CONFIG_FILE" 2>/dev/null)
   local target_inbound_transport=""
   local target_inbound_sni=""
-  local target_inbound_fp=""
   local target_inbound_metadata=""
   local target_inbound_grpc_service_name=""
   local target_inbound_xhttp_path=""
@@ -8317,7 +8312,6 @@ change_port_menu() {
     # Port is in use - check transport compatibility
     target_inbound_transport=$(jq -r --argjson port "$new_port" '.inbounds[] | select(.port == $port) | .streamSettings.network' "$CONFIG_FILE")
     target_inbound_sni=$(jq -r --argjson port "$new_port" '.inbounds[] | select(.port == $port) | .streamSettings.realitySettings.serverNames[0]' "$CONFIG_FILE")
-    target_inbound_fp=$(jq -r --argjson port "$new_port" '.inbounds[] | select(.port == $port) | .streamSettings.realitySettings.fingerprint // "chrome"' "$CONFIG_FILE")
     target_inbound_metadata=$(read_inbound_transport_metadata "$new_port" "$profile_transport")
     IFS='|' read -r target_inbound_grpc_service_name target_inbound_xhttp_path <<< "$target_inbound_metadata"
 
@@ -8453,15 +8447,14 @@ change_port_menu() {
   fi
 
   if [[ "$move_to_existing" == "true" ]]; then
-    # Шаг 4: Обновить файл профиля/маршрута (port + sni + fingerprint целевого inbound)
-    [[ -z "$target_inbound_fp" ]] && target_inbound_fp="chrome"
+    # Шаг 4: Обновить файл профиля/маршрута (port + sni целевого inbound).
+    # Fingerprint client-only: сохраняем текущее значение профиля/route.
     local profile_update_ok=true
     if [[ -n "$route_index" ]]; then
-      if ! safe_jq_write --argjson i "$route_index" --argjson port "$new_port" --arg sni "$target_inbound_sni" --arg fp "$target_inbound_fp" '
+      if ! safe_jq_write --argjson i "$route_index" --argjson port "$new_port" --arg sni "$target_inbound_sni" '
         .routes[$i].port = $port |
         .routes[$i].sni = $sni |
-        .routes[$i].fingerprint = $fp |
-        if $i == 0 then .port = $port | .sni = $sni | .fingerprint = $fp else . end
+        if $i == 0 then .port = $port | .sni = $sni else . end
       ' "$profile_file"; then
         profile_update_ok=false
       fi
@@ -8479,8 +8472,8 @@ change_port_menu() {
         profile_update_ok=false
       fi
     else
-      if ! safe_jq_write --argjson port "$new_port" --arg sni "$target_inbound_sni" --arg fp "$target_inbound_fp" \
-        '.port = $port | .sni = $sni | .fingerprint = $fp' "$profile_file"; then
+      if ! safe_jq_write --argjson port "$new_port" --arg sni "$target_inbound_sni" \
+        '.port = $port | .sni = $sni' "$profile_file"; then
         profile_update_ok=false
       fi
       if ! write_profile_transport_metadata "$profile_file" "$target_inbound_grpc_service_name" "$target_inbound_xhttp_path"; then
@@ -9008,7 +9001,7 @@ upgrade_profile_to_pq_menu() {
   local port=$(jq -r '.port' "$pfile")
   local uuid=$(jq -r '.uuid' "$pfile")
   local sni=$(jq -r '.sni // "www.ozon.ru"' "$pfile")
-  local fingerprint=$(jq -r '.fingerprint // "chrome"' "$pfile")
+  local fingerprint=$(jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.fingerprint // $default_fp' "$pfile")
   local old_transport=$(jq -r '.transport // "tcp"' "$pfile")
 
   # H1 fix: short_id ЧИТАЕМ ИЗ СУЩЕСТВУЮЩЕГО INBOUND (config.json), НЕ из profile JSON.
@@ -9123,8 +9116,7 @@ upgrade_profile_to_pq_menu() {
       "xver": 0,
       "serverNames": ["$sni"],
       "privateKey": "$PRIVATE_KEY",
-      "shortIds": ["$short_id"],
-      "fingerprint": "$fingerprint"
+      "shortIds": ["$short_id"]
     }
   },
   "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true},
