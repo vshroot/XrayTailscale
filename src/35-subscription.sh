@@ -828,14 +828,23 @@ install_subscription_public_tls() {
   install_subscription_server || return 1
 
   # Domain prompt (M6: read -r — без -r теряются backslashes).
-  local domain
-  echo -n -e "${YELLOW}Введите домен (A/AAAA должна указывать на этот VPS): ${NC}"
+  # Автоподстановка: сохранённый серверный домен предлагается дефолтом.
+  local domain saved_domain
+  saved_domain=$(get_server_domain)
+  if [[ -n "$saved_domain" ]]; then
+    echo -n -e "${YELLOW}Введите домен (A/AAAA должна указывать на этот VPS) [${CYAN}$saved_domain${YELLOW}]: ${NC}"
+  else
+    echo -n -e "${YELLOW}Введите домен (A/AAAA должна указывать на этот VPS): ${NC}"
+  fi
   read -r domain
+  [[ -z "$domain" ]] && domain="$saved_domain"
   if [[ -z "$domain" ]] || ! [[ "$domain" =~ ^[a-zA-Z0-9.-]+$ ]]; then
     echo -e "${RED}✗ Некорректный домен${NC}"
     sleep 2
     return 1
   fi
+  # Сохраняем как серверный домен для self-steal и будущих настроек.
+  set_server_domain "$domain" || true
 
   # DNS sanity-check (soft — warning + опция продолжить).
   # Rationale: split-DNS / Cloudflare proxied (orange-cloud) дают false-negatives.

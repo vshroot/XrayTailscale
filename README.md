@@ -66,6 +66,7 @@ The manager is interactive. The most important options are:
 | `13` | Install and configure Tailscale as an exit node. |
 | `14` | Configure cascade routing through an upstream node. |
 | `15` | Create an outbound-server node on a separate overseas VPS. |
+| `16` | Self-steal: VLESS+Reality+Vision on :443 behind your own website. |
 
 ## HAPP Subscription Setup
 
@@ -217,6 +218,54 @@ You can also paste a complete upstream VLESS Reality URL instead of entering the
 
 Disabling cascade removes the cascade outbounds and returns the catch-all route to `direct`. Existing client profiles, HAPP subscriptions, XHTTP paths, Reality keys, and Tailscale settings are not changed.
 
+## Self-Steal (Own Website)
+
+Self-steal makes Reality mimic **your own website** instead of a third-party
+SNI like `microsoft.com`. Domain, IP and certificate all match, so the
+SNI/certificate mismatch used to detect classic Reality disappears.
+
+Scheme:
+
+```text
+client          -> VPS:443 (Xray VLESS + Reality + Vision, RAW TCP, uTLS firefox)
+browser / probe -> VPS:443 -> Reality fallback -> 127.0.0.1:<port>
+                   (nginx serving a real site with a valid Let's Encrypt cert)
+```
+
+Open the manager:
+
+```bash
+sudo xraytailscale
+```
+
+Choose:
+
+```text
+16) Self-steal
+```
+
+The wizard asks for the domain once (a previously saved domain is offered as
+the default and reused automatically), checks DNS, then automatically:
+
+- installs nginx + certbot and opens port `80` for ACME HTTP-01 and renewals;
+- generates a plausible static "photo archive" site (no external resources);
+- issues a Let's Encrypt certificate via webroot and installs a renew
+  deploy-hook that reloads nginx;
+- serves the site on `127.0.0.1:<port>` only — the public `:443` belongs to Xray;
+- creates the `selfsteal` profile: VLESS + Reality + Vision
+  (`xtls-rprx-vision`), RAW TCP on `443`, `firefox` fingerprint,
+  `serverNames=[your-domain]`, `dest=127.0.0.1:<port>`;
+- prints a ready-to-import `vless://` URL and QR. The URL uses your domain as
+  the server address (`server_address` in the profile), so address, SNI and
+  certificate match.
+
+Requirements: a public IPv4 VPS with an A-record pointing the domain to it,
+ports `80` and `443` free (no other inbound on `443` with a different SNI).
+An existing self-steal inbound on `443` is reused (a new client is added).
+
+The saved server domain is also auto-filled when setting up the public HAPP
+subscription TLS, so you do not retype it.
+
 ## Updates
 
 Update XrayTailscale scripts:
@@ -294,10 +343,21 @@ sudo xraytailscale probe-test
 
 ## Development Checks
 
+The single-file `xraytailscale` is **built** from modules in `src/`
+(see `src/README.md` for the module map). Edit modules, then rebuild:
+
+```bash
+./build.sh
+bash validation/test-build-sync.sh   # src/ and built file must match exactly
+```
+
 From the repository root:
 
 ```bash
 bash -n xraytailscale install.sh update.sh uninstall.sh
+bash validation/test-build-sync.sh
+bash validation/test-domain-defaults.sh
+bash validation/test-selfsteal-static.sh
 bash validation/test-client-only-fingerprint.sh
 bash validation/test-vless-url-generation.sh
 bash validation/test-bulk-happ-users.sh

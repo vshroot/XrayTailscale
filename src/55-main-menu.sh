@@ -122,6 +122,9 @@ main_menu() {
     echo -e "${CYAN}14)${NC} Каскад / upstream-ноды"
     echo -e "${CYAN}15)${NC} Поднять outbound-сервер (зарубежная нода)"
     echo ""
+    echo -e "${MAGENTA} SELF-STEAL (свой сайт):${NC}"
+    echo -e "${CYAN}16)${NC} Self-steal: VLESS+Reality+Vision :443 под свой домен"
+    echo ""
     echo -e "${RED} 0)${NC} Выход"
     echo ""
     echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
@@ -140,6 +143,7 @@ main_menu() {
       13) tailscale_exit_node_menu ;;
       14) cascade_mode_menu ;;
       15) setup_outbound_server_menu ;;
+      16) selfsteal_menu ;;
       0) exit 0 ;;
       *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
     esac

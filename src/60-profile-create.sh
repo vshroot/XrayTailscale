@@ -331,6 +331,9 @@ create_profile() {
   local custom_sni=$5  # Опциональный кастомный SNI
   local grpc_service_name=$6
   local xhttp_path=$7
+  # Self-steal: необязательный явный Reality dest (8-й аргумент).
+  # Задан → подтверждение риска Vision:443 не требуется (свой сайт снимает риск).
+  local reality_dest=${8:-}
   local uuid=$(uuidgen)
 
   # Phase 7 REQ-C04: sub_token (32 hex-символа) для HAPP subscription URL.
@@ -378,7 +381,7 @@ create_profile() {
       ;;
   esac
 
-  if [[ "$port" == "443" ]] && [[ "$transport" == "tcp" || "$transport" == "tcp-utls" || "$transport" == "tcp-xudp" ]]; then
+  if [[ "$port" == "443" ]] && [[ "$transport" == "tcp" || "$transport" == "tcp-utls" || "$transport" == "tcp-xudp" ]] && [[ -z "$reality_dest" ]]; then
     if ! confirm_vision_443_risk; then
       echo -e "${CYAN}✓ Создание профиля отменено${NC}"
       sleep 1
@@ -421,7 +424,7 @@ create_profile() {
     rm -f "$PROFILES_DIR/$name.json"
     return 1
   fi
-  if ! add_inbound "$uuid" "$transport" "$port" "$default_sni" "$fingerprint" "$grpc_service_name" "$xhttp_path"; then
+  if ! add_inbound "$uuid" "$transport" "$port" "$default_sni" "$fingerprint" "$grpc_service_name" "$xhttp_path" "" "$reality_dest"; then
     rm -f "$PROFILES_DIR/$name.json"
     echo ""
     echo -e "${RED}╔═══════════════════════════════════════════════${NC}"
@@ -495,6 +498,10 @@ add_inbound() {
   local grpc_service_name=$6
   local xhttp_path=$7
   local pq_enabled=${8:-}
+  # Self-steal: явный Reality dest (например 127.0.0.1:8443 — локальный nginx
+  # с сертификатом собственного домена). Пусто = прежнее поведение "$sni:443".
+  local reality_dest=${9:-}
+  [[ -z "$reality_dest" ]] && reality_dest="$sni:443"
   local short_id=$(openssl rand -hex 4)
   [[ -z "$pq_enabled" && "$transport" == "xhttp" ]] && pq_enabled=true
 
@@ -626,7 +633,7 @@ add_inbound() {
     "security": "reality",
     "realitySettings": {
       "show": false,
-      "dest": "$sni:443",
+      "dest": "$reality_dest",
       "xver": 0,
       "serverNames": ["$sni"],
       "privateKey": "$PRIVATE_KEY",
@@ -654,7 +661,7 @@ TCPMUXEOF
     "security": "reality",
     "realitySettings": {
       "show": false,
-      "dest": "$sni:443",
+      "dest": "$reality_dest",
       "xver": 0,
       "serverNames": ["$sni"],
       "privateKey": "$PRIVATE_KEY",
@@ -683,7 +690,7 @@ TCPEOF
     "grpcSettings": {"serviceName": "$grpc_service_name"},
     "realitySettings": {
       "show": false,
-      "dest": "$sni:443",
+      "dest": "$reality_dest",
       "xver": 0,
       "serverNames": ["$sni"],
       "privateKey": "$PRIVATE_KEY",
@@ -727,7 +734,7 @@ GRPCEOF
     },
     "realitySettings": {
       "show": false,
-      "dest": "$sni:443",
+      "dest": "$reality_dest",
       "xver": 0,
       "serverNames": ["$sni"],
       "privateKey": "$PRIVATE_KEY",

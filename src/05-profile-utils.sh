@@ -262,7 +262,15 @@ _generate_vless_url_pure() {
   [[ -n "$route_label" && "$route_label" != "null" ]] && profile_name="${profile_name}-${route_label}"
 
   local server_ip clean_public_key
-  server_ip=$(_connection_server_address)
+  # Per-profile server_address (self-steal: клиент подключается по собственному
+  # домену — адрес/SNI/сертификат совпадают). Пусто = глобальная логика адреса.
+  local profile_server_addr
+  profile_server_addr=$(jq -r '.server_address // ""' "$profile_file" 2>/dev/null)
+  if [[ -n "$profile_server_addr" && "$profile_server_addr" != "null" ]]; then
+    server_ip="$profile_server_addr"
+  else
+    server_ip=$(_connection_server_address)
+  fi
   [[ -n "$server_ip" ]] || return 1
   clean_public_key=$(cat "$PUBLIC_KEY_FILE" 2>/dev/null) || return 1
 
