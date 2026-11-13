@@ -42,6 +42,19 @@ Alternative with `wget`:
 wget -qO- https://raw.githubusercontent.com/vshroot/XrayTailscale/main/install.sh | sudo bash
 ```
 
+Self-steal auto-deploy (domain must already resolve to this VPS): the main
+profile is created directly as VLESS+Reality+Vision on `:443` behind your own
+website — no manual menu steps:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vshroot/XrayTailscale/main/install.sh -o /tmp/install.sh
+sudo XT_DOMAIN=your-domain.example bash /tmp/install.sh
+# optional: XT_LE_EMAIL=you@example.com (default: admin@<domain>)
+```
+
+Without `XT_DOMAIN` the installer keeps the classic scheme; self-steal can be
+enabled later via menu `16` or `sudo xraytailscale selfsteal-auto <domain>`.
+
 After installation, open the manager:
 
 ```bash
@@ -245,23 +258,41 @@ Choose:
 ```
 
 The wizard asks for the domain once (a previously saved domain is offered as
-the default and reused automatically), checks DNS, then automatically:
+the default and reused automatically), checks DNS strictly, then automatically:
 
+- frees port `443` if needed: an existing HAPP subscription nginx site on `:443`
+  is moved to `:8443` automatically (its URL gains the explicit port);
 - installs nginx + certbot and opens port `80` for ACME HTTP-01 and renewals;
 - generates a plausible static "photo archive" site (no external resources);
 - issues a Let's Encrypt certificate via webroot and installs a renew
   deploy-hook that reloads nginx;
 - serves the site on `127.0.0.1:<port>` only — the public `:443` belongs to Xray;
-- creates the `selfsteal` profile: VLESS + Reality + Vision
-  (`xtls-rprx-vision`), RAW TCP on `443`, `firefox` fingerprint,
-  `serverNames=[your-domain]`, `dest=127.0.0.1:<port>`;
+- **converts the main inbound to self-steal** instead of creating a separate
+  profile: the inbound with the most clients (or an existing `:443` inbound)
+  moves to `:443` with RAW TCP, `serverNames=[your-domain]`,
+  `dest=127.0.0.1:<port>`, all clients get `flow=xtls-rprx-vision`. UUIDs,
+  shortIds and Reality keys are preserved; client links must be re-issued
+  (port/SNI/flow change). On a fresh install with no inbounds, the main
+  profile is created directly as self-steal;
 - prints a ready-to-import `vless://` URL and QR. The URL uses your domain as
   the server address (`server_address` in the profile), so address, SNI and
   certificate match.
 
+Non-interactive usage (same pipeline as the wizard):
+
+```bash
+sudo xraytailscale selfsteal-auto your-domain.example [email]
+# or with the saved domain: sudo xraytailscale selfsteal-auto
+```
+
+On existing servers, after an update the manager auto-converts the main
+profile once if a server domain was previously saved and self-steal is not
+configured yet (marker `.selfsteal_autoconvert_seen`; retry manually via
+menu `16` on failure).
+
 Requirements: a public IPv4 VPS with an A-record pointing the domain to it,
-ports `80` and `443` free (no other inbound on `443` with a different SNI).
-An existing self-steal inbound on `443` is reused (a new client is added).
+ports `80` and `443` reachable. An inbound already converted to self-steal on
+`:443` is detected and reused (idempotent re-runs).
 
 The saved server domain is also auto-filled when setting up the public HAPP
 subscription TLS, so you do not retype it.

@@ -63,7 +63,9 @@ get_profiles_on_port() {
     fi
   done
 
-  echo "${profiles[@]}"
+  # Пустой массив: "${profiles[@]}" падает под set -u на bash < 4.4.
+  ((${#profiles[@]})) && echo "${profiles[@]}"
+  return 0
 }
 
 # Update field for all profiles on a specific port
@@ -76,11 +78,18 @@ update_all_profiles_on_port() {
   local profiles=($(get_profiles_on_port "$port"))
   local ok=true
 
+  # Пусто — нечего обновлять (и "${profiles[@]}" не переживёт set -u на bash < 4.4).
+  ((${#profiles[@]})) || return 0
+
   for pname in "${profiles[@]}"; do
     local pfile="$PROFILES_DIR/$pname.json"
     if safe_jq_write --argjson port "$port" --arg f "$field" --arg v "$value" '
       if .port == $port then .[$f] = $v else . end |
-      (.routes // []) |= map(if .port == $port then .[$f] = $v else . end)
+      # routes отсутствует у single-route профилей: (.routes // []) |= там падает
+      # ("Invalid path expression"). Обновляем только реально существующий массив.
+      if (.routes | type) == "array" then
+        .routes |= map(if .port == $port then .[$f] = $v else . end)
+      else . end
     ' "$pfile"; then
       echo -e "${CYAN}  → Обновлен: ${YELLOW}$pname${NC}"
     else
@@ -121,11 +130,15 @@ update_all_profiles_port_reference() {
   local profiles=($(get_profiles_on_port "$old_port"))
   local ok=true
   local pname
+  ((${#profiles[@]})) || return 0
   for pname in "${profiles[@]}"; do
     local pfile="$PROFILES_DIR/$pname.json"
     if safe_jq_write --argjson old_port "$old_port" --argjson new_port "$new_port" '
       if .port == $old_port then .port = $new_port else . end |
-      (.routes // []) |= map(if .port == $old_port then .port = $new_port else . end)
+      # См. выше: routes может отсутствовать — тогда (.routes // []) |= падает.
+      if (.routes | type) == "array" then
+        .routes |= map(if .port == $old_port then .port = $new_port else . end)
+      else . end
     ' "$pfile"; then
       echo -e "${CYAN}  → Обновлен порт: ${YELLOW}$pname${NC}"
     else

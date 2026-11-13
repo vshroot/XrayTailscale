@@ -25,6 +25,23 @@ main_menu() {
   run_migration "xhttp_default_2026"                   "XHTTP+PQ как дефолтный пресет создания профиля" _migrate_xhttp_default_2026 || ((migration_failures++))
   run_migration "subscription_tokens_2026"             "Subscription tokens (Phase 7) для существующих профилей" _migrate_subscription_tokens_2026 || ((migration_failures++))
   run_migration "happ_legacy_xhttp_route_2026"         "HAPP subscription не меняет существующие профили" _migrate_happ_legacy_xhttp_route_2026 || ((migration_failures++))
+
+  # Авто-конвертация в self-steal: одноразово, если домен уже сохранён
+  # (задан при прошлых настройках), self-steal ещё не развёрнут и есть
+  # хотя бы один inbound. Маркер выставляется ДО попытки: при сбое
+  # ретрай только вручную (меню 16 / selfsteal-auto), чтобы каждый запуск
+  # меню не превращался в многоминутный certbot-цикл.
+  if [[ ! -f /usr/local/etc/xray/.selfsteal_autoconvert_seen \
+     && -f "$SERVER_DOMAIN_FILE" && ! -f "$SELFSTEAL_DOMAIN_FILE" ]] \
+     && jq -e '.inbounds | length > 0' "$CONFIG_FILE" >/dev/null 2>&1; then
+    touch /usr/local/etc/xray/.selfsteal_autoconvert_seen 2>/dev/null || true
+    chown xray:xray /usr/local/etc/xray/.selfsteal_autoconvert_seen 2>/dev/null || true
+    local _ss_auto_domain
+    _ss_auto_domain=$(get_server_domain)
+    echo -e "${MAGENTA}[auto] Self-steal: конвертация главного профиля → :443 (${_ss_auto_domain})${NC}"
+    _selfsteal_provision "$_ss_auto_domain" "admin@${_ss_auto_domain}" || \
+      echo -e "${YELLOW}  ⚠ Авто-конвертация не удалась — повторите: меню 16 или sudo xraytailscale selfsteal-auto${NC}"
+  fi
   if [[ ! -f /usr/local/etc/xray/.sni_list_2026 ]]; then
     echo -e "${YELLOW}Перед SNI миграцией доступна команда probe-test для проверки доступности SNI.${NC}"
     echo -n -e "${YELLOW}Запустить probe-test сейчас? [y/N]: ${NC}"

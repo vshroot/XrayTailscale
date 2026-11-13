@@ -16,6 +16,10 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
       shift
       repair_stale_subscription_profiles_core
       ;;
+    selfsteal-auto)
+      shift
+      selfsteal_auto_command "$@"
+      ;;
     ""|menu)
       main_menu
       ;;
@@ -27,6 +31,7 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
       echo -e "  ${CYAN}sudo xraytailscale subscription-repair${NC}  — восстановить stale HAPP profiles"
       echo -e "  ${CYAN}sudo xraytailscale bulk-repair${NC}  — alias для subscription-repair"
       echo -e "  ${CYAN}sudo xraytailscale probe-test${NC}  — проверить доступность SNI с VPS"
+      echo -e "  ${CYAN}sudo xraytailscale selfsteal-auto <domain> [email]${NC}  — self-steal без меню (автодеплой)"
       exit 1
       ;;
   esac

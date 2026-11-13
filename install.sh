@@ -833,4 +833,22 @@ echo ""
 echo -e "${BLUE}GitHub:${NC} https://github.com/${GITHUB_USER}/${GITHUB_REPO}"
 echo -e "${BLUE}Версия:${NC} 2.0"
 echo ""
+
+# Опционально: self-steal автодеплой (нон-интерактивно), ПОСЛЕ финального
+# сообщения — ссылка и QR должны остаться на экране (final message делает clear).
+# Включается переменной окружения XT_DOMAIN (A-запись домена → IP этого VPS):
+#   curl -fsSL .../install.sh -o /tmp/i.sh && sudo XT_DOMAIN=example.com bash /tmp/i.sh
+# Главный профиль сразу создаётся self-steal на :443; без XT_DOMAIN — прежняя схема,
+# self-steal доступен позже через меню 16 или `xraytailscale selfsteal-auto`.
+if [[ -n "${XT_DOMAIN:-}" ]]; then
+  echo -e "${BLUE}[self-steal]${NC} ${YELLOW}Автодеплой для домена ${XT_DOMAIN}...${NC}"
+  XT_SS_EMAIL="${XT_LE_EMAIL:-admin@${XT_DOMAIN}}"
+  if /usr/local/bin/xraytailscale selfsteal-auto "$XT_DOMAIN" "$XT_SS_EMAIL"; then
+    echo -e "\n${GREEN}✓ Self-steal развёрнут: главный профиль на :443 (${XT_DOMAIN})${NC}"
+  else
+    echo -e "\n${YELLOW}⚠ Self-steal автодеплой не удался — базовая установка OK.${NC}"
+    echo -e "${YELLOW}  Повторите: sudo xraytailscale selfsteal-auto ${XT_DOMAIN}${NC}"
+  fi
+  echo ""
+fi
 echo -e "${MAGENTA}════════════════════════════════════════════════════════════${NC}"

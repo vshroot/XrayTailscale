@@ -202,31 +202,7 @@ EOF
 }
 
 # ── Preflight ───────────────────────────────────────────────
-
-# Soft DNS check: расхождение = warning + подтверждение (split-DNS/CF proxy).
-_selfsteal_dns_preflight() {
-  local domain="$1"
-  local server_ip resolved_ip
-  server_ip=$(get_server_ip)
-  resolved_ip=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' | head -1)
-  if [[ -z "$resolved_ip" ]]; then
-    echo -e "${YELLOW}  ⚠ $domain не резолвится. A-запись должна указывать на $server_ip${NC}"
-    echo -n -e "${YELLOW}    Продолжить всё равно? [y/N]: ${NC}"
-    local cont; read -r cont
-    [[ "$cont" =~ ^[yYдД]$ ]]
-    return
-  fi
-  if [[ "$resolved_ip" != "$server_ip" ]]; then
-    echo -e "${YELLOW}  ⚠ DNS: $domain → $resolved_ip, но VPS IP = $server_ip${NC}"
-    echo -e "${YELLOW}    Let's Encrypt скорее всего откажет.${NC}"
-    echo -n -e "${YELLOW}    Продолжить? [y/N]: ${NC}"
-    local cont; read -r cont
-    [[ "$cont" =~ ^[yYдД]$ ]]
-    return
-  fi
-  echo -e "${GREEN}  ✓ DNS: $domain → $server_ip (совпадает с VPS)${NC}"
-  return 0
-}
+# DNS-проверки живут рядом с provision (strict _selfsteal_dns_check).
 
 # Свободный localhost-порт для nginx backend (8443 может быть занят подпиской).
 _selfsteal_pick_backend_port() {
@@ -241,80 +217,231 @@ _selfsteal_pick_backend_port() {
   return 1
 }
 
-# Проверка inbound :443: self-steal несовместим с уже существующим обычным
-# inbound на 443 (другой SNI или чужой dest). return 0 = можно продолжать.
-_selfsteal_inbound_443_preflight() {
-  local domain="$1" backend_dest="$2"
-  jq -e '.inbounds[] | select(.port == 443)' "$CONFIG_FILE" >/dev/null 2>&1 || return 0
-  local existing_sni existing_dest
-  existing_sni=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.realitySettings.serverNames[0] // ""' "$CONFIG_FILE" 2>/dev/null)
-  existing_dest=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.realitySettings.dest // ""' "$CONFIG_FILE" 2>/dev/null)
-  if [[ "$existing_sni" != "$domain" || "$existing_dest" != "$backend_dest" ]]; then
-    echo -e "${RED}✗ Порт 443 уже занят существующим inbound:${NC}"
-    echo -e "  SNI:  ${CYAN}${existing_sni}${NC}"
-    echo -e "  dest: ${CYAN}${existing_dest}${NC}"
-    echo -e "${YELLOW}  Self-steal требует: SNI=${domain}, dest=${backend_dest}${NC}"
-    echo -e "${YELLOW}  Удалите старый профиль на 443 (меню 2) или оставьте текущую схему.${NC}"
+# ── Конвертация существующего inbound в self-steal ──────────
+# Self-steal — базовый режим ГЛАВНОГО профиля, а не отдельный новый профиль:
+# существующий inbound переносится на :443 с dest → локальный nginx.
+# UUID, shortIds и Reality-ключи сохраняются; меняются порт/SNI/flow —
+# клиентские ссылки перевыпускаются.
+
+# Профиль, живущий на inbound :443 (имя произвольное после конвертации).
+# stdout: путь к profile JSON. return 1 если нет.
+_selfsteal_profile_file_on_443() {
+  local pf
+  for pf in "$PROFILES_DIR"/*.json; do
+    [[ -f "$pf" ]] || continue
+    if jq -e '.port == 443' "$pf" >/dev/null 2>&1; then
+      echo "$pf"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Выбор inbound-кандидата на конвертацию.
+# Приоритет: уже существующий :443 → VLESS-inbound с max клиентами → пусто.
+_selfsteal_pick_convert_port() {
+  if jq -e '.inbounds[] | select(.port == 443)' "$CONFIG_FILE" >/dev/null 2>&1; then
+    echo 443
+    return 0
+  fi
+  jq -r '[.inbounds[] | select(.protocol == "vless")]
+         | sort_by(.settings.clients | length) | reverse
+         | .[0].port // empty' "$CONFIG_FILE" 2>/dev/null
+}
+
+# Авто-перенос HAPP-подписки nginx с :443 на :8443 (нон-интерактивно).
+# Умеет переносить ТОЛЬКО свой сайт xraytailscale-sub; чужой listener → отказ.
+SELFSTEAL_SUB_NGINX_AVAILABLE="${SELFSTEAL_SUB_NGINX_AVAILABLE:-/etc/nginx/sites-available/xraytailscale-sub}"
+SUBSCRIPTION_PORT_FILE="${SUBSCRIPTION_PORT_FILE:-/usr/local/etc/xray/.subscription_port}"
+
+_selfsteal_free_443_from_nginx() {
+  local sub_avail="$SELFSTEAL_SUB_NGINX_AVAILABLE"
+  if [[ ! -f "$sub_avail" ]] || ! grep -qE 'listen[[:space:]]+(\[::\]:)?443[[:space:]]+ssl' "$sub_avail"; then
+    echo -e "${RED}✗ Порт 443 занят неизвестным сервисом (не HAPP-подпиской).${NC}"
+    echo -e "${YELLOW}  Найдите процесс: ss -tlnp 'sport = :443' — и освободите порт вручную.${NC}"
     return 1
   fi
-  echo -e "${GREEN}  ✓ Inbound :443 уже self-steal для $domain — добавлю клиента${NC}"
+  echo -e "${CYAN}  → Перенос HAPP-подписки nginx :443 → :8443...${NC}"
+  # -i.bak: кросс-платформенно (GNU/BSD), .bak удаляется после успешного nginx -t.
+  if ! sed -i.bak -E 's/listen 443 ssl/listen 8443 ssl/; s/listen \[::\]:443 ssl/listen \[::\]:8443 ssl/' "$sub_avail"; then
+    echo -e "${RED}✗ Не удалось переписать $sub_avail${NC}"
+    return 1
+  fi
+  if ! nginx -t >/dev/null 2>&1; then
+    echo -e "${RED}✗ nginx -t failed после переноса — откат конфига${NC}"
+    mv "${sub_avail}.bak" "$sub_avail"
+    return 1
+  fi
+  rm -f "${sub_avail}.bak"
+  if ! systemctl reload nginx; then
+    echo -e "${RED}✗ nginx не перечитал конфиг${NC}"
+    return 1
+  fi
+  printf '8443\n' > "$SUBSCRIPTION_PORT_FILE"
+  chown xray:xray "$SUBSCRIPTION_PORT_FILE" 2>/dev/null || true
+  open_firewall_port 8443 tcp || \
+    echo -e "${YELLOW}  ⚠ Не удалось открыть 8443/tcp через UFW — проверьте firewall${NC}"
+  echo -e "${GREEN}  ✓ Подписка перенесена на :8443 (URL теперь с явным портом)${NC}"
   return 0
 }
 
-# ── Мастер установки ────────────────────────────────────────
+# Конвертация inbound :$1 → self-steal :443.
+# Перенос порта, network → RAW TCP, dest → backend nginx, serverNames → домен,
+# все клиенты → flow xtls-rprx-vision. Backup + safe_restart с авто-откатом.
+_selfsteal_convert_inbound() {
+  local old_port="$1" domain="$2" backend_dest="$3"
+  echo -e "${CYAN}  → Конвертация главного inbound :$old_port → self-steal :443${NC}"
+  echo -e "${CYAN}    (UUID/shortIds сохраняются; ссылки меняются: порт/SNI/flow)${NC}"
 
-selfsteal_setup() {
-  show_ascii
-  echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}   SELF-STEAL: свой сайт + VLESS Reality Vision ${NC}"
-  echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo ""
-  echo -e "${CYAN}Схема: VLESS + Reality + Vision (xtls-rprx-vision), RAW TCP :443,${NC}"
-  echo -e "${CYAN}uTLS firefox. Reality маскируется под ВАШ сайт с LE-сертификатом:${NC}"
-  echo -e "${CYAN}чужой HTTPS-заход на :443 увидит настоящий сайт фотоархива.${NC}"
-  echo ""
+  local rollback_config=""
+  backup_config "selfsteal_convert" rollback_config || return 1
 
-  # Домен: автоподстановка сохранённого, ввод один раз.
-  local domain
-  domain=$(prompt_server_domain) || { sleep 2; return 1; }
+  if ! safe_jq_write --argjson old_port "$old_port" --arg dest "$backend_dest" --arg sni "$domain" '
+    (.inbounds[] | select(.port == $old_port)) |= (
+      .port = 443 |
+      .tag = "inbound-443" |
+      .settings.decryption = "none" |
+      .settings.clients |= map(.flow = "xtls-rprx-vision") |
+      .streamSettings.network = "tcp" |
+      .streamSettings.security = "reality" |
+      del(.streamSettings.grpcSettings, .streamSettings.xhttpSettings, .streamSettings.tcpSettings) |
+      .streamSettings.realitySettings.dest = $dest |
+      .streamSettings.realitySettings.serverNames = [$sni]
+    )
+  ' "$CONFIG_FILE"; then
+    echo -e "${RED}✗ Не удалось сконвертировать inbound :$old_port${NC}"
+    return 1
+  fi
+
+  # Профили: порт-ссылки, SNI, fingerprint, транспорт, адрес сервера (по домену).
+  [[ "$old_port" != "443" ]] && { update_all_profiles_port_reference "$old_port" 443 || true; }
+  update_all_profiles_on_port 443 sni "$domain" || true
+  update_all_profiles_on_port 443 fingerprint "firefox" || true
+  update_all_profiles_on_port 443 transport "tcp" || true
+  update_all_profiles_on_port 443 server_address "$domain" || true
+
+  open_firewall_port 443 tcp || \
+    echo -e "${YELLOW}  ⚠ Не удалось открыть 443/tcp через UFW — проверьте firewall${NC}"
+  if [[ "$old_port" != "443" ]]; then
+    close_firewall_port "$old_port" || true
+  fi
+
+  if ! safe_restart_xray "$rollback_config"; then
+    echo -e "${RED}✗ Xray не принял self-steal конфигурацию — откат из бэкапа${NC}"
+    return 1
+  fi
+  echo -e "${GREEN}  ✓ Inbound сконвертирован: self-steal :443 (${domain})${NC}"
+  return 0
+}
+
+# Создание главного профиля (fresh install: inbound'ов ещё нет).
+# Нон-интерактивный аналог create_profile без pause/read.
+_selfsteal_create_main_profile() {
+  local domain="$1" backend_dest="$2"
+  local name="main"
+  [[ -f "$PROFILES_DIR/main.json" ]] && name="selfsteal"
+  echo -e "${CYAN}  → Создание главного профиля '$name' (VLESS+Reality+Vision :443)...${NC}"
+
+  local uuid sub_token
+  uuid=$(uuidgen) || return 1
+  sub_token=$(openssl rand -hex 16)
+  if [[ ! "$sub_token" =~ ^[a-f0-9]{32}$ ]]; then
+    echo -e "${RED}✗ Не удалось сгенерировать sub_token${NC}"
+    return 1
+  fi
+
+  local rollback_config=""
+  backup_config "selfsteal_main_profile" rollback_config || return 1
+
+  if ! jq -n --arg name "$name" --arg uuid "$uuid" --arg fp "firefox" \
+       --arg sni "$domain" --arg addr "$domain" --arg sub_token "$sub_token" \
+       --arg created "$(date +%Y-%m-%d\ %H:%M:%S)" \
+       '{name: $name, uuid: $uuid, transport: "tcp", port: 443,
+         fingerprint: $fp, sni: $sni, server_address: $addr,
+         sub_token: $sub_token, created: $created}' > "$PROFILES_DIR/$name.json"; then
+    rm -f "$PROFILES_DIR/$name.json"
+    echo -e "${RED}✗ Не удалось создать JSON профиля${NC}"
+    return 1
+  fi
+
+  if ! add_inbound "$uuid" tcp 443 "$domain" firefox "" "" "" "$backend_dest"; then
+    rm -f "$PROFILES_DIR/$name.json"
+    echo -e "${RED}✗ Inbound :443 не создан — профиль удалён${NC}"
+    return 1
+  fi
+
+  if ! safe_restart_xray "$rollback_config"; then
+    rm -f "$PROFILES_DIR/$name.json"
+    close_firewall_port 443 || true
+    echo -e "${RED}✗ Xray не принял конфигурацию — профиль удалён, config откачен${NC}"
+    return 1
+  fi
+  echo -e "${GREEN}  ✓ Главный профиль '$name' создан на :443${NC}"
+  return 0
+}
+
+# Strict DNS check для автодеплоя (без вопросов): A-запись обязана совпадать.
+_selfsteal_dns_check() {
+  local domain="$1" server_ip resolved_ip
+  server_ip=$(get_server_ip)
+  resolved_ip=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' | head -1)
+  [[ -n "$resolved_ip" && "$resolved_ip" == "$server_ip" ]]
+}
+
+# ── Нон-интерактивное ядро (мастер, CLI, install.sh, авто-миграция) ──
+# Полный цикл: DNS → освобождение :443 → backend → nginx+cert →
+# конвертация главного inbound (или создание главного профиля) → ссылка.
+_selfsteal_provision() {
+  local domain="$1" email="$2"
+
+  if ! validate_server_domain "$domain"; then
+    echo -e "${RED}✗ Некорректный домен: '${domain}'${NC}"
+    return 1
+  fi
+  if [[ -z "$email" ]] || ! [[ "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+    echo -e "${RED}✗ Некорректный email для Let's Encrypt: '${email}'${NC}"
+    return 1
+  fi
   echo -e "${GREEN}  → Домен: $domain${NC}"
 
-  if [[ -f "$SELFSTEAL_DOMAIN_FILE" && -f "$PROFILES_DIR/$SELFSTEAL_PROFILE_NAME.json" ]]; then
-    echo -e "${YELLOW}Self-steal уже настроен ($(cat "$SELFSTEAL_DOMAIN_FILE")).${NC}"
-    selfsteal_show_link
+  # Идемпотентность: inbound :443 уже self-steal для этого домена → готово.
+  if [[ -f "$SELFSTEAL_DOMAIN_FILE" ]] && jq -e --arg d "$domain" '
+      .inbounds[] | select(.port == 443)
+      | select(.streamSettings.realitySettings.serverNames[0] == $d)
+      | select(.streamSettings.realitySettings.dest | startswith("127.0.0.1:"))
+    ' "$CONFIG_FILE" >/dev/null 2>&1; then
+    echo -e "${GREEN}✓ Self-steal уже развёрнут для $domain${NC}"
+    _selfsteal_print_link || true
     return 0
   fi
 
-  _selfsteal_dns_preflight "$domain" || return 1
+  # DNS обязателен: автодеплой без retry-диалога (Reality через CDN-прокси
+  # невозможен, поэтому strict-режим — единственно корректный).
+  if ! _selfsteal_dns_check "$domain"; then
+    echo -e "${RED}✗ DNS: $domain не указывает на IP этого VPS${NC}"
+    echo -e "${YELLOW}  Создайте A-запись → $(get_server_ip) и повторите.${NC}"
+    return 1
+  fi
+  echo -e "${GREEN}  ✓ DNS: $domain → $(get_server_ip) (совпадает с VPS)${NC}"
 
-  local backend_port
-  backend_port=$(_selfsteal_pick_backend_port) || { sleep 2; return 1; }
-  local backend_dest="127.0.0.1:${backend_port}"
-  echo -e "${CYAN}  → Backend nginx: $backend_dest${NC}"
-
-  _selfsteal_inbound_443_preflight "$domain" "$backend_dest" || { sleep 3; return 1; }
-
-  # :443 не должен быть занят чужим процессом (nginx/apache/3x-ui).
+  # :443 должен принадлежать Xray. nginx-подписку переносим автоматически.
   if ! jq -e '.inbounds[] | select(.port == 443)' "$CONFIG_FILE" >/dev/null 2>&1; then
     local listener
     listener=$(ss -tlnpH 'sport = :443' 2>/dev/null | head -1)
     if [[ -n "$listener" && "$listener" != *xray* ]]; then
-      echo -e "${RED}✗ Порт 443 занят процессом:${NC} $listener"
-      echo -e "${YELLOW}  Освободите 443 для Xray и повторите.${NC}"
-      sleep 3
-      return 1
+      _selfsteal_free_443_from_nginx || return 1
+      listener=$(ss -tlnpH 'sport = :443' 2>/dev/null | head -1)
+      if [[ -n "$listener" && "$listener" != *xray* ]]; then
+        echo -e "${RED}✗ Порт 443 всё ещё занят:${NC} $listener"
+        return 1
+      fi
     fi
   fi
 
-  # Email для LE (как в публичной подписке).
-  local email
-  echo -n -e "${YELLOW}Email для Let's Encrypt (восстановление аккаунта): ${NC}"
-  read -r email
-  if [[ -z "$email" ]] || ! [[ "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
-    echo -e "${RED}✗ Некорректный email${NC}"
-    sleep 2
-    return 1
-  fi
+  local backend_port backend_dest
+  backend_port=$(_selfsteal_pick_backend_port) || return 1
+  backend_dest="127.0.0.1:${backend_port}"
+  echo -e "${CYAN}  → Backend nginx: $backend_dest${NC}"
 
   echo -e "${CYAN}  → Установка nginx + certbot...${NC}"
   if ! apt-get install -y nginx certbot; then
@@ -381,45 +508,89 @@ selfsteal_setup() {
     echo -e "${YELLOW}  ⚠ Backend self-check не прошёл — проверьте: curl -vk --resolve ${domain}:${backend_port}:127.0.0.1 https://${domain}:${backend_port}/${NC}"
   fi
 
-  # Профиль + inbound: create_profile сам делает backup/validate/restart.
-  echo -e "${CYAN}  → Создание профиля '$SELFSTEAL_PROFILE_NAME' (VLESS+Reality+Vision :443, dest=$backend_dest)...${NC}"
-  if ! create_profile "$SELFSTEAL_PROFILE_NAME" tcp 443 firefox "$domain" "" "" "" "$backend_dest"; then
-    echo -e "${RED}✗ Профиль не создан. Сайт и сертификат оставлены — повторите мастер после разбора.${NC}"
-    return 1
+  # Главное действие: конвертация существующего главного inbound
+  # или создание главного профиля (fresh install).
+  local target_port
+  target_port=$(_selfsteal_pick_convert_port)
+  if [[ -n "$target_port" ]]; then
+    _selfsteal_convert_inbound "$target_port" "$domain" "$backend_dest" || return 1
+  else
+    _selfsteal_create_main_profile "$domain" "$backend_dest" || return 1
   fi
-
-  # Клиент подключается по домену: адрес/SNI/сертификат совпадают.
-  safe_jq_write --arg addr "$domain" '.server_address = $addr' \
-    "$PROFILES_DIR/$SELFSTEAL_PROFILE_NAME.json" || \
-    echo -e "${YELLOW}  ⚠ Не удалось записать server_address в профиль${NC}"
 
   printf '%s\n' "$domain" > "$SELFSTEAL_DOMAIN_FILE"
   printf '%s\n' "$backend_port" > "$SELFSTEAL_PORT_FILE"
+  set_server_domain "$domain" || true
   fix_xray_permissions
 
   echo ""
   echo -e "${GREEN}✓ Self-steal развёрнут: https://${domain} для чужих = ваш сайт,${NC}"
-  echo -e "${GREEN}  для ваших клиентов = VLESS+Reality+Vision.${NC}"
-  selfsteal_show_link
+  echo -e "${GREEN}  для ваших клиентов = VLESS+Reality+Vision :443.${NC}"
+  _selfsteal_print_link || true
+  return 0
+}
+
+# CLI-обёртка: `xraytailscale selfsteal-auto [domain] [email]`.
+# Без аргументов — домен из .server_domain, email admin@<domain>.
+selfsteal_auto_command() {
+  local domain="${1:-}" email="${2:-}"
+  [[ -z "$domain" ]] && domain=$(get_server_domain)
+  if [[ -z "$domain" ]]; then
+    echo -e "${RED}✗ Домен не задан: sudo xraytailscale selfsteal-auto <domain> [email]${NC}"
+    return 1
+  fi
+  [[ -z "$email" ]] && email="admin@${domain}"
+  _selfsteal_provision "$domain" "$email"
+}
+
+# ── Мастер установки (интерактивная обёртка над _selfsteal_provision) ──
+
+selfsteal_setup() {
+  show_ascii
+  echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
+  echo -e "${BLUE}   SELF-STEAL: свой сайт + VLESS Reality Vision ${NC}"
+  echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
+  echo ""
+  echo -e "${CYAN}Схема: VLESS + Reality + Vision (xtls-rprx-vision), RAW TCP :443,${NC}"
+  echo -e "${CYAN}uTLS firefox. Reality маскируется под ВАШ сайт с LE-сертификатом.${NC}"
+  echo -e "${CYAN}Главный профиль КОНВЕРТИРУЕТСЯ в self-steal: UUID сохраняются,${NC}"
+  echo -e "${CYAN}ссылки перевыпускаются. nginx-подписка на :443 уйдёт на :8443.${NC}"
+  echo ""
+
+  # Домен: автоподстановка сохранённого, ввод один раз.
+  local domain
+  domain=$(prompt_server_domain) || { sleep 2; return 1; }
+
+  # Email для LE (как в публичной подписке).
+  local email
+  echo -n -e "${YELLOW}Email для Let's Encrypt (восстановление аккаунта) [admin@${domain}]: ${NC}"
+  read -r email
+  [[ -z "$email" ]] && email="admin@${domain}"
+
+  _selfsteal_provision "$domain" "$email"
+  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  read -r _
 }
 
 # ── Ссылка / статус / удаление ──────────────────────────────
 
-selfsteal_show_link() {
-  local profile_file="$PROFILES_DIR/$SELFSTEAL_PROFILE_NAME.json"
+# Печать vless-ссылки профиля на :443 (без pause — используется и автодеплоем).
+_selfsteal_print_link() {
+  local profile_file
+  profile_file=$(_selfsteal_profile_file_on_443) || \
+    profile_file="$PROFILES_DIR/$SELFSTEAL_PROFILE_NAME.json"
   if [[ ! -f "$profile_file" ]]; then
-    echo -e "${RED}✗ Профиль $SELFSTEAL_PROFILE_NAME не найден — сначала запустите установку${NC}"
-    sleep 2
+    echo -e "${RED}✗ Профиль на :443 не найден — сначала запустите установку${NC}"
     return 1
   fi
   local vless_link
   vless_link=$(_generate_vless_url_pure "$profile_file") || {
     echo -e "${RED}✗ Не удалось построить vless:// (inbound :443 жив? проверьте systemctl status xray)${NC}"
-    sleep 3
     return 1
   }
   echo ""
   echo -e "${BLUE}Параметры self-steal:${NC}"
+  echo -e "  ${CYAN}Профиль:${NC} $(basename "$profile_file" .json)"
   echo -e "  ${CYAN}Домен:${NC}   $(cat "$SELFSTEAL_DOMAIN_FILE" 2>/dev/null)"
   echo -e "  ${CYAN}Порт:${NC}    443 (RAW TCP)"
   echo -e "  ${CYAN}Flow:${NC}    xtls-rprx-vision"
@@ -430,6 +601,11 @@ selfsteal_show_link() {
   echo -e "${YELLOW}${vless_link}${NC}"
   echo ""
   qrencode -t ANSIUTF8 "$vless_link" 2>/dev/null || true
+  return 0
+}
+
+selfsteal_show_link() {
+  _selfsteal_print_link || { sleep 3; return 1; }
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
   read -r _
 }
@@ -481,7 +657,7 @@ selfsteal_remove() {
   fi
   rm -f "$SELFSTEAL_DOMAIN_FILE" "$SELFSTEAL_PORT_FILE"
   echo -e "${GREEN}✓ Сайт и nginx-конфиг self-steal удалены${NC}"
-  echo -e "${YELLOW}⚠ Профиль '$SELFSTEAL_PROFILE_NAME' и inbound :443 НЕ удалены автоматически.${NC}"
+  echo -e "${YELLOW}⚠ Профиль и inbound :443 НЕ удалены автоматически.${NC}"
   echo -e "${YELLOW}  Удалите профиль через меню 2 — иначе Reality dest указывает на несуществующий сайт.${NC}"
   if [[ -n "$domain" && -d "/etc/letsencrypt/live/${domain}" ]]; then
     echo -e "${YELLOW}  Сертификат LE оставлен. Удалить вручную: certbot delete --cert-name ${domain}${NC}"
