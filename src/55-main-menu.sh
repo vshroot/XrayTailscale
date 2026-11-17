@@ -22,6 +22,33 @@ main_menu() {
   run_migration "xmux_explicit_2026"                   "Explicit xmux block для XHTTP"     migrate_xmux_explicit_2026         || ((migration_failures++))
   run_migration "xhttp_xmux_throughput_2026"           "XHTTP XMUX throughput profile"      _migrate_xhttp_xmux_throughput_2026 || ((migration_failures++))
   run_migration "mlkem_keys_generated"                 "PQ ключи VLESS Encryption (mlkem768x25519plus)" _migrate_mlkem_keys || ((migration_failures++))
+
+  # Одноразовое предупреждение перед необратимой сменой старых vless:// ссылок.
+  # Отказ не создаёт маркер предупреждения, поэтому вопрос повторится при следующем запуске.
+  local pq_migration_warned="/usr/local/etc/xray/.pq_migration_warned"
+  local pq_migration_allowed=1
+  if [[ ! -f "$pq_migration_warned" ]] && [[ -n "$(_list_legacy_pq_profile_names)" ]]; then
+    echo -e "${YELLOW}Внимание: старые single-route профили будут переведены на XHTTP+PQ. Ручные vless://-ссылки перестанут работать (подписки обновятся сами).${NC}"
+    echo -n -e "${YELLOW}Продолжить PQ-миграцию? [Y/n]: ${NC}"
+    local pq_migration_answer=""
+    read -r pq_migration_answer || {
+      echo
+      echo -e "${YELLOW}Ввод завершён без ответа — PQ-миграция пропущена до следующего запуска${NC}"
+      pq_migration_allowed=0
+    }
+    if [[ $pq_migration_allowed -eq 1 ]]; then
+      if [[ -z "$pq_migration_answer" ]] || [[ "$pq_migration_answer" =~ ^[yYдД]$ ]]; then
+        touch "$pq_migration_warned"
+        chown xray:xray "$pq_migration_warned" 2>/dev/null || true
+      else
+        echo -e "${YELLOW}PQ-миграция пропущена. Предупреждение появится снова при следующем запуске.${NC}"
+        pq_migration_allowed=0
+      fi
+    fi
+  fi
+  if [[ $pq_migration_allowed -eq 1 ]]; then
+    run_migration "pq_all_2026" "PQ: legacy-профили → XHTTP+PQ" _migrate_pq_all_profiles_2026 || ((migration_failures++))
+  fi
   run_migration "xhttp_default_2026"                   "XHTTP+PQ как дефолтный пресет создания профиля" _migrate_xhttp_default_2026 || ((migration_failures++))
   run_migration "subscription_tokens_2026"             "Subscription tokens (Phase 7) для существующих профилей" _migrate_subscription_tokens_2026 || ((migration_failures++))
   run_migration "happ_legacy_xhttp_route_2026"         "HAPP subscription не меняет существующие профили" _migrate_happ_legacy_xhttp_route_2026 || ((migration_failures++))

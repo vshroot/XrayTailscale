@@ -1039,6 +1039,76 @@ _migrate_xhttp_default_2026() {
   return 1
 }
 
+# Общий поиск single-route legacy профилей для предупреждения и миграции.
+# Multi-route, уже включённые PQ и служебный bulk-seed не попадают в список.
+_list_legacy_pq_profile_names() {
+  local profile_file profile_name
+  for profile_file in "$PROFILES_DIR"/*.json; do
+    [[ -f "$profile_file" ]] || continue
+    _profile_is_bulk_seed_file "$profile_file" && continue
+    profile_has_routes "$profile_file" && continue
+    [[ "$(jq -r '.pq_enabled // false' "$profile_file" 2>/dev/null)" == "true" ]] && continue
+    profile_name=$(basename "$profile_file" .json)
+    echo "$profile_name"
+  done | sort
+}
+
+# Автоматический перевод старых single-route профилей на XHTTP+PQ.
+# run_migration уже создал общий бэкап; каждый helper дополнительно создаёт свой
+# точечный бэкап и применяет один inbound сразу через safe_restart_xray.
+# Return: 0=changed, 1=no-op, 2=fail.
+_migrate_pq_all_profiles_2026() {
+  local legacy_profiles=()
+  local profile_name
+  while IFS= read -r profile_name; do
+    [[ -n "$profile_name" ]] && legacy_profiles+=("$profile_name")
+  done < <(_list_legacy_pq_profile_names)
+
+  if [[ ${#legacy_profiles[@]} -eq 0 ]]; then
+    echo -e "${GREEN}✓ Single-route legacy профилей для PQ-миграции не найдено${NC}"
+    return 1
+  fi
+
+  if [[ ! -f "$VLESS_DECRYPTION_FILE" ]] || [[ ! -f "$VLESS_ENCRYPTION_FILE" ]]; then
+    echo -e "${YELLOW}⚠ PQ-миграция отложена: не найдены ключи VLESS Encryption${NC}"
+    echo -e "${YELLOW}  Ожидаются: $VLESS_DECRYPTION_FILE и $VLESS_ENCRYPTION_FILE${NC}"
+    echo -e "${YELLOW}  Их должна сгенерировать миграция _migrate_mlkem_keys; config.json не изменён${NC}"
+    return 1
+  fi
+
+  local ok=0
+  local fail=0
+  for profile_name in "${legacy_profiles[@]}"; do
+    # Профиль на общем порту мог уже обновиться вместе с предыдущим.
+    [[ -f "$PROFILES_DIR/$profile_name.json" ]] || continue
+    if profile_has_routes "$PROFILES_DIR/$profile_name.json" || \
+       _profile_is_bulk_seed_file "$PROFILES_DIR/$profile_name.json" || \
+       [[ "$(jq -r '.pq_enabled // false' "$PROFILES_DIR/$profile_name.json" 2>/dev/null)" == "true" ]]; then
+      continue
+    fi
+
+    echo -e "${CYAN}  → PQ-миграция профиля '$profile_name'${NC}"
+    if _pq_upgrade_one_profile "$profile_name"; then
+      ((ok += 1))
+    else
+      echo -e "${RED}  ✗ Не удалось мигрировать профиль '$profile_name'${NC}"
+      ((fail += 1))
+    fi
+  done
+
+  if [[ $fail -gt 0 ]]; then
+    echo -e "${RED}✗ PQ-миграция: успешно $ok, с ошибками $fail${NC}"
+    return 2
+  fi
+  if [[ $ok -gt 0 ]]; then
+    echo -e "${GREEN}✓ PQ-миграция завершена: обновлено профилей $ok${NC}"
+    return 0
+  fi
+
+  echo -e "${GREEN}✓ Все найденные профили уже обновлены${NC}"
+  return 1
+}
+
 # Phase 7 REQ-C04: догенерируем sub_token для существующих профилей,
 # созданных до Phase 7 (нет поля .sub_token).
 # Return: 0 = были изменения config.json (НЕ наш случай, миграция не трогает config.json),
