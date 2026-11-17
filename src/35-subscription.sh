@@ -699,7 +699,11 @@ install_subscription_ip_tls() {
   fi
 
   local pub_port
-  pub_port=$(_select_subscription_port)
+  if ! pub_port=$(_select_subscription_port); then
+    echo -e "${RED}✗ Нет свободного порта для подписки (8443–12443 заняты)${NC}"
+    echo -e "${YELLOW}  Освободите один из портов диапазона 8443–12443 и повторите установку.${NC}"
+    return 1
+  fi
   echo -e "${CYAN}  → HTTPS порт подписки: $pub_port${NC}"
 
   echo -e "${CYAN}  → Установка nginx...${NC}"
@@ -881,7 +885,9 @@ NGINX_TLS_EOF
 # → nginx HTTP-only ACME site on :80 → certbot certonly --webroot → explicit SSL
 # nginx site on selected public port → markers → enable xraytailscale-sub.
 # Важно: не используем certbot --nginx. Он плохо предсказуем на нестандартном
-# HTTPS-порту (8443) и может оставить plain HTTP listener после failed certbot.
+# HTTPS-порту (fallback идёт по списку 8443→9443→10443→11443→12443 через
+# _subscription_find_free_port) и может оставить plain HTTP listener после
+# failed certbot.
 install_subscription_public_tls() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
@@ -935,9 +941,14 @@ install_subscription_public_tls() {
     return 1
   fi
 
-  # Port preflight: 443 (default) или 8443 (если 443 занят).
+  # Port preflight: 443 (default), иначе первый свободный fallback из
+  # 8443→9443→10443→11443→12443 через _subscription_find_free_port.
   local pub_port
-  pub_port=$(_select_subscription_port)
+  if ! pub_port=$(_select_subscription_port); then
+    echo -e "${RED}✗ Нет свободного порта для подписки (8443–12443 заняты)${NC}"
+    echo -e "${YELLOW}  Освободите один из портов диапазона 8443–12443 и повторите установку.${NC}"
+    return 1
+  fi
   echo -e "${CYAN}  → Публичный порт: $pub_port${NC}"
 
   echo -e "${CYAN}  → Установка nginx + certbot...${NC}"

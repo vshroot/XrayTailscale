@@ -561,7 +561,8 @@ selfsteal_setup() {
   echo -e "${CYAN}Схема: VLESS + Reality + Vision (xtls-rprx-vision), RAW TCP :443,${NC}"
   echo -e "${CYAN}uTLS firefox. Reality маскируется под ВАШ сайт с LE-сертификатом.${NC}"
   echo -e "${CYAN}Главный профиль КОНВЕРТИРУЕТСЯ в self-steal: UUID сохраняются,${NC}"
-  echo -e "${CYAN}ссылки перевыпускаются. nginx-подписка на :443 уйдёт на :8443.${NC}"
+  echo -e "${CYAN}ссылки перевыпускаются. nginx-подписка на :443 уйдёт на свободный${NC}"
+  echo -e "${CYAN}порт из диапазона 8443–12443.${NC}"
   echo ""
 
   # Домен: автоподстановка сохранённого, ввод один раз.
