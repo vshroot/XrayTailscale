@@ -4,23 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-XrayTailscale — automated Xray Reality VPN manager for bypassing DPI censorship in Russia. Single Bash script (`xraytailscale`, ~2500 lines) that turns a VPS into a managed VPN server with interactive terminal UI. Deployed to Debian 10+/Ubuntu 20.04+ servers.
+XrayTailscale — automated Xray Reality VPN manager for bypassing DPI censorship in Russia. Single Bash script (`xraytailscale`, ~12k lines) built from modules in `src/`, turning a VPS into a managed VPN server with an interactive terminal UI. Deployed to Debian 10+/Ubuntu 20.04+ servers.
 
 ## Validation Commands
 
 ```bash
+./build.sh                         # src/*.sh -> ./xraytailscale (name order)
 bash -n xraytailscale              # Syntax check (MUST pass before commit)
-bash -n install.sh              # Also check lifecycle scripts
-bash -n update.sh
+bash -n install.sh update.sh uninstall.sh
+for t in validation/test-*.sh; do bash "$t" || echo "FAIL: $t"; done
 ```
 
-There are no automated tests. Validation is manual: create/delete profiles, check `ufw status`, `systemctl status xray`, test connections from client apps (v2rayNG, Shadowrocket).
+Tests in `validation/` are static (grep + `bash -n`) and behavioural (source a
+module, call a function, assert rc/state) — they need no server. `test-build-sync.sh`
+fails if the committed bundle differs from `src/`. Manual validation on a real
+VPS is still needed for provisioning paths (certbot, nginx, firewall).
 
 ## Architecture
 
-### Single-file application
+### Modular sources, single-file bundle
 
-All logic lives in `xraytailscale`. Supporting scripts (`install.sh`, `update.sh`, `uninstall.sh`) handle lifecycle but are not part of the runtime.
+Logic lives in `src/*.sh` modules (see `src/README.md` for the map); `./build.sh`
+concatenates them in filename order into the committed `xraytailscale` bundle.
+Supporting scripts (`install.sh`, `update.sh`, `uninstall.sh`) handle lifecycle
+but are not part of the runtime. Never edit `xraytailscale` directly — edit
+`src/` and rebuild, or `test-build-sync.sh` fails.
 
 ### Production paths
 
@@ -105,6 +113,22 @@ Do NOT use raw `jq ... > temp && mv temp file` — always go through `safe_jq_wr
 **Client counting**: When checking if an inbound has remaining clients (e.g. before deleting the entire inbound), count via `config.json` clients array, NOT by counting profile files on disk. Profile files can be out of sync.
 
 **Menu pattern**: `while true; do show_ascii; ... read choice; case $choice in ... 0) return ;; esac; done`
+
+**UI entry points** (`src/55-main-menu.sh`, `src/56-wizard.sh`, `src/57-status.sh`):
+`main_menu()` is a router, not a 16-item list: `wizard_is_fresh_install` →
+`run_first_run_wizard`, otherwise → `status_screen`. The status screen has
+add-user / links+QR / diagnose-and-repair / «Дополнительно». Everything rare
+(bulk users, Tailscale, cascade + bypass + outbound node, subscription
+management, self-steal, advanced profile settings, user deletion, core update)
+lives in `_status_extra_menu`. Bypass rules and the outbound-node setup are
+sub-items of `cascade_mode_menu` — they only make sense with a cascade.
+
+- `read` in every interactive function must tolerate EOF (`read -r x || return`)
+  so the wizard can call menu functions non-interactively.
+- Every provisioning step ends with an outside-in check; a step the user cannot
+  see failing is a bug.
+- State files (`.wizard_state`, `.subscription_port`) are untrusted input: re-validate
+  values read back before they reach a path, `jq` filter or firewall command.
 
 **Colors**: `RED` (errors), `GREEN` (success), `YELLOW` (warnings/prompts), `BLUE` (menu borders), `CYAN` (info/options), `MAGENTA` (section headers), `NC` (reset).
 
