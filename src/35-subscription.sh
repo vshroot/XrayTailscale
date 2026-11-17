@@ -475,6 +475,7 @@ _subscription_external_selfcheck() {
   fi
   echo -e "${CYAN}  → Проверяю подписку извне: ${url}${NC}"
   code=$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
+  [[ -z "$code" ]] && code="000"
   if [[ "$code" =~ ^[23] ]]; then
     echo -e "${GREEN}  ✓ Подписка проверена извне: HTTP ${code}${NC}"
     return 0
@@ -690,8 +691,16 @@ install_subscription_ip_tls() {
   echo -e "${CYAN}  → VPS IPv4: ${server_ip}${NC}"
 
   local email
-  echo -n -e "${YELLOW}Email для Let's Encrypt (renew/account notices): ${NC}"
-  read -r email
+  # Обратно-совместимый override: мастер (src/56-wizard.sh) спрашивает email
+  # один раз и выставляет SUBSCRIPTION_LE_EMAIL перед вызовом — тогда prompt
+  # пропускается, но валидация остаётся той же.
+  if [[ -n "${SUBSCRIPTION_LE_EMAIL:-}" ]]; then
+    email="$SUBSCRIPTION_LE_EMAIL"
+    echo -e "${CYAN}  → Email для Let's Encrypt (из мастера): ${email}${NC}"
+  else
+    echo -n -e "${YELLOW}Email для Let's Encrypt (renew/account notices): ${NC}"
+    read -r email
+  fi
   if [[ -z "$email" ]] || ! [[ "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
     echo -e "${RED}✗ Некорректный email${NC}"
     sleep 2
