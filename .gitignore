@@ -1,6 +1,7 @@
 # локальный контекст ИИ
 AI_CONTEXT.md
 .planning/
+.hermes/
 
 # бэкапы xrayebator
 xrayebator.backup_*
