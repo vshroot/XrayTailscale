@@ -27,6 +27,7 @@ main_menu() {
   # Отказ не создаёт маркер предупреждения, поэтому вопрос повторится при следующем запуске.
   local pq_migration_warned="/usr/local/etc/xray/.pq_migration_warned"
   local pq_migration_allowed=1
+  local pq_migration_answered_yes=0
   if [[ ! -f "$pq_migration_warned" ]] && [[ -n "$(_list_legacy_pq_profile_names)" ]]; then
     echo -e "${YELLOW}Внимание: старые single-route профили будут переведены на XHTTP+PQ. Ручные vless://-ссылки перестанут работать (подписки обновятся сами).${NC}"
     echo -n -e "${YELLOW}Продолжить PQ-миграцию? [Y/n]: ${NC}"
@@ -38,8 +39,9 @@ main_menu() {
     }
     if [[ $pq_migration_allowed -eq 1 ]]; then
       if [[ -z "$pq_migration_answer" ]] || [[ "$pq_migration_answer" =~ ^[yYдД]$ ]]; then
-        touch "$pq_migration_warned"
-        chown xray:xray "$pq_migration_warned" 2>/dev/null || true
+        # Маркер предупреждения ставится ТОЛЬКО после успешной миграции (ниже):
+        # иначе упавшая миграция повторялась бы уже молча, без предупреждения.
+        pq_migration_answered_yes=1
       else
         echo -e "${YELLOW}PQ-миграция пропущена. Предупреждение появится снова при следующем запуске.${NC}"
         pq_migration_allowed=0
@@ -47,7 +49,15 @@ main_menu() {
     fi
   fi
   if [[ $pq_migration_allowed -eq 1 ]]; then
-    run_migration "pq_all_2026" "PQ: legacy-профили → XHTTP+PQ" _migrate_pq_all_profiles_2026 || ((migration_failures++))
+    if run_migration "pq_all_2026" "PQ: legacy-профили → XHTTP+PQ" _migrate_pq_all_profiles_2026; then
+      # Предупреждение «исчерпано» только когда миграция реально прошла.
+      if [[ $pq_migration_answered_yes -eq 1 ]]; then
+        touch "$pq_migration_warned"
+        chown xray:xray "$pq_migration_warned" 2>/dev/null || true
+      fi
+    else
+      ((migration_failures++))
+    fi
   fi
   run_migration "xhttp_default_2026"                   "XHTTP+PQ как дефолтный пресет создания профиля" _migrate_xhttp_default_2026 || ((migration_failures++))
   run_migration "subscription_tokens_2026"             "Subscription tokens (Phase 7) для существующих профилей" _migrate_subscription_tokens_2026 || ((migration_failures++))

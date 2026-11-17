@@ -423,7 +423,13 @@ run_first_run_wizard() {
 
     if [[ "$have_domain" =~ ^[yYдД]$ ]]; then
       mode="domain"
+      local domain_attempts=0
       while true; do
+        ((domain_attempts++))
+        if [[ $domain_attempts -gt 10 ]]; then
+          echo -e "${RED}✗ Слишком много попыток ввода домена — мастер прерван${NC}"
+          return 1
+        fi
         local domain_hint="$saved_domain"
         if [[ -n "$domain_hint" ]]; then
           echo -n -e "${YELLOW}Домен [${CYAN}${domain_hint}${YELLOW}]: ${NC}"
@@ -501,7 +507,13 @@ run_first_run_wizard() {
     saved_email=$(_wizard_state_get EMAIL || true)
     [[ -n "$saved_email" ]] && email_default="$saved_email"
 
+    local email_attempts=0
     while true; do
+      ((email_attempts++))
+      if [[ $email_attempts -gt 10 ]]; then
+        echo -e "${RED}✗ Слишком много попыток ввода email — мастер прерван${NC}"
+        return 1
+      fi
       if [[ -n "$email_default" ]]; then
         echo -n -e "${YELLOW}Email для Let's Encrypt [${CYAN}${email_default}${YELLOW}]: ${NC}"
       else
@@ -550,7 +562,13 @@ run_first_run_wizard() {
         user_name="$default_user"
       else
         echo -e "${CYAN}Имя пользователя — это имя профиля (7 маршрутов, XHTTP+PQ).${NC}"
+        local user_attempts=0
         while true; do
+          ((user_attempts++))
+          if [[ $user_attempts -gt 10 ]]; then
+            echo -e "${RED}✗ Слишком много попыток ввода имени — мастер прерван${NC}"
+            return 1
+          fi
           echo -n -e "${YELLOW}Имя первого пользователя [${CYAN}${default_user}${YELLOW}]: ${NC}"
           read -r user_name || {
             echo ""

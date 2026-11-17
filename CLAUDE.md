@@ -73,15 +73,17 @@ XHTTP transport stores SNI in TWO places: `realitySettings.serverNames` AND `xht
 
 ### Migration system
 
-Marker files in `/usr/local/etc/xray/` (e.g. `.xhttp_migrated`, `.config_optimized`). Migrations run once on first `main_menu()` launch after upgrade. Pattern for new migrations:
+Marker files in `/usr/local/etc/xray/` (e.g. `.xhttp_migrated`, `.config_optimized`, `.pq_all_2026`). Migrations run once on first `main_menu()` launch after upgrade, through `run_migration <id> <description> <fn>` (`src/20-migrations.sh`), which already wraps `backup_config` and `safe_restart_xray`. A migration function returns **0 = changed, 1 = no-op, 2 = failed**, and must not do its own backup/restart. `pq_all_2026` (`_migrate_pq_all_profiles_2026`) upgrades legacy single-route profiles to XHTTP+PQ one by one through `_pq_upgrade_one_profile` (shared with the manual `upgrade_profile_to_pq_menu`).
+
+Pattern for a migration body:
 ```bash
-if [[ ! -f "/usr/local/etc/xray/.my_migration_marker" ]]; then
-  backup_config "my_migration"
+_my_migration() {
   # ... safe_jq_write calls ...
   fix_xray_permissions
-  touch "/usr/local/etc/xray/.my_migration_marker"
-  safe_restart_xray
-fi
+  return 0   # 0=changed, 1=no-op, 2=failed (marker is NOT set, migration retries)
+}
+# Registered in main_menu(): run_migration "my_migration_marker" "Description" _my_migration
+# run_migration sets the marker and restarts Xray only after a successful fn.
 ```
 
 ### Security model

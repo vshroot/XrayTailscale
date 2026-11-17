@@ -64,8 +64,16 @@ extract_fn src/55-main-menu.sh main_menu > "$WORKDIR/main_menu"
 
 [[ -s "$WORKDIR/pq_helper" ]] || fail "_pq_upgrade_one_profile не определён"
 [[ -s "$WORKDIR/pq_migration" ]] || fail "_migrate_pq_all_profiles_2026 не определена"
-assert_contains "$WORKDIR/main_menu" 'run_migration "pq_all_2026" "PQ: legacy-профили → XHTTP+PQ" _migrate_pq_all_profiles_2026 || ((migration_failures++))'
+assert_contains "$WORKDIR/main_menu" 'run_migration "pq_all_2026" "PQ: legacy-профили → XHTTP+PQ" _migrate_pq_all_profiles_2026'
 echo "  ✓ helper, миграция и регистрация pq_all_2026"
+
+# Предупреждение считается «исчерпанным» только после УСПЕШНОЙ миграции:
+# маркер ставится в ветке успеха run_migration, а не до её запуска — иначе
+# упавшая миграция повторялась бы уже молча.
+assert_order "$WORKDIR/main_menu" \
+  'run_migration "pq_all_2026" "PQ: legacy-профили → XHTTP+PQ" _migrate_pq_all_profiles_2026; then' \
+  'touch "$pq_migration_warned"'
+assert_contains "$WORKDIR/main_menu" 'pq_migration_answered_yes'
 
 # config.json сначала успешно применяется, только затем профили получают PQ-флаг.
 assert_order "$WORKDIR/pq_helper" 'if ! safe_restart_xray "$rollback_config"; then' "'.transport = \"xhttp\" | .schema_version = 2 | .pq_enabled = true | .xhttp_path = \$path'"
