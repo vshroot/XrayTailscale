@@ -6,26 +6,26 @@ _pq_upgrade_one_profile() {
   local pfile="$PROFILES_DIR/$name.json"
 
   if [[ ! -f "$pfile" ]]; then
-    echo -e "${RED}✗ Профиль не найден: $name${NC}"
+    echo -e "${RED}✗ Profile not found: $name${NC}"
     return 1
   fi
   if profile_has_routes "$pfile"; then
-    echo -e "${RED}✗ Multi-route профиль '$name' нельзя перевести целиком через PQ-апгрейд${NC}"
+    echo -e "${RED}✗ Multi-route profile '$name' cannot be converted wholesale via the PQ upgrade${NC}"
     return 1
   fi
   if _profile_is_bulk_seed_file "$pfile"; then
-    echo -e "${RED}✗ Служебный bulk-seed профиль '$name' пропущен${NC}"
+    echo -e "${RED}✗ Service bulk-seed profile '$name' skipped${NC}"
     return 1
   fi
   if [[ "$(jq -r '.pq_enabled // false' "$pfile" 2>/dev/null)" == "true" ]]; then
-    echo -e "${CYAN}  → Профиль '$name' уже использует PQ${NC}"
+    echo -e "${CYAN}  → Profile '$name' already uses PQ${NC}"
     return 0
   fi
 
   # Бэкап нужен до любой мутации config.json; точный путь используется для отката.
   local rollback_config=""
   if ! backup_config "upgrade_profile_pq_$name" rollback_config; then
-    echo -e "${RED}✗ Не удалось создать бэкап перед PQ-апгрейдом профиля '$name'${NC}"
+    echo -e "${RED}✗ Could not back up before the PQ upgrade of profile '$name'${NC}"
     return 1
   fi
 
@@ -33,7 +33,7 @@ _pq_upgrade_one_profile() {
   port=$(jq -r '.port // empty' "$pfile" 2>/dev/null)
   uuid=$(jq -r '.uuid // empty' "$pfile" 2>/dev/null)
   if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ -z "$uuid" || "$uuid" == "null" ]]; then
-    echo -e "${RED}✗ Профиль '$name' не содержит корректные port/uuid${NC}"
+    echo -e "${RED}✗ Profile '$name' has no valid port/uuid${NC}"
     return 1
   fi
 
@@ -46,7 +46,7 @@ _pq_upgrade_one_profile() {
       | select(any(.settings.clients[]?; (.id // "") == $uuid)))
   ' "$CONFIG_FILE" 2>/dev/null)
   if [[ -z "$current_inbound" || "$current_inbound" == "null" ]]; then
-    echo -e "${RED}✗ Не найден текущий inbound профиля '$name' на порту $port${NC}"
+    echo -e "${RED}✗ Current inbound of profile '$name' not found on port $port${NC}"
     return 1
   fi
 
@@ -54,7 +54,7 @@ _pq_upgrade_one_profile() {
   sni=$(jq -r '.streamSettings.realitySettings.serverNames[0] // empty' <<< "$current_inbound")
   short_id=$(jq -r '.streamSettings.realitySettings.shortIds[0] // empty' <<< "$current_inbound")
   if [[ -z "$sni" ]]; then
-    echo -e "${RED}✗ В inbound на порту $port отсутствует Reality SNI${NC}"
+    echo -e "${RED}✗ The inbound on port $port has no Reality SNI${NC}"
     return 1
   fi
   if [[ -z "$short_id" ]]; then
@@ -65,7 +65,7 @@ _pq_upgrade_one_profile() {
   local VLESS_DECRYPTION
   VLESS_DECRYPTION=$(cat "$VLESS_DECRYPTION_FILE" 2>/dev/null)
   if [[ -z "$VLESS_DECRYPTION" ]]; then
-    echo -e "${RED}✗ $VLESS_DECRYPTION_FILE пуст или отсутствует — апгрейд прерван${NC}"
+    echo -e "${RED}✗ $VLESS_DECRYPTION_FILE is empty or missing — upgrade aborted${NC}"
     return 1
   fi
 
@@ -73,7 +73,7 @@ _pq_upgrade_one_profile() {
   local PRIVATE_KEY
   PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE" 2>/dev/null)
   if [[ -z "$PRIVATE_KEY" ]]; then
-    echo -e "${RED}✗ Reality private key пуст или отсутствует: $PRIVATE_KEY_FILE${NC}"
+    echo -e "${RED}✗ Reality private key is empty or missing: $PRIVATE_KEY_FILE${NC}"
     return 1
   fi
 
@@ -135,7 +135,7 @@ UPGEOF
     for p in "${profiles_on_port[@]}"; do
       pu=$(jq -r '.uuid // empty' "$PROFILES_DIR/$p.json" 2>/dev/null)
       if [[ -z "$pu" ]]; then
-        echo -e "${RED}✗ Не удалось прочитать UUID профиля '$p' на порту $port${NC}"
+        echo -e "${RED}✗ Could not obtain the UUID of profile '$p' on port $port${NC}"
         return 1
       fi
       if [[ $first -eq 1 ]]; then first=0; else clients_json+=","; fi
@@ -144,7 +144,7 @@ UPGEOF
     clients_json+="]"
     new_inbound=$(jq --argjson c "$clients_json" '.settings.clients = $c' <<< "$new_inbound")
     if [[ -z "$new_inbound" ]]; then
-      echo -e "${RED}✗ Не удалось собрать список клиентов для порта $port${NC}"
+      echo -e "${RED}✗ Could not build the client list for port $port${NC}"
       return 1
     fi
   fi
@@ -153,7 +153,7 @@ UPGEOF
   if ! safe_jq_write --argjson port "$port" --argjson new_in "$new_inbound" \
     '(.inbounds |= map(select(.port != $port))) | .inbounds += [$new_in]' \
     "$CONFIG_FILE"; then
-    echo -e "${RED}✗ Ошибка обновления config.json для профиля '$name'${NC}"
+    echo -e "${RED}✗ Error updating config.json for profile '$name'${NC}"
     _restore_config_backup "$rollback_config" >/dev/null 2>&1 || true
     return 1
   fi
@@ -161,8 +161,8 @@ UPGEOF
   # Сначала применяем config.json, затем синхронизируем profile JSON.
   fix_xray_permissions
   if ! safe_restart_xray "$rollback_config"; then
-    echo -e "${RED}✗ safe_restart_xray failed — config откачен на бэкап upgrade_profile_pq_$name${NC}"
-    echo -e "${YELLOW}  Profile JSON не менялся — состояние профилей сохранено.${NC}"
+    echo -e "${RED}✗ safe_restart_xray failed — config rolled back to backup upgrade_profile_pq_$name${NC}"
+    echo -e "${YELLOW}  Profile JSON unchanged — profile state preserved.${NC}"
     _restore_config_backup "$rollback_config" >/dev/null 2>&1 || true
     return 1
   fi
@@ -174,19 +174,19 @@ UPGEOF
     if ! safe_jq_write --arg path "$xhttp_path" \
       '.transport = "xhttp" | .schema_version = 2 | .pq_enabled = true | .xhttp_path = $path' \
       "$PROFILES_DIR/$p.json"; then
-      echo -e "${RED}  ✗ Ошибка обновления profile JSON: $p${NC}"
+      echo -e "${RED}  ✗ Error updating profile JSON: $p${NC}"
       ((profile_failed += 1))
     else
-      echo -e "${CYAN}  → Обновлен: ${YELLOW}$p${NC}"
+      echo -e "${CYAN}  → Updated: ${YELLOW}$p${NC}"
     fi
   done
 
   if [[ $profile_failed -gt 0 ]]; then
-    echo -e "${RED}✗ PQ-апгрейд '$name': config.json применён, но $profile_failed profile JSON требуют повторной миграции${NC}"
+    echo -e "${RED}✗ PQ upgrade '$name': config.json applied, but $profile_failed profile JSON need a re-migration${NC}"
     return 1
   fi
 
-  echo -e "${GREEN}✓ Профиль '$name' успешно переведён на XHTTP+PQ${NC}"
+  echo -e "${GREEN}✓ Profile '$name' successfully switched to XHTTP+PQ${NC}"
   return 0
 }
 
@@ -196,26 +196,26 @@ upgrade_profile_to_pq_menu() {
   # Если оператор прерывает (Ctrl+C / выбор 0 / "n" в подтверждении) — НИЧЕГО не изменено.
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}   ОБНОВЛЕНИЕ ПРОФИЛЯ ДО POST-QUANTUM         ${NC}"
+  echo -e "${BLUE}   UPGRADE PROFILE TO POST-QUANTUM         ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
 
   # Pre-check: ключи vlessenc должны существовать (Plan 6.1 marker .mlkem_keys_generated)
   if [[ ! -f "$VLESS_DECRYPTION_FILE" ]] || [[ ! -f "$VLESS_ENCRYPTION_FILE" ]]; then
-    echo -e "${RED}✗ ML-KEM ключи не найдены ($VLESS_DECRYPTION_FILE).${NC}"
-    echo -e "${YELLOW}  Запустите xraytailscale update — миграция .mlkem_keys_generated должна сгенерировать ключи.${NC}"
-    echo -n -e "${YELLOW}Нажмите Enter для возврата...${NC}"; read
+    echo -e "${RED}✗ ML-KEM keys not found ($VLESS_DECRYPTION_FILE).${NC}"
+    echo -e "${YELLOW}  Run xraytailscale update — the .mlkem_keys_generated migration should generate the keys.${NC}"
+    echo -n -e "${YELLOW}Press Enter to return...${NC}"; read
     return
   fi
 
   # Список ВСЕХ профилей с пометкой PQ-статуса
   local profiles=($(_list_visible_profile_names))
   if [[ ${#profiles[@]} -eq 0 ]]; then
-    echo -e "${RED}✗ Нет созданных профилей${NC}"
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"; read
+    echo -e "${RED}✗ No profiles created${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"; read
     return
   fi
 
-  echo -e "${YELLOW}Выберите профиль для перевода на post-quantum:${NC}\n"
+  echo -e "${YELLOW}Choose a profile to switch to post-quantum:${NC}\n"
   local i=1
   local upgradeable=()
   for profile in "${profiles[@]}"; do
@@ -226,43 +226,43 @@ upgrade_profile_to_pq_menu() {
       local route_count
       route_count=$(_profile_route_count "$pfile")
       if _profile_has_pq_route "$pfile"; then
-        echo -e "${CYAN} —)${NC} $profile ${BLUE}[multi-route: ${route_count} routes]${NC} ${GREEN}[PQ route уже есть]${NC}"
+        echo -e "${CYAN} —)${NC} $profile ${BLUE}[multi-route: ${route_count} routes]${NC} ${GREEN}[PQ route already present]${NC}"
       else
-        echo -e "${CYAN} —)${NC} $profile ${BLUE}[multi-route: ${route_count} routes]${NC} ${YELLOW}[апгрейд делается по маршрутам вручную]${NC}"
+        echo -e "${CYAN} —)${NC} $profile ${BLUE}[multi-route: ${route_count} routes]${NC} ${YELLOW}[upgrade is done per-route manually]${NC}"
       fi
       continue
     fi
 
     local pq=$(jq -r '.pq_enabled // false' "$pfile" 2>/dev/null)
     if [[ "$pq" == "true" ]]; then
-      echo -e "${CYAN} —)${NC} $profile ${BLUE}[порт:$port,$transport]${NC} ${GREEN}[уже PQ]${NC}"
+      echo -e "${CYAN} —)${NC} $profile ${BLUE}[port:$port,$transport]${NC} ${GREEN}[already PQ]${NC}"
     else
-      echo -e "${CYAN} $i)${NC} $profile ${BLUE}[порт:$port,$transport]${NC} ${YELLOW}[legacy]${NC}"
+      echo -e "${CYAN} $i)${NC} $profile ${BLUE}[port:$port,$transport]${NC} ${YELLOW}[legacy]${NC}"
       upgradeable+=("$profile")
       ((i++))
     fi
   done
-  echo -e "${CYAN} 0)${NC} Назад\n"
+  echo -e "${CYAN} 0)${NC} Back\n"
 
   if [[ ${#upgradeable[@]} -eq 0 ]]; then
-    echo -e "${GREEN}✓ Нет single-route legacy профилей для in-place PQ upgrade.${NC}"
-    echo -e "${CYAN}Multi-route профили уже содержат отдельные legacy/PQ маршруты.${NC}"
-    echo -n -e "${YELLOW}Нажмите Enter для возврата...${NC}"; read
+    echo -e "${GREEN}✓ No single-route legacy profiles for in-place PQ upgrade.${NC}"
+    echo -e "${CYAN}Multi-route profiles already contain separate legacy/PQ routes.${NC}"
+    echo -n -e "${YELLOW}Press Enter to return...${NC}"; read
     return
   fi
 
-  echo -n -e "${YELLOW}Выберите профиль (1-${#upgradeable[@]}, 0 — назад): ${NC}"
+  echo -n -e "${YELLOW}Choose a profile (1-${#upgradeable[@]}, 0 — back): ${NC}"
   read choice
   if [[ "$choice" == "0" ]]; then return; fi
   if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ $choice -lt 1 ]] || [[ $choice -gt ${#upgradeable[@]} ]]; then
-    echo -e "${RED}✗ Неверный выбор${NC}"; sleep 2; return
+    echo -e "${RED}✗ Invalid choice${NC}"; sleep 2; return
   fi
 
   local selected="${upgradeable[$((choice-1))]}"
   local pfile="$PROFILES_DIR/$selected.json"
   if profile_has_routes "$pfile"; then
-    echo -e "${RED}✗ Multi-route профиль не переводится целиком через это меню.${NC}"
-    echo -e "${YELLOW}  В нем уже есть отдельные legacy/PQ маршруты. Используйте raw route или создайте отдельный legacy/PQ профиль.${NC}"
+    echo -e "${RED}✗ A multi-route profile is not converted wholesale via this menu.${NC}"
+    echo -e "${YELLOW}  It already has separate legacy/PQ routes. Use a raw route or create a separate legacy/PQ profile.${NC}"
     sleep 3
     return
   fi
@@ -278,55 +278,55 @@ upgrade_profile_to_pq_menu() {
   local profiles_on_port=($(get_profiles_on_port "$port"))
   echo ""
   echo -e "${RED}╔═══════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║                  ⚠ ВНИМАНИЕ                                  ║${NC}"
+  echo -e "${RED}║                  ⚠ WARNING                                  ║${NC}"
   echo -e "${RED}╚═══════════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "${YELLOW}Профиль: ${MAGENTA}$selected${NC} ${BLUE}(порт $port, транспорт $old_transport → xhttp+pq)${NC}"
+  echo -e "${YELLOW}Profile: ${MAGENTA}$selected${NC} ${BLUE}(port $port, transport $old_transport → xhttp+pq)${NC}"
   echo ""
-  echo -e "${YELLOW}После апгрейда:${NC}"
-  echo -e "  ${RED}• Старая vless:// ссылка ПЕРЕСТАНЕТ РАБОТАТЬ немедленно${NC}"
-  echo -e "  ${RED}• Все клиенты, подключённые к этому профилю, потеряют связь${NC}"
-  echo -e "  ${RED}• Их нужно переимпортировать с новой vless:// (или создать отдельный legacy-профиль через 'Создать профиль')${NC}"
-  echo -e "  ${YELLOW}• Затронутые клиенты (только эти умеют PQ): HAPP 2.10+, v2rayNG 1.10+, v2rayN (PR #7782), Shadowrocket${NC}"
-  echo -e "  ${YELLOW}• НЕ совместимые: sing-box, mihomo, NekoBox, Hiddify — для них нужен отдельный legacy профиль${NC}"
-  echo -e "  ${GREEN}• UUID сохраняется: $uuid${NC}"
-  echo -e "  ${GREEN}• Порт сохраняется: $port${NC}"
-  echo -e "  ${GREEN}• SNI сохраняется (читается из существующего инбаунда): $sni${NC}"
+  echo -e "${YELLOW}After the upgrade:${NC}"
+  echo -e "  ${RED}• The old vless:// link STOPS WORKING immediately${NC}"
+  echo -e "  ${RED}• All clients connected to this profile lose connectivity${NC}"
+  echo -e "  ${RED}• They must be re-imported with the new vless:// (or create a separate legacy profile via 'Create profile')${NC}"
+  echo -e "  ${YELLOW}• Affected clients (only these support PQ): HAPP 2.10+, v2rayNG 1.10+, v2rayN (PR #7782), Shadowrocket${NC}"
+  echo -e "  ${YELLOW}• NOT compatible: sing-box, mihomo, NekoBox, Hiddify — they need a separate legacy profile${NC}"
+  echo -e "  ${GREEN}• UUID preserved: $uuid${NC}"
+  echo -e "  ${GREEN}• Port preserved: $port${NC}"
+  echo -e "  ${GREEN}• SNI preserved (read from the existing inbound): $sni${NC}"
   echo ""
   if [[ ${#profiles_on_port[@]} -gt 1 ]]; then
-    echo -e "${RED}⚠ На порту $port размещён ОБЩИЙ inbound — операция МАССОВАЯ и НЕОБРАТИМАЯ:${NC}"
-    echo -e "  ${RED}• ВСЕ перечисленные ниже профили будут переведены на XHTTP+PQ${NC}"
-    echo -e "  ${RED}• TCP+Vision профили на этом порту потеряют flow=xtls-rprx-vision${NC}"
-    echo -e "  ${RED}• Транспорт принудительно меняется tcp/grpc → xhttp в profile JSON${NC}"
-    echo -e "  ${RED}• Каждому из этих профилей нужно переимпортировать клиента с НОВОЙ vless:// ссылкой${NC}"
-    echo -e "  ${RED}• Путь обратно (XHTTP+PQ → TCP+Vision) ТОЛЬКО через ручное пересоздание профиля${NC}"
+    echo -e "${RED}⚠ Port $port hosts a SHARED inbound — the operation is MASS and IRREVERSIBLE:${NC}"
+    echo -e "  ${RED}• ALL profiles listed below will be switched to XHTTP+PQ${NC}"
+    echo -e "  ${RED}• TCP+Vision profiles on this port lose flow=xtls-rprx-vision${NC}"
+    echo -e "  ${RED}• Transport is forcibly changed tcp/grpc → xhttp in the profile JSON${NC}"
+    echo -e "  ${RED}• Each of these profiles needs its client re-imported with the NEW vless:// link${NC}"
+    echo -e "  ${RED}• The way back (XHTTP+PQ → TCP+Vision) is ONLY via manual profile recreation${NC}"
     echo ""
-    echo -e "${YELLOW}Затронутые профили на порту $port:${NC}"
+    echo -e "${YELLOW}Affected profiles on port $port:${NC}"
     for p in "${profiles_on_port[@]}"; do
       echo -e "  ${CYAN}•${NC} $p"
     done
     echo ""
   fi
-  echo -n -e "${YELLOW}Подтвердите апгрейд (y/N): ${NC}"
+  echo -n -e "${YELLOW}Confirm the upgrade (y/N): ${NC}"
   read confirm
   if [[ ! "$confirm" =~ ^[yYдД]$ ]]; then
-    echo -e "${YELLOW}Апгрейд отменён.${NC}"; sleep 2; return
+    echo -e "${YELLOW}Upgrade cancelled.${NC}"; sleep 2; return
   fi
 
   # === Phase 1b/1c: общая мутация config.json и profile JSON ===
-  echo -e "${CYAN}→ Перевод профиля на XHTTP+PQ${NC}"
+  echo -e "${CYAN}→ Switching the profile to XHTTP+PQ${NC}"
   if ! _pq_upgrade_one_profile "$selected"; then
-    echo -e "${RED}✗ PQ-апгрейд профиля '$selected' не завершён${NC}"
-    echo -n -e "${YELLOW}Нажмите Enter для возврата в меню...${NC}"
+    echo -e "${RED}✗ PQ upgrade of profile '$selected' did not finish${NC}"
+    echo -n -e "${YELLOW}Press Enter to return to the menu...${NC}"
     read -r _ || true
     return
   fi
 
   echo ""
-  echo -e "${CYAN}Новая vless:// ссылка:${NC}"
+  echo -e "${CYAN}New vless:// link:${NC}"
   generate_connection "$selected"
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для возврата в меню...${NC}"
+  echo -n -e "${YELLOW}Press Enter to return to the menu...${NC}"
   read
 }
 
@@ -338,35 +338,35 @@ upgrade_profile_to_pq_menu() {
 uninstall_adguard_home() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}        УДАЛЕНИЕ ADGUARD HOME                 ${NC}"
+  echo -e "${BLUE}        REMOVE ADGUARD HOME                 ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
   echo ""
 
   # Шаг 1: Проверка — установлен?
   if [[ ! -f /opt/AdGuardHome/AdGuardHome ]]; then
-    echo -e "${YELLOW}⚠ AdGuard Home не установлен${NC}"
+    echo -e "${YELLOW}⚠ AdGuard Home is not installed${NC}"
     echo ""
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read
     return
   fi
 
   # Шаг 2: Подтверждение
   echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║            ⚠ УДАЛЕНИЕ ADGUARD HOME ⚠                   ║${NC}"
+  echo -e "${RED}║            ⚠ REMOVE ADGUARD HOME ⚠                   ║${NC}"
   echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "${YELLOW}Будут удалены:${NC}"
-  echo -e "  ${CYAN}•${NC} AdGuard Home и все его настройки"
-  echo -e "  ${CYAN}•${NC} Фильтры и статистика"
-  echo -e "  ${CYAN}•${NC} Интеграция с Xray DNS"
+  echo -e "${YELLOW}Will be removed:${NC}"
+  echo -e "  ${CYAN}•${NC} AdGuard Home and all its settings"
+  echo -e "  ${CYAN}•${NC} Filters and statistics"
+  echo -e "  ${CYAN}•${NC} Integration with Xray DNS"
   echo ""
-  echo -e "${CYAN}Xray DNS будет восстановлен на DoH Local (1.1.1.1).${NC}"
+  echo -e "${CYAN}Xray DNS will be restored to Local DoH (1.1.1.1).${NC}"
   echo ""
-  echo -n -e "${RED}Вы уверены? (y/N): ${NC}"
+  echo -n -e "${RED}Are you sure? (y/N): ${NC}"
   read confirm
   if [[ ! "$confirm" =~ ^[yYдД]$ ]]; then
-    echo -e "${CYAN}✓ Отменено${NC}"
+    echo -e "${CYAN}✓ Cancelled${NC}"
     sleep 1
     return
   fi
@@ -376,19 +376,19 @@ uninstall_adguard_home() {
   local rollback_config=""
 
   # Шаг 3: Остановка службы
-  echo -e "${CYAN}Шаг 1/6: Остановка AdGuard Home...${NC}"
+  echo -e "${CYAN}Step 1/6: Stopping AdGuard Home...${NC}"
   systemctl stop AdGuardHome 2>/dev/null || true
   systemctl disable AdGuardHome 2>/dev/null || true
-  echo -e "${GREEN}  ✓ Служба остановлена${NC}"
+  echo -e "${GREEN}  ✓ Service stopped${NC}"
 
   # Шаг 4: Удаление
-  echo -e "${CYAN}Шаг 2/6: Удаление файлов...${NC}"
+  echo -e "${CYAN}Step 2/6: Removing files...${NC}"
   /opt/AdGuardHome/AdGuardHome -s uninstall 2>/dev/null || true
   rm -rf /opt/AdGuardHome/
-  echo -e "${GREEN}  ✓ AdGuard Home удалён${NC}"
+  echo -e "${GREEN}  ✓ AdGuard Home removed${NC}"
 
   # Шаг 5: Восстановление Xray DNS
-  echo -e "${CYAN}Шаг 3/6: Восстановление Xray DNS...${NC}"
+  echo -e "${CYAN}Step 3/6: Restoring Xray DNS...${NC}"
   if [[ -f "$CONFIG_FILE" ]]; then
     backup_config "adguard_dns_restore" rollback_config || true
     if safe_jq_write '.dns = {
@@ -401,12 +401,12 @@ uninstall_adguard_home() {
     }' "$CONFIG_FILE"; then
       echo -e "${GREEN}  ✓ Xray DNS → DoH Local${NC}"
     else
-      echo -e "${RED}  ✗ Ошибка восстановления Xray DNS${NC}"
+      echo -e "${RED}  ✗ Error restoring Xray DNS${NC}"
     fi
   fi
 
   # Шаг 6: Восстановление systemd-resolved
-  echo -e "${CYAN}Шаг 4/6: Восстановление systemd-resolved...${NC}"
+  echo -e "${CYAN}Step 4/6: Restoring systemd-resolved...${NC}"
   if [[ -f /etc/systemd/resolved.conf.d/adguardhome.conf ]]; then
     rm -f /etc/systemd/resolved.conf.d/adguardhome.conf
     # Восстанавливаем resolv.conf на стандартный stub
@@ -414,33 +414,33 @@ uninstall_adguard_home() {
       ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/null || true
     fi
     systemctl restart systemd-resolved 2>/dev/null || true
-    echo -e "${GREEN}  ✓ systemd-resolved восстановлен${NC}"
+    echo -e "${GREEN}  ✓ systemd-resolved restored${NC}"
   else
-    echo -e "${GREEN}  ✓ systemd-resolved не был изменён${NC}"
+    echo -e "${GREEN}  ✓ systemd-resolved was not changed${NC}"
   fi
 
   # Закрытие портов
-  echo -e "${CYAN}Шаг 5/6: Закрытие портов...${NC}"
+  echo -e "${CYAN}Step 5/6: Closing ports...${NC}"
   if command -v ufw &>/dev/null; then
     ufw delete allow 53/tcp >/dev/null 2>&1
     ufw delete allow 53/udp >/dev/null 2>&1
     ufw delete allow 3000/tcp >/dev/null 2>&1  # На случай если открывали вручную
     ufw reload >/dev/null 2>&1
   fi
-  echo -e "${GREEN}  ✓ Порты проверены${NC}"
+  echo -e "${GREEN}  ✓ Ports checked${NC}"
 
   # Перезапуск Xray
-  echo -e "${CYAN}Шаг 6/6: Перезапуск Xray...${NC}"
+  echo -e "${CYAN}Step 6/6: Restarting Xray...${NC}"
   safe_restart_xray "$rollback_config"
 
   echo ""
   echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║         ✓ ADGUARD HOME УСПЕШНО УДАЛЁН                   ║${NC}"
+  echo -e "${GREEN}║         ✓ ADGUARD HOME REMOVED SUCCESSFULLY                   ║${NC}"
   echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "${CYAN}Xray DNS восстановлен на DoH Local (1.1.1.1).${NC}"
+  echo -e "${CYAN}Xray DNS restored to Local DoH (1.1.1.1).${NC}"
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read
 }
 
