@@ -474,7 +474,7 @@ _subscription_external_selfcheck() {
     url="${base}/sub/"
   fi
   echo -e "${CYAN}  → Проверяю подписку извне: ${url}${NC}"
-  code=$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+  code=$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
   if [[ "$code" =~ ^[23] ]]; then
     echo -e "${GREEN}  ✓ Подписка проверена извне: HTTP ${code}${NC}"
     return 0
