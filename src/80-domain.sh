@@ -41,14 +41,14 @@ prompt_server_domain() {
   local saved domain
   saved=$(get_server_domain)
   if [[ -n "$saved" ]]; then
-    echo -n -e "${YELLOW}Домен сервера [${CYAN}$saved${YELLOW}]: ${NC}" >&2
+    echo -n -e "${YELLOW}Server domain [${CYAN}$saved${YELLOW}]: ${NC}" >&2
   else
-    echo -n -e "${YELLOW}Домен сервера (A-запись → IP этого VPS): ${NC}" >&2
+    echo -n -e "${YELLOW}Server domain (A record → this VPS IP): ${NC}" >&2
   fi
   read -r domain
   [[ -z "$domain" ]] && domain="$saved"
   if ! validate_server_domain "$domain"; then
-    echo -e "${RED}✗ Некорректный домен: '${domain}'${NC}" >&2
+    echo -e "${RED}✗ Invalid domain: '${domain}'${NC}" >&2
     return 1
   fi
   set_server_domain "$domain" || return 1

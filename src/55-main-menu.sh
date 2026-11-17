@@ -29,12 +29,12 @@ main_menu() {
   local pq_migration_allowed=1
   local pq_migration_answered_yes=0
   if [[ ! -f "$pq_migration_warned" ]] && [[ -n "$(_list_legacy_pq_profile_names)" ]]; then
-    echo -e "${YELLOW}Внимание: старые single-route профили будут переведены на XHTTP+PQ. Ручные vless://-ссылки перестанут работать (подписки обновятся сами).${NC}"
-    echo -n -e "${YELLOW}Продолжить PQ-миграцию? [Y/n]: ${NC}"
+    echo -e "${YELLOW}Warning: old single-route profiles will be switched to XHTTP+PQ. Manual vless:// links stop working (subscriptions update themselves).${NC}"
+    echo -n -e "${YELLOW}Continue the PQ migration? [Y/n]: ${NC}"
     local pq_migration_answer=""
     read -r pq_migration_answer || {
       echo
-      echo -e "${YELLOW}Ввод завершён без ответа — PQ-миграция пропущена до следующего запуска${NC}"
+      echo -e "${YELLOW}Input ended without an answer — the PQ migration is skipped until the next run${NC}"
       pq_migration_allowed=0
     }
     if [[ $pq_migration_allowed -eq 1 ]]; then
@@ -43,7 +43,7 @@ main_menu() {
         # иначе упавшая миграция повторялась бы уже молча, без предупреждения.
         pq_migration_answered_yes=1
       else
-        echo -e "${YELLOW}PQ-миграция пропущена. Предупреждение появится снова при следующем запуске.${NC}"
+        echo -e "${YELLOW}PQ migration skipped. The warning will appear again on the next run.${NC}"
         pq_migration_allowed=0
       fi
     fi
@@ -64,14 +64,14 @@ main_menu() {
   run_migration "happ_legacy_xhttp_route_2026"         "HAPP subscription не меняет существующие профили" _migrate_happ_legacy_xhttp_route_2026 || ((migration_failures++))
 
   if [[ ! -f /usr/local/etc/xray/.sni_list_2026 ]]; then
-    echo -e "${YELLOW}Перед SNI миграцией доступна команда probe-test для проверки доступности SNI.${NC}"
-    echo -n -e "${YELLOW}Запустить probe-test сейчас? [y/N]: ${NC}"
+    echo -e "${YELLOW}Before the SNI migration you can run probe-test to check SNI availability.${NC}"
+    echo -n -e "${YELLOW}Run probe-test now? [y/N]: ${NC}"
     local probe_ans
     read -r probe_ans
     probe_ans=${probe_ans:-N}
     if [[ "$probe_ans" =~ ^[yYдД]$ ]]; then
       probe_test_command
-      echo -n -e "${YELLOW}Нажмите Enter для продолжения миграции...${NC}"
+      echo -n -e "${YELLOW}Press Enter to continue the migration...${NC}"
       read -r _
     fi
   fi
@@ -85,15 +85,15 @@ main_menu() {
   run_migration "subhttp_happ_legacy_xhttp_2026" "HAPP subscription: prefer legacy XHTTP route" _migrate_subhttp_happ_legacy_xhttp_2026 || ((migration_failures++))
 
   if ! migrate_remove_legacy_tcp_tuning_v3; then
-    echo -e "${YELLOW}⚠ Legacy host TCP tuning cleanup не завершён. Проверьте sysctl-конфиги вручную.${NC}"
+    echo -e "${YELLOW}⚠ The legacy host TCP tuning cleanup did not finish. Check the sysctl configs manually.${NC}"
   fi
 
   # Aggregate report (RESEARCH §«Error reporting»): чтобы пользователь не пропустил
   # failure среди скроллящегося TUI вывода.
   if [[ $migration_failures -gt 0 ]]; then
     echo
-    echo -e "${YELLOW}⚠ $migration_failures миграций не завершились — повторятся при следующем запуске${NC}"
-    echo -e "${YELLOW}  Логи бэкапов: /usr/local/etc/xray/backups/${NC}"
+    echo -e "${YELLOW}⚠ $migration_failures migrations did not finish — they will retry on the next run${NC}"
+    echo -e "${YELLOW}  Backup logs: /usr/local/etc/xray/backups/${NC}"
     read -n 1 -p "Нажмите любую клавишу для продолжения..."
     echo
   fi
@@ -120,7 +120,7 @@ main_menu() {
       return 0
     fi
     # Fallback, если модули не подгружены — просто выход с подсказкой.
-    echo -e "${RED}Модули мастера/статуса не загружены. Пересоберите ./build.sh${NC}"
+    echo -e "${RED}The wizard/status modules are not loaded. Rebuild with ./build.sh${NC}"
     return 1
   done
 }

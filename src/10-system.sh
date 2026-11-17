@@ -4,7 +4,7 @@ safe_jq_write() {
 
   # Минимум 2 аргумента: выражение и файл
   if [[ $nargs -lt 2 ]]; then
-    echo -e "${RED}  ✗ safe_jq_write: недостаточно аргументов${NC}" >&2
+    echo -e "${RED}  ✗ safe_jq_write: not enough arguments${NC}" >&2
     return 1
   fi
 
@@ -25,7 +25,7 @@ safe_jq_write() {
     chown "$orig_owner" "$dst_file" 2>/dev/null
     return 0
   else
-    echo -e "${RED}  ✗ Ошибка jq — файл НЕ изменён: $dst_file${NC}" >&2
+    echo -e "${RED}  ✗ jq error — file NOT modified: $dst_file${NC}" >&2
     rm -f "$tmp"
     return 1
   fi
@@ -40,7 +40,7 @@ backup_config() {
   local safe_operation_name
 
   if [[ -n "$result_var" && ! "$result_var" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-    echo -e "${RED}  ✗ Некорректное имя переменной результата backup_config${NC}"
+    echo -e "${RED}  ✗ Invalid result variable name for backup_config${NC}"
     return 1
   fi
   [[ -n "$result_var" ]] && printf -v "$result_var" '%s' ""
@@ -51,13 +51,13 @@ backup_config() {
   chown xray:xray "$backup_dir" 2>/dev/null
   local backup_file="$backup_dir/config_$(date +%Y%m%d_%H%M%S)_$$_${RANDOM}_${safe_operation_name}.json"
   if ! cp "$CONFIG_FILE" "$backup_file"; then
-    echo -e "${RED}  ✗ Не удалось создать бэкап config.json: $backup_file${NC}"
+    echo -e "${RED}  ✗ Could not create the config.json backup: $backup_file${NC}"
     return 1
   fi
   chmod 600 "$backup_file" 2>/dev/null
   chown xray:xray "$backup_file" 2>/dev/null
   [[ -n "$result_var" ]] && printf -v "$result_var" '%s' "$backup_file"
-  echo -e "${CYAN}  -> Бэкап конфига: $(basename "$backup_file")${NC}"
+  echo -e "${CYAN}  -> Config backup: $(basename "$backup_file")${NC}"
   return 0
 }
 
@@ -65,16 +65,16 @@ _restore_config_backup() {
   local backup_file=${1:-}
 
   if [[ -z "$backup_file" || ! -f "$backup_file" || ! -s "$backup_file" ]]; then
-    echo -e "${RED}  ✗ Точный бэкап для отката отсутствует: ${backup_file:-не задан}${NC}"
+    echo -e "${RED}  ✗ The exact rollback backup is missing: ${backup_file:-not set}${NC}"
     return 1
   fi
   if ! cp "$backup_file" "$CONFIG_FILE"; then
-    echo -e "${RED}  ✗ Не удалось восстановить config.json из $(basename "$backup_file")${NC}"
+    echo -e "${RED}  ✗ Could not restore config.json from $(basename "$backup_file")${NC}"
     return 1
   fi
   chmod 600 "$CONFIG_FILE" 2>/dev/null
   chown xray:xray "$CONFIG_FILE" 2>/dev/null
-  echo -e "${GREEN}  ✓ Конфиг восстановлен из: $(basename "$backup_file")${NC}"
+  echo -e "${GREEN}  ✓ Config restored from: $(basename "$backup_file")${NC}"
   return 0
 }
 
@@ -83,7 +83,7 @@ _snapshot_profiles() {
   local snapshot_dir
 
   if [[ ! "$result_var" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-    echo -e "${RED}  ✗ Некорректное имя переменной результата _snapshot_profiles${NC}"
+    echo -e "${RED}  ✗ Invalid result variable name for _snapshot_profiles${NC}"
     return 1
   fi
   printf -v "$result_var" '%s' ""
@@ -91,7 +91,7 @@ _snapshot_profiles() {
   snapshot_dir=$(mktemp -d /tmp/xraytailscale-profiles.XXXXXX) || return 1
   if [[ -d "$PROFILES_DIR" ]] && ! cp -a "$PROFILES_DIR/." "$snapshot_dir/"; then
     rm -rf -- "$snapshot_dir"
-    echo -e "${RED}  ✗ Не удалось создать снимок profile JSON${NC}"
+    echo -e "${RED}  ✗ Could not snapshot the profile JSON${NC}"
     return 1
   fi
   printf -v "$result_var" '%s' "$snapshot_dir"
@@ -102,15 +102,15 @@ _restore_profiles_snapshot() {
   local snapshot_dir=${1:-}
 
   if [[ "$snapshot_dir" != /tmp/xraytailscale-profiles.* || ! -d "$snapshot_dir" ]]; then
-    echo -e "${RED}  ✗ Некорректный снимок profile JSON: ${snapshot_dir:-не задан}${NC}"
+    echo -e "${RED}  ✗ Invalid profile JSON snapshot: ${snapshot_dir:-not set}${NC}"
     return 1
   fi
   mkdir -p "$PROFILES_DIR"
   if ! cp -a "$snapshot_dir/." "$PROFILES_DIR/"; then
-    echo -e "${RED}  ✗ Не удалось восстановить profile JSON${NC}"
+    echo -e "${RED}  ✗ Could not restore the profile JSON${NC}"
     return 1
   fi
-  echo -e "${GREEN}  ✓ Profile JSON восстановлены${NC}"
+  echo -e "${GREEN}  ✓ Profile JSON restored${NC}"
   return 0
 }
 
@@ -130,7 +130,7 @@ ensure_xray_runtime_user() {
   [[ -x "$nologin" ]] || nologin="/sbin/nologin"
   [[ -x "$nologin" ]] || nologin="/bin/false"
 
-  echo -e "${YELLOW}  ⚠ Пользователь xray отсутствует — создаю runtime user${NC}"
+  echo -e "${YELLOW}  ⚠ User xray is missing — creating the runtime user${NC}"
   if ! getent group xray >/dev/null 2>&1; then
     groupadd -r xray 2>/dev/null || true
   fi
@@ -142,11 +142,11 @@ ensure_xray_runtime_user() {
   fi
 
   if ! getent passwd xray >/dev/null 2>&1; then
-    echo -e "${RED}  ✗ Не удалось создать пользователя xray${NC}"
+    echo -e "${RED}  ✗ Could not create user xray${NC}"
     return 1
   fi
 
-  echo -e "${GREEN}  ✓ Пользователь xray создан${NC}"
+  echo -e "${GREEN}  ✓ User xray created${NC}"
   return 0
 }
 
@@ -166,7 +166,7 @@ ensure_xray_service_unit() {
     return 0
   fi
 
-  echo -e "${YELLOW}  ⚠ systemd unit xray.service не найден — создаю базовый unit${NC}"
+  echo -e "${YELLOW}  ⚠ systemd unit xray.service not found — creating a base unit${NC}"
   cat > /etc/systemd/system/xray.service <<'SVCEOF'
 [Unit]
 Description=Xray Service
@@ -193,11 +193,11 @@ SVCEOF
   systemctl enable xray >/dev/null 2>&1 || true
 
   if systemctl cat xray.service >/dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ xray.service создан${NC}"
+    echo -e "${GREEN}  ✓ xray.service created${NC}"
     return 0
   fi
 
-  echo -e "${RED}  ✗ Не удалось создать xray.service${NC}"
+  echo -e "${RED}  ✗ Could not create xray.service${NC}"
   return 1
 }
 
@@ -208,12 +208,12 @@ safe_restart_xray() {
   local rollback_config=${1:-}
 
   if [[ ! -x "$XRAY_BIN" ]]; then
-    echo -e "${RED}  ✗ Бинарник $XRAY_BIN не найден${NC}"
+    echo -e "${RED}  ✗ Binary $XRAY_BIN not found${NC}"
     return 1
   fi
 
   if [[ ! -f "$CONFIG_FILE" || ! -s "$CONFIG_FILE" ]]; then
-    echo -e "${RED}  ✗ config.json отсутствует или пустой — Xray НЕ перезапущен${NC}"
+    echo -e "${RED}  ✗ config.json is missing or empty — Xray NOT restarted${NC}"
     _restore_config_backup "$rollback_config" || true
     return 1
   fi
@@ -222,8 +222,8 @@ safe_restart_xray() {
   test_output=$("$XRAY_BIN" run -test -format json -config "$CONFIG_FILE" 2>&1)
 
   if ! grep -qx "Configuration OK." <<< "$test_output"; then
-    echo -e "${RED}  ✗ Конфиг не прошёл валидацию -- Xray НЕ перезапущен${NC}"
-    echo -e "${YELLOW}  Ошибка: ${test_output}${NC}"
+    echo -e "${RED}  ✗ Config failed validation — Xray NOT restarted${NC}"
+    echo -e "${YELLOW}  Error: ${test_output}${NC}"
     _restore_config_backup "$rollback_config" || true
     return 1
   fi
@@ -236,18 +236,18 @@ safe_restart_xray() {
   sleep 1
 
   if systemctl is-active --quiet xray; then
-    echo -e "${GREEN}  ✓ Xray перезапущен${NC}"
+    echo -e "${GREEN}  ✓ Xray restarted${NC}"
     return 0
   else
-    echo -e "${RED}  ✗ Xray не запустился после перезапуска${NC}"
+    echo -e "${RED}  ✗ Xray did not start after the restart${NC}"
     if _restore_config_backup "$rollback_config"; then
-      echo -e "${YELLOW}  -> Пробую вернуть старую конфигурацию...${NC}"
+      echo -e "${YELLOW}  -> Trying to restore the old config...${NC}"
       systemctl restart xray
       sleep 1
       if systemctl is-active --quiet xray; then
-        echo -e "${GREEN}  ✓ Xray восстановлен на предыдущем конфиге${NC}"
+        echo -e "${GREEN}  ✓ Xray restored to the previous config${NC}"
       else
-        echo -e "${RED}  ✗ Откат конфига не поднял Xray — требуется ручная проверка${NC}"
+        echo -e "${RED}  ✗ The config rollback did not start Xray — manual check required${NC}"
       fi
     fi
     return 1
@@ -263,35 +263,35 @@ open_firewall_port() {
 
   # Validate port number
   if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ $port -lt 1 ]] || [[ $port -gt 65535 ]]; then
-    echo -e "${RED}  ✗ Неверный порт: $port${NC}" >&2
+    echo -e "${RED}  ✗ Invalid port: $port${NC}" >&2
     return 1
   fi
 
   # Check if UFW is installed and active
   if ! command -v ufw &>/dev/null; then
-    echo -e "${YELLOW}  ⚠ UFW не установлен${NC}" >&2
+    echo -e "${YELLOW}  ⚠ UFW is not installed${NC}" >&2
     return 1
   fi
 
   if ! ufw status | grep -q "Status: active"; then
-    echo -e "${YELLOW}  ⚠ UFW не активен — правило не применено${NC}" >&2
+    echo -e "${YELLOW}  ⚠ UFW is not active — the rule was not applied${NC}" >&2
     return 1
   fi
 
   # Check if port already open (idempotent)
   if ufw status | grep -qE "^${port}/${protocol}.*ALLOW"; then
-    echo -e "${CYAN}  → Порт ${port}/${protocol} уже открыт${NC}"
+    echo -e "${CYAN}  → Port ${port}/${protocol} is already open${NC}"
     return 0
   fi
 
   # Open port
-  echo -e "${CYAN}  → Открываю порт ${port}/${protocol}...${NC}"
+  echo -e "${CYAN}  → Opening port ${port}/${protocol}...${NC}"
   if ufw allow "${port}/${protocol}" >/dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ Порт ${port}/${protocol} открыт${NC}"
+    echo -e "${GREEN}  ✓ Port ${port}/${protocol} opened${NC}"
     ufw reload >/dev/null 2>&1
     return 0
   else
-    echo -e "${RED}  ✗ Ошибка открытия порта${NC}" >&2
+    echo -e "${RED}  ✗ Error opening the port${NC}" >&2
     return 1
   fi
 }
@@ -319,10 +319,10 @@ close_firewall_port() {
 
   # Close port
   if ufw status | grep -qE "^${port}/${protocol}.*ALLOW"; then
-    echo -e "${CYAN}  → Закрываю порт ${port}/${protocol}...${NC}"
+    echo -e "${CYAN}  → Closing port ${port}/${protocol}...${NC}"
     ufw delete allow "${port}/${protocol}" >/dev/null 2>&1
     ufw reload >/dev/null 2>&1
-    echo -e "${GREEN}  ✓ Порт закрыт${NC}"
+    echo -e "${GREEN}  ✓ Port closed${NC}"
   fi
 
   return 0

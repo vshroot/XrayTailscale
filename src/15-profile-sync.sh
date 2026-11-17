@@ -17,19 +17,19 @@ select_route_for_profile() {
   fi
 
   echo ""
-  echo -e "${YELLOW}Профиль содержит несколько маршрутов. Выберите маршрут для ${action_label}:${NC}\n"
+  echo -e "${YELLOW}The profile has several routes. Choose a route for ${action_label}:${NC}\n"
   jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '
     to_entries[] |
     "  \(.key + 1)) \(.value.label // .value.transport): \(.value.transport) :\(.value.port) sni=\(.value.sni // "n/a") fp=\(.value.fingerprint // $default_fp)"
   ' < <(jq '.routes // []' "$profile_file")
-  echo -e "  ${CYAN}0)${NC} Назад"
+  echo -e "  ${CYAN}0)${NC} Back"
   echo ""
-  echo -n -e "${YELLOW}Маршрут: ${NC}"
+  echo -n -e "${YELLOW}Route: ${NC}"
   local route_choice
   read -r route_choice
   [[ "$route_choice" == "0" ]] && return 1
   if [[ ! "$route_choice" =~ ^[0-9]+$ ]] || [[ "$route_choice" -lt 1 ]] || [[ "$route_choice" -gt "$route_count" ]]; then
-    echo -e "${RED}✗ Неверный выбор маршрута${NC}"
+    echo -e "${RED}✗ Invalid route choice${NC}"
     sleep 2
     return 1
   fi
@@ -91,9 +91,9 @@ update_all_profiles_on_port() {
         .routes |= map(if .port == $port then .[$f] = $v else . end)
       else . end
     ' "$pfile"; then
-      echo -e "${CYAN}  → Обновлен: ${YELLOW}$pname${NC}"
+      echo -e "${CYAN}  → Updated: ${YELLOW}$pname${NC}"
     else
-      echo -e "${RED}  ✗ Ошибка обновления: ${YELLOW}$pname${NC}"
+      echo -e "${RED}  ✗ Update error: ${YELLOW}$pname${NC}"
       ok=false
     fi
   done
@@ -140,9 +140,9 @@ update_all_profiles_port_reference() {
         .routes |= map(if .port == $old_port then .port = $new_port else . end)
       else . end
     ' "$pfile"; then
-      echo -e "${CYAN}  → Обновлен порт: ${YELLOW}$pname${NC}"
+      echo -e "${CYAN}  → Port updated: ${YELLOW}$pname${NC}"
     else
-      echo -e "${RED}  ✗ Ошибка обновления порта: ${YELLOW}$pname${NC}"
+      echo -e "${RED}  ✗ Port update error: ${YELLOW}$pname${NC}"
       ok=false
     fi
   done

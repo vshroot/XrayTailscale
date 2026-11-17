@@ -100,7 +100,7 @@ assert_not_contains "$WORKDIR/pq_migration" 'backup_config '
 assert_not_contains "$WORKDIR/pq_migration" 'safe_restart_xray "'
 assert_contains "$WORKDIR/main_menu" '.pq_migration_warned'
 assert_contains "$WORKDIR/main_menu" 'read -r pq_migration_answer || {'
-assert_contains "$WORKDIR/main_menu" 'Внимание: старые single-route профили будут переведены на XHTTP+PQ. Ручные vless://-ссылки перестанут работать (подписки обновятся сами).'
+assert_contains "$WORKDIR/main_menu" 'Warning: old single-route profiles will be switched to XHTTP+PQ. Manual vless:// links stop working (subscriptions update themselves).'
 echo "  ✓ фильтры legacy-профилей и одноразовое предупреждение"
 
 # Поведенческая проверка no-op: пустой PROFILES_DIR не вызывает ни запись,

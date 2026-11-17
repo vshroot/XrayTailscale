@@ -1,26 +1,26 @@
 _bypass_add_single_domain() {
-  echo -n -e "${YELLOW}Введите домен (без domain:, например steamcontent.com): ${NC}"
+  echo -n -e "${YELLOW}Enter a domain (without domain:, e.g. steamcontent.com): ${NC}"
   local user_dom
   read -r user_dom
   user_dom="${user_dom#domain:}"
 
   if [[ ! "$user_dom" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$ ]]; then
-    echo -e "${RED}✗ Некорректный домен${NC}"
+    echo -e "${RED}✗ Invalid domain${NC}"
     sleep 2
     return
   fi
 
-  echo -n -e "${YELLOW}Добавить domain:${user_dom} в обход VPN? [y/N]: ${NC}"
+  echo -n -e "${YELLOW}Add domain:${user_dom} to the VPN bypass? [y/N]: ${NC}"
   local confirm
   read -r confirm
-  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Отменено${NC}"; sleep 1; return; }
+  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Cancelled${NC}"; sleep 1; return; }
 
   if _apply_bypass_rule "[\"domain:${user_dom}\"]"; then
-    echo -e "${GREEN}✓ domain:${user_dom} добавлен в обход VPN${NC}"
+    echo -e "${GREEN}✓ domain:${user_dom} added to the VPN bypass${NC}"
   else
-    echo -e "${RED}✗ Правило не применено${NC}"
+    echo -e "${RED}✗ The rule was not applied${NC}"
   fi
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
@@ -43,11 +43,11 @@ _bypass_apply_bundle() {
   while true; do
     show_ascii
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}    ДЕФОЛТНЫЙ BYPASS BUNDLE                   ${NC}"
+    echo -e "${BLUE}    DEFAULT BYPASS BUNDLE                   ${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${YELLOW}Выберите группы для применения:${NC}"
-    echo -e "${CYAN}↑/↓ — выбор, Space — вкл/выкл, Enter — применить, q/Esc — отмена${NC}"
+    echo -e "${YELLOW}Choose the groups to apply:${NC}"
+    echo -e "${CYAN}↑/↓ to move, Space to toggle, Enter to apply, q/Esc to cancel${NC}"
     echo ""
 
     local i
@@ -58,11 +58,11 @@ _bypass_apply_bundle() {
       count=$(awk -F',' '{print NF}' <<< "${group_domains[$i]}")
       local pointer=" "
       [[ $i -eq $cursor ]] && pointer=">"
-      echo -e "${CYAN}${pointer} $((i+1)))${NC} $mark ${group_names[$i]} (${count} доменов)"
+      echo -e "${CYAN}${pointer} $((i+1)))${NC} $mark ${group_names[$i]} (${count} domains)"
     done
 
     echo ""
-    echo -n -e "${YELLOW}Клавиша: ${NC}"
+    echo -n -e "${YELLOW}Key: ${NC}"
     local key rest
     IFS= read -rsn1 key
     case "$key" in
@@ -75,7 +75,7 @@ _bypass_apply_bundle() {
         done
 
         if [[ -z "$all_doms_csv" ]]; then
-          echo -e "${YELLOW}Нет выбранных групп. Отменено.${NC}"
+          echo -e "${YELLOW}No groups selected. Cancelled.${NC}"
           sleep 1
           return
         fi
@@ -84,14 +84,14 @@ _bypass_apply_bundle() {
         doms_json=$(printf '%s' "$all_doms_csv" | tr ',' '\n' | sed '/^$/d' | jq -R '"domain:" + .' | jq -s '.')
         local domain_count
         domain_count=$(printf '%s' "$doms_json" | jq 'length')
-        echo -e "${CYAN}Применяю ${domain_count} доменов...${NC}"
+        echo -e "${CYAN}Applying ${domain_count} domains...${NC}"
 
         if _apply_bypass_rule "$doms_json"; then
-          echo -e "${GREEN}✓ Дефолтный bundle применен${NC}"
+          echo -e "${GREEN}✓ Default bundle applied${NC}"
         else
-          echo -e "${RED}✗ Bundle не применен. Если был создан бэкап, config.json откатан safe_restart_xray.${NC}"
+          echo -e "${RED}✗ Bundle not applied. If a backup was made, config.json was rolled back by safe_restart_xray.${NC}"
         fi
-        echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+        echo -n -e "${YELLOW}Press Enter to continue...${NC}"
         read -r _
         return
         ;;
@@ -143,63 +143,63 @@ _bypass_remove_domain_interactive() {
   mapfile -t current_domains < <(_bypass_list_current)
 
   if [[ ${#current_domains[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}Нет правил для удаления${NC}"
+    echo -e "${YELLOW}No rules to delete${NC}"
     sleep 1
     return
   fi
 
-  echo -e "${CYAN}Текущие bypass-домены:${NC}"
+  echo -e "${CYAN}Current bypass domains:${NC}"
   local i
   for i in "${!current_domains[@]}"; do
     echo -e "${CYAN} $((i+1)))${NC} ${current_domains[$i]}"
   done
-  echo -e "${CYAN} 0)${NC} Отмена"
+  echo -e "${CYAN} 0)${NC} Cancel"
   echo ""
-  echo -n -e "${YELLOW}Выберите правило для удаления: ${NC}"
+  echo -n -e "${YELLOW}Choose a rule to delete: ${NC}"
   local choice
   read -r choice
   [[ "$choice" == "0" ]] && return
   if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -gt ${#current_domains[@]} ]]; then
-    echo -e "${RED}Неверный выбор${NC}"
+    echo -e "${RED}Invalid choice${NC}"
     sleep 1
     return
   fi
 
   local selected="${current_domains[$((choice-1))]}"
   local dom="${selected#domain:}"
-  echo -n -e "${YELLOW}Удалить ${selected}? [y/N]: ${NC}"
+  echo -n -e "${YELLOW}Delete ${selected}? [y/N]: ${NC}"
   local confirm
   read -r confirm
-  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Отменено${NC}"; sleep 1; return; }
+  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Cancelled${NC}"; sleep 1; return; }
 
   if _bypass_remove_rule "$dom"; then
-    echo -e "${GREEN}✓ ${selected} удален из обхода${NC}"
+    echo -e "${GREEN}✓ ${selected} removed from the bypass${NC}"
   else
-    echo -e "${RED}✗ Не удалось удалить ${selected}${NC}"
+    echo -e "${RED}✗ Could not remove ${selected}${NC}"
   fi
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
 _bypass_reset_all_interactive() {
   echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║  СБРОС ВСЕХ BYPASS-ПРАВИЛ                                ║${NC}"
+  echo -e "${RED}║  RESET ALL BYPASS RULES                                ║${NC}"
   echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "${YELLOW}Будут удалены только domain bypass-правила.${NC}"
-  echo -e "${CYAN}Дефолтные правила install.sh (ads, QUIC block, direct catch-all) останутся.${NC}"
+  echo -e "${YELLOW}Only domain bypass rules will be removed.${NC}"
+  echo -e "${CYAN}The default install.sh rules (ads, QUIC block, direct catch-all) stay.${NC}"
   echo ""
-  echo -n -e "${RED}Действительно сбросить? [y/N]: ${NC}"
+  echo -n -e "${RED}Really reset? [y/N]: ${NC}"
   local confirm
   read -r confirm
-  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Отменено${NC}"; sleep 1; return; }
+  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Cancelled${NC}"; sleep 1; return; }
 
   if _bypass_reset_all; then
-    echo -e "${GREEN}✓ Все bypass-правила удалены${NC}"
+    echo -e "${GREEN}✓ All bypass rules removed${NC}"
   else
-    echo -e "${RED}✗ Сброс не выполнен${NC}"
+    echo -e "${RED}✗ Reset failed${NC}"
   fi
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
@@ -207,29 +207,29 @@ bypass_routing_menu() {
   while true; do
     show_ascii
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}    УПРАВЛЕНИЕ ОБХОДОМ VPN                    ${NC}"
+    echo -e "${BLUE}    VPN BYPASS MANAGEMENT                    ${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
     echo ""
 
     local current
     current=$(_bypass_list_current)
     if [[ -z "$current" ]]; then
-      echo -e "${YELLOW}  Нет правил обхода (весь трафик через VPN)${NC}"
+      echo -e "${YELLOW}  No bypass rules (all traffic goes through the VPN)${NC}"
     else
-      echo -e "${CYAN}Текущие домены в обходе:${NC}"
+      echo -e "${CYAN}Current domains in the bypass:${NC}"
       while IFS= read -r dom; do
         [[ -n "$dom" ]] && echo -e "  ${GREEN}->${NC} $dom"
       done <<< "$current"
     fi
     echo ""
 
-    echo -e "${CYAN} 1)${NC} Добавить домен в обход"
-    echo -e "${CYAN} 2)${NC} Применить дефолтный bundle (5 групп)"
-    echo -e "${CYAN} 3)${NC} Удалить домен из обхода"
-    echo -e "${CYAN} 4)${NC} Сбросить ВСЕ правила обхода"
-    echo -e "${CYAN} 0)${NC} Назад в главное меню"
+    echo -e "${CYAN} 1)${NC} Add a domain to the bypass"
+    echo -e "${CYAN} 2)${NC} Apply the default bundle (5 groups)"
+    echo -e "${CYAN} 3)${NC} Remove a domain from the bypass"
+    echo -e "${CYAN} 4)${NC} Reset ALL bypass rules"
+    echo -e "${CYAN} 0)${NC} Back to the main menu"
     echo ""
-    echo -n -e "${YELLOW}Выбор: ${NC}"
+    echo -n -e "${YELLOW}Choice: ${NC}"
 
     local c
     read -r c
@@ -239,7 +239,7 @@ bypass_routing_menu() {
       3) _bypass_remove_domain_interactive ;;
       4) _bypass_reset_all_interactive ;;
       0) return ;;
-      *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
+      *) echo -e "${RED}Invalid choice${NC}"; sleep 1 ;;
     esac
   done
 }

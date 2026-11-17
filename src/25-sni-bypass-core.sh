@@ -49,14 +49,14 @@ _apply_bypass_rule() {
         error("invalid domain list")
       end
     ' 2>/dev/null); then
-    echo -e "${RED}✗ Некорректный JSON domain-list для bypass${NC}"
+    echo -e "${RED}✗ Invalid domain-list JSON for bypass${NC}"
     return 2
   fi
 
   local domain_count
   domain_count=$(printf '%s' "$normalized_json" | jq 'length' 2>/dev/null)
   if [[ "$domain_count" == "0" ]]; then
-    echo -e "${YELLOW}Нет доменов для применения${NC}"
+    echo -e "${YELLOW}No domains to apply${NC}"
     return 1
   fi
 
@@ -66,8 +66,8 @@ _apply_bypass_rule() {
   while IFS= read -r dom; do
     [[ -z "$dom" ]] && continue
     if _sni_in_use "$dom"; then
-      echo -e "${RED}Конфликт: $dom используется как Reality SNI — добавление сломает handshake${NC}"
-      echo -e "${YELLOW}  Bypass правила не применены. Удалите $dom из списка и попробуйте снова.${NC}"
+      echo -e "${RED}Conflict: $dom is used as the Reality SNI — adding it would break the handshake${NC}"
+      echo -e "${YELLOW}  Bypass rules were not applied. Remove $dom from the list and try again.${NC}"
       return 1
     fi
   done <<< "$domains_raw"
@@ -178,12 +178,12 @@ probe_test_command() {
     sni_file="/usr/local/etc/xray/sni_list.txt"
   fi
   if [[ ! -f "$sni_file" ]]; then
-    echo -e "${RED}✗ SNI list не найден: $SNI_LIST${NC}"
+    echo -e "${RED}✗ SNI list not found: $SNI_LIST${NC}"
     return 1
   fi
 
   echo -e "${BLUE}════════════════════════════════════════════════════${NC}"
-  echo -e "${BLUE} PROBE TEST: проверка SNI с VPS${NC}"
+  echo -e "${BLUE} PROBE TEST: checking SNI from the VPS${NC}"
   echo -e "${BLUE}════════════════════════════════════════════════════${NC}"
   echo ""
   printf "${CYAN}%-32s | %-10s | %-10s | %6s${NC}\n" "SNI" "HTTP" "TLS" "latency"
@@ -204,7 +204,7 @@ probe_test_command() {
   done < "$sni_file"
 
   printf "%-32s-+-%-10s-+-%-10s-+-%6s\n" "--------------------------------" "----------" "----------" "------"
-  echo -e "${GREEN}Доступны: ${ok_count}/${total} SNI${NC}"
+  echo -e "${GREEN}Available: ${ok_count}/${total} SNI${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════

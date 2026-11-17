@@ -99,8 +99,8 @@ fi
 # Проверка прав root + загрузка ключей выполняются только при прямом запуске.
 if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
   if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}✗ Требуются права root${NC}"
-    echo -e "${YELLOW}Используйте: sudo xraytailscale${NC}"
+    echo -e "${RED}✗ Root privileges required${NC}"
+    echo -e "${YELLOW}Use: sudo xraytailscale${NC}"
     exit 1
   fi
 
@@ -109,13 +109,13 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
     PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
     PUBLIC_KEY=$(cat "$PUBLIC_KEY_FILE")
     if [[ -z "$PRIVATE_KEY" ]] || [[ -z "$PUBLIC_KEY" ]]; then
-      echo -e "${RED}✗ Ключи Reality пусты.${NC}"
-      echo -e "${YELLOW}Пересоздайте ключи командой:${NC}"
+      echo -e "${RED}✗ Reality keys are empty.${NC}"
+      echo -e "${YELLOW}Recreate the keys with:${NC}"
       echo "  cd /usr/local/etc/xray/ && sudo /usr/local/bin/xray x25519 2>&1"
       exit 1
     fi
   else
-    echo -e "${RED}✗ Ключи Reality не найдены. Запустите install.sh${NC}"
+    echo -e "${RED}✗ Reality keys not found. Run install.sh${NC}"
     exit 1
   fi
 fi

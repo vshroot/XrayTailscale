@@ -99,8 +99,8 @@ fi
 # Проверка прав root + загрузка ключей выполняются только при прямом запуске.
 if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
   if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}✗ Требуются права root${NC}"
-    echo -e "${YELLOW}Используйте: sudo xraytailscale${NC}"
+    echo -e "${RED}✗ Root privileges required${NC}"
+    echo -e "${YELLOW}Use: sudo xraytailscale${NC}"
     exit 1
   fi
 
@@ -109,13 +109,13 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
     PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
     PUBLIC_KEY=$(cat "$PUBLIC_KEY_FILE")
     if [[ -z "$PRIVATE_KEY" ]] || [[ -z "$PUBLIC_KEY" ]]; then
-      echo -e "${RED}✗ Ключи Reality пусты.${NC}"
-      echo -e "${YELLOW}Пересоздайте ключи командой:${NC}"
+      echo -e "${RED}✗ Reality keys are empty.${NC}"
+      echo -e "${YELLOW}Recreate the keys with:${NC}"
       echo "  cd /usr/local/etc/xray/ && sudo /usr/local/bin/xray x25519 2>&1"
       exit 1
     fi
   else
-    echo -e "${RED}✗ Ключи Reality не найдены. Запустите install.sh${NC}"
+    echo -e "${RED}✗ Reality keys not found. Run install.sh${NC}"
     exit 1
   fi
 fi
@@ -149,23 +149,23 @@ update_transport_settings_for_sni() {
     '.inbounds[] | select(.port == $port) | .streamSettings.network' \
     "$config_file")
 
-  echo -e "${CYAN}  → Обновление SNI на порту $port (транспорт: $transport)...${NC}"
+  echo -e "${CYAN}  → Updating SNI on port $port (transport: $transport)...${NC}"
 
   # Base updates (ALL transports) - search by port number, not tag
   if ! safe_jq_write --argjson port "$port_num" --arg sni "$new_sni" '
     (.inbounds[] | select(.port == $port) | .streamSettings.realitySettings.dest) |= ($sni + ":443") |
     (.inbounds[] | select(.port == $port) | .streamSettings.realitySettings.serverNames) |= [$sni]
   ' "$config_file"; then
-    echo -e "${RED}  ✗ Ошибка обновления SNI${NC}"
+    echo -e "${RED}  ✗ SNI update error${NC}"
     return 1
   fi
-  echo -e "${GREEN}  ✓ Reality SNI обновлен → $new_sni${NC}"
+  echo -e "${GREEN}  ✓ Reality SNI updated → $new_sni${NC}"
 
   if [[ "$transport" == "xhttp" ]]; then
     safe_jq_write --argjson port "$port_num" '
       (.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings) |= del(.host)
     ' "$config_file" >/dev/null 2>&1 || true
-    echo -e "${GREEN}  ✓ XHTTP Host header не форсируется${NC}"
+    echo -e "${GREEN}  ✓ XHTTP Host header is not forced${NC}"
   fi
 }
 
@@ -217,7 +217,7 @@ find_available_random_port() {
     ((attempts++))
   done
 
-  echo -e "${RED}✗ Не удалось подобрать свободный случайный порт 30000-60000${NC}" >&2
+  echo -e "${RED}✗ Could not pick a free random port 30000-60000${NC}" >&2
   return 1
 }
 
@@ -657,9 +657,9 @@ _ensure_certbot_ip_tls() {
     fi
   done
 
-  echo -e "${YELLOW}  → Системный certbot не поддерживает IP certificates; ставлю актуальный certbot через snap...${NC}"
+  echo -e "${YELLOW}  → The system certbot does not support IP certificates; installing the current certbot via snap...${NC}"
   if ! apt-get install -y snapd >/dev/null 2>&1; then
-    echo -e "${RED}✗ Не удалось установить snapd для Certbot 5.4+${NC}"
+    echo -e "${RED}✗ Could not install snapd for Certbot 5.4+${NC}"
     return 1
   fi
 
@@ -670,7 +670,7 @@ _ensure_certbot_ip_tls() {
     if snap list core >/dev/null 2>&1; then
       snap refresh core >/tmp/snap-core.log 2>&1 || true
     elif ! snap install core >/tmp/snap-core.log 2>&1; then
-      echo -e "${RED}✗ snap install core не удался. Лог: /tmp/snap-core.log${NC}"
+      echo -e "${RED}✗ snap install core failed. Log: /tmp/snap-core.log${NC}"
       tail -20 /tmp/snap-core.log
       return 1
     fi
@@ -678,12 +678,12 @@ _ensure_certbot_ip_tls() {
     if snap list certbot >/dev/null 2>&1; then
       snap refresh certbot >/tmp/snap-certbot.log 2>&1 || true
     elif ! snap install --classic certbot >/tmp/snap-certbot.log 2>&1; then
-      echo -e "${RED}✗ snap install certbot не удался. Лог: /tmp/snap-certbot.log${NC}"
+      echo -e "${RED}✗ snap install certbot failed. Log: /tmp/snap-certbot.log${NC}"
       tail -20 /tmp/snap-certbot.log
       return 1
     fi
   else
-    echo -e "${RED}✗ snap command не найден после установки snapd${NC}"
+    echo -e "${RED}✗ snap command not found after installing snapd${NC}"
     return 1
   fi
 
@@ -695,7 +695,7 @@ _ensure_certbot_ip_tls() {
     fi
   done
 
-  echo -e "${RED}✗ Не найден Certbot 5.4+ с поддержкой --ip-address${NC}"
+  echo -e "${RED}✗ Certbot 5.4+ with --ip-address support not found${NC}"
   return 1
 }
 
@@ -722,11 +722,11 @@ write_profile_transport_metadata() {
 confirm_vision_443_risk() {
   echo ""
   echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║         ⚠ VISION НА 443 — РУЧНОЙ РИСКОВЫЙ РЕЖИМ         ║${NC}"
+  echo -e "${RED}║         ⚠ VISION ON 443 — MANUAL RISKY MODE         ║${NC}"
   echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
-  echo -e "${YELLOW}В 2026 году ТСПУ часто режет Vision на 443, особенно на мобильных сетях.${NC}"
-  echo -e "${YELLOW}Используйте 443 только осознанно, если случайный высокий порт/XHTTP не подходят.${NC}"
-  echo -n -e "${YELLOW}Продолжить несмотря на риск? (y/N): ${NC}"
+  echo -e "${YELLOW}In 2026 the DPI often cuts Vision on 443, especially on mobile networks.${NC}"
+  echo -e "${YELLOW}Use 443 only deliberately, when a random high port/XHTTP does not fit.${NC}"
+  echo -n -e "${YELLOW}Continue despite the risk? (y/N): ${NC}"
   read confirm
   [[ "$confirm" =~ ^[yYдД]$ ]]
 }
@@ -771,7 +771,7 @@ safe_jq_write() {
 
   # Минимум 2 аргумента: выражение и файл
   if [[ $nargs -lt 2 ]]; then
-    echo -e "${RED}  ✗ safe_jq_write: недостаточно аргументов${NC}" >&2
+    echo -e "${RED}  ✗ safe_jq_write: not enough arguments${NC}" >&2
     return 1
   fi
 
@@ -792,7 +792,7 @@ safe_jq_write() {
     chown "$orig_owner" "$dst_file" 2>/dev/null
     return 0
   else
-    echo -e "${RED}  ✗ Ошибка jq — файл НЕ изменён: $dst_file${NC}" >&2
+    echo -e "${RED}  ✗ jq error — file NOT modified: $dst_file${NC}" >&2
     rm -f "$tmp"
     return 1
   fi
@@ -807,7 +807,7 @@ backup_config() {
   local safe_operation_name
 
   if [[ -n "$result_var" && ! "$result_var" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-    echo -e "${RED}  ✗ Некорректное имя переменной результата backup_config${NC}"
+    echo -e "${RED}  ✗ Invalid result variable name for backup_config${NC}"
     return 1
   fi
   [[ -n "$result_var" ]] && printf -v "$result_var" '%s' ""
@@ -818,13 +818,13 @@ backup_config() {
   chown xray:xray "$backup_dir" 2>/dev/null
   local backup_file="$backup_dir/config_$(date +%Y%m%d_%H%M%S)_$$_${RANDOM}_${safe_operation_name}.json"
   if ! cp "$CONFIG_FILE" "$backup_file"; then
-    echo -e "${RED}  ✗ Не удалось создать бэкап config.json: $backup_file${NC}"
+    echo -e "${RED}  ✗ Could not create the config.json backup: $backup_file${NC}"
     return 1
   fi
   chmod 600 "$backup_file" 2>/dev/null
   chown xray:xray "$backup_file" 2>/dev/null
   [[ -n "$result_var" ]] && printf -v "$result_var" '%s' "$backup_file"
-  echo -e "${CYAN}  -> Бэкап конфига: $(basename "$backup_file")${NC}"
+  echo -e "${CYAN}  -> Config backup: $(basename "$backup_file")${NC}"
   return 0
 }
 
@@ -832,16 +832,16 @@ _restore_config_backup() {
   local backup_file=${1:-}
 
   if [[ -z "$backup_file" || ! -f "$backup_file" || ! -s "$backup_file" ]]; then
-    echo -e "${RED}  ✗ Точный бэкап для отката отсутствует: ${backup_file:-не задан}${NC}"
+    echo -e "${RED}  ✗ The exact rollback backup is missing: ${backup_file:-not set}${NC}"
     return 1
   fi
   if ! cp "$backup_file" "$CONFIG_FILE"; then
-    echo -e "${RED}  ✗ Не удалось восстановить config.json из $(basename "$backup_file")${NC}"
+    echo -e "${RED}  ✗ Could not restore config.json from $(basename "$backup_file")${NC}"
     return 1
   fi
   chmod 600 "$CONFIG_FILE" 2>/dev/null
   chown xray:xray "$CONFIG_FILE" 2>/dev/null
-  echo -e "${GREEN}  ✓ Конфиг восстановлен из: $(basename "$backup_file")${NC}"
+  echo -e "${GREEN}  ✓ Config restored from: $(basename "$backup_file")${NC}"
   return 0
 }
 
@@ -850,7 +850,7 @@ _snapshot_profiles() {
   local snapshot_dir
 
   if [[ ! "$result_var" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-    echo -e "${RED}  ✗ Некорректное имя переменной результата _snapshot_profiles${NC}"
+    echo -e "${RED}  ✗ Invalid result variable name for _snapshot_profiles${NC}"
     return 1
   fi
   printf -v "$result_var" '%s' ""
@@ -858,7 +858,7 @@ _snapshot_profiles() {
   snapshot_dir=$(mktemp -d /tmp/xraytailscale-profiles.XXXXXX) || return 1
   if [[ -d "$PROFILES_DIR" ]] && ! cp -a "$PROFILES_DIR/." "$snapshot_dir/"; then
     rm -rf -- "$snapshot_dir"
-    echo -e "${RED}  ✗ Не удалось создать снимок profile JSON${NC}"
+    echo -e "${RED}  ✗ Could not snapshot the profile JSON${NC}"
     return 1
   fi
   printf -v "$result_var" '%s' "$snapshot_dir"
@@ -869,15 +869,15 @@ _restore_profiles_snapshot() {
   local snapshot_dir=${1:-}
 
   if [[ "$snapshot_dir" != /tmp/xraytailscale-profiles.* || ! -d "$snapshot_dir" ]]; then
-    echo -e "${RED}  ✗ Некорректный снимок profile JSON: ${snapshot_dir:-не задан}${NC}"
+    echo -e "${RED}  ✗ Invalid profile JSON snapshot: ${snapshot_dir:-not set}${NC}"
     return 1
   fi
   mkdir -p "$PROFILES_DIR"
   if ! cp -a "$snapshot_dir/." "$PROFILES_DIR/"; then
-    echo -e "${RED}  ✗ Не удалось восстановить profile JSON${NC}"
+    echo -e "${RED}  ✗ Could not restore the profile JSON${NC}"
     return 1
   fi
-  echo -e "${GREEN}  ✓ Profile JSON восстановлены${NC}"
+  echo -e "${GREEN}  ✓ Profile JSON restored${NC}"
   return 0
 }
 
@@ -897,7 +897,7 @@ ensure_xray_runtime_user() {
   [[ -x "$nologin" ]] || nologin="/sbin/nologin"
   [[ -x "$nologin" ]] || nologin="/bin/false"
 
-  echo -e "${YELLOW}  ⚠ Пользователь xray отсутствует — создаю runtime user${NC}"
+  echo -e "${YELLOW}  ⚠ User xray is missing — creating the runtime user${NC}"
   if ! getent group xray >/dev/null 2>&1; then
     groupadd -r xray 2>/dev/null || true
   fi
@@ -909,11 +909,11 @@ ensure_xray_runtime_user() {
   fi
 
   if ! getent passwd xray >/dev/null 2>&1; then
-    echo -e "${RED}  ✗ Не удалось создать пользователя xray${NC}"
+    echo -e "${RED}  ✗ Could not create user xray${NC}"
     return 1
   fi
 
-  echo -e "${GREEN}  ✓ Пользователь xray создан${NC}"
+  echo -e "${GREEN}  ✓ User xray created${NC}"
   return 0
 }
 
@@ -933,7 +933,7 @@ ensure_xray_service_unit() {
     return 0
   fi
 
-  echo -e "${YELLOW}  ⚠ systemd unit xray.service не найден — создаю базовый unit${NC}"
+  echo -e "${YELLOW}  ⚠ systemd unit xray.service not found — creating a base unit${NC}"
   cat > /etc/systemd/system/xray.service <<'SVCEOF'
 [Unit]
 Description=Xray Service
@@ -960,11 +960,11 @@ SVCEOF
   systemctl enable xray >/dev/null 2>&1 || true
 
   if systemctl cat xray.service >/dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ xray.service создан${NC}"
+    echo -e "${GREEN}  ✓ xray.service created${NC}"
     return 0
   fi
 
-  echo -e "${RED}  ✗ Не удалось создать xray.service${NC}"
+  echo -e "${RED}  ✗ Could not create xray.service${NC}"
   return 1
 }
 
@@ -975,12 +975,12 @@ safe_restart_xray() {
   local rollback_config=${1:-}
 
   if [[ ! -x "$XRAY_BIN" ]]; then
-    echo -e "${RED}  ✗ Бинарник $XRAY_BIN не найден${NC}"
+    echo -e "${RED}  ✗ Binary $XRAY_BIN not found${NC}"
     return 1
   fi
 
   if [[ ! -f "$CONFIG_FILE" || ! -s "$CONFIG_FILE" ]]; then
-    echo -e "${RED}  ✗ config.json отсутствует или пустой — Xray НЕ перезапущен${NC}"
+    echo -e "${RED}  ✗ config.json is missing or empty — Xray NOT restarted${NC}"
     _restore_config_backup "$rollback_config" || true
     return 1
   fi
@@ -989,8 +989,8 @@ safe_restart_xray() {
   test_output=$("$XRAY_BIN" run -test -format json -config "$CONFIG_FILE" 2>&1)
 
   if ! grep -qx "Configuration OK." <<< "$test_output"; then
-    echo -e "${RED}  ✗ Конфиг не прошёл валидацию -- Xray НЕ перезапущен${NC}"
-    echo -e "${YELLOW}  Ошибка: ${test_output}${NC}"
+    echo -e "${RED}  ✗ Config failed validation — Xray NOT restarted${NC}"
+    echo -e "${YELLOW}  Error: ${test_output}${NC}"
     _restore_config_backup "$rollback_config" || true
     return 1
   fi
@@ -1003,18 +1003,18 @@ safe_restart_xray() {
   sleep 1
 
   if systemctl is-active --quiet xray; then
-    echo -e "${GREEN}  ✓ Xray перезапущен${NC}"
+    echo -e "${GREEN}  ✓ Xray restarted${NC}"
     return 0
   else
-    echo -e "${RED}  ✗ Xray не запустился после перезапуска${NC}"
+    echo -e "${RED}  ✗ Xray did not start after the restart${NC}"
     if _restore_config_backup "$rollback_config"; then
-      echo -e "${YELLOW}  -> Пробую вернуть старую конфигурацию...${NC}"
+      echo -e "${YELLOW}  -> Trying to restore the old config...${NC}"
       systemctl restart xray
       sleep 1
       if systemctl is-active --quiet xray; then
-        echo -e "${GREEN}  ✓ Xray восстановлен на предыдущем конфиге${NC}"
+        echo -e "${GREEN}  ✓ Xray restored to the previous config${NC}"
       else
-        echo -e "${RED}  ✗ Откат конфига не поднял Xray — требуется ручная проверка${NC}"
+        echo -e "${RED}  ✗ The config rollback did not start Xray — manual check required${NC}"
       fi
     fi
     return 1
@@ -1030,35 +1030,35 @@ open_firewall_port() {
 
   # Validate port number
   if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ $port -lt 1 ]] || [[ $port -gt 65535 ]]; then
-    echo -e "${RED}  ✗ Неверный порт: $port${NC}" >&2
+    echo -e "${RED}  ✗ Invalid port: $port${NC}" >&2
     return 1
   fi
 
   # Check if UFW is installed and active
   if ! command -v ufw &>/dev/null; then
-    echo -e "${YELLOW}  ⚠ UFW не установлен${NC}" >&2
+    echo -e "${YELLOW}  ⚠ UFW is not installed${NC}" >&2
     return 1
   fi
 
   if ! ufw status | grep -q "Status: active"; then
-    echo -e "${YELLOW}  ⚠ UFW не активен — правило не применено${NC}" >&2
+    echo -e "${YELLOW}  ⚠ UFW is not active — the rule was not applied${NC}" >&2
     return 1
   fi
 
   # Check if port already open (idempotent)
   if ufw status | grep -qE "^${port}/${protocol}.*ALLOW"; then
-    echo -e "${CYAN}  → Порт ${port}/${protocol} уже открыт${NC}"
+    echo -e "${CYAN}  → Port ${port}/${protocol} is already open${NC}"
     return 0
   fi
 
   # Open port
-  echo -e "${CYAN}  → Открываю порт ${port}/${protocol}...${NC}"
+  echo -e "${CYAN}  → Opening port ${port}/${protocol}...${NC}"
   if ufw allow "${port}/${protocol}" >/dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ Порт ${port}/${protocol} открыт${NC}"
+    echo -e "${GREEN}  ✓ Port ${port}/${protocol} opened${NC}"
     ufw reload >/dev/null 2>&1
     return 0
   else
-    echo -e "${RED}  ✗ Ошибка открытия порта${NC}" >&2
+    echo -e "${RED}  ✗ Error opening the port${NC}" >&2
     return 1
   fi
 }
@@ -1086,10 +1086,10 @@ close_firewall_port() {
 
   # Close port
   if ufw status | grep -qE "^${port}/${protocol}.*ALLOW"; then
-    echo -e "${CYAN}  → Закрываю порт ${port}/${protocol}...${NC}"
+    echo -e "${CYAN}  → Closing port ${port}/${protocol}...${NC}"
     ufw delete allow "${port}/${protocol}" >/dev/null 2>&1
     ufw reload >/dev/null 2>&1
-    echo -e "${GREEN}  ✓ Порт закрыт${NC}"
+    echo -e "${GREEN}  ✓ Port closed${NC}"
   fi
 
   return 0
@@ -1115,19 +1115,19 @@ select_route_for_profile() {
   fi
 
   echo ""
-  echo -e "${YELLOW}Профиль содержит несколько маршрутов. Выберите маршрут для ${action_label}:${NC}\n"
+  echo -e "${YELLOW}The profile has several routes. Choose a route for ${action_label}:${NC}\n"
   jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '
     to_entries[] |
     "  \(.key + 1)) \(.value.label // .value.transport): \(.value.transport) :\(.value.port) sni=\(.value.sni // "n/a") fp=\(.value.fingerprint // $default_fp)"
   ' < <(jq '.routes // []' "$profile_file")
-  echo -e "  ${CYAN}0)${NC} Назад"
+  echo -e "  ${CYAN}0)${NC} Back"
   echo ""
-  echo -n -e "${YELLOW}Маршрут: ${NC}"
+  echo -n -e "${YELLOW}Route: ${NC}"
   local route_choice
   read -r route_choice
   [[ "$route_choice" == "0" ]] && return 1
   if [[ ! "$route_choice" =~ ^[0-9]+$ ]] || [[ "$route_choice" -lt 1 ]] || [[ "$route_choice" -gt "$route_count" ]]; then
-    echo -e "${RED}✗ Неверный выбор маршрута${NC}"
+    echo -e "${RED}✗ Invalid route choice${NC}"
     sleep 2
     return 1
   fi
@@ -1189,9 +1189,9 @@ update_all_profiles_on_port() {
         .routes |= map(if .port == $port then .[$f] = $v else . end)
       else . end
     ' "$pfile"; then
-      echo -e "${CYAN}  → Обновлен: ${YELLOW}$pname${NC}"
+      echo -e "${CYAN}  → Updated: ${YELLOW}$pname${NC}"
     else
-      echo -e "${RED}  ✗ Ошибка обновления: ${YELLOW}$pname${NC}"
+      echo -e "${RED}  ✗ Update error: ${YELLOW}$pname${NC}"
       ok=false
     fi
   done
@@ -1238,9 +1238,9 @@ update_all_profiles_port_reference() {
         .routes |= map(if .port == $old_port then .port = $new_port else . end)
       else . end
     ' "$pfile"; then
-      echo -e "${CYAN}  → Обновлен порт: ${YELLOW}$pname${NC}"
+      echo -e "${CYAN}  → Port updated: ${YELLOW}$pname${NC}"
     else
-      echo -e "${RED}  ✗ Ошибка обновления порта: ${YELLOW}$pname${NC}"
+      echo -e "${RED}  ✗ Port update error: ${YELLOW}$pname${NC}"
       ok=false
     fi
   done
@@ -2706,14 +2706,14 @@ _apply_bypass_rule() {
         error("invalid domain list")
       end
     ' 2>/dev/null); then
-    echo -e "${RED}✗ Некорректный JSON domain-list для bypass${NC}"
+    echo -e "${RED}✗ Invalid domain-list JSON for bypass${NC}"
     return 2
   fi
 
   local domain_count
   domain_count=$(printf '%s' "$normalized_json" | jq 'length' 2>/dev/null)
   if [[ "$domain_count" == "0" ]]; then
-    echo -e "${YELLOW}Нет доменов для применения${NC}"
+    echo -e "${YELLOW}No domains to apply${NC}"
     return 1
   fi
 
@@ -2723,8 +2723,8 @@ _apply_bypass_rule() {
   while IFS= read -r dom; do
     [[ -z "$dom" ]] && continue
     if _sni_in_use "$dom"; then
-      echo -e "${RED}Конфликт: $dom используется как Reality SNI — добавление сломает handshake${NC}"
-      echo -e "${YELLOW}  Bypass правила не применены. Удалите $dom из списка и попробуйте снова.${NC}"
+      echo -e "${RED}Conflict: $dom is used as the Reality SNI — adding it would break the handshake${NC}"
+      echo -e "${YELLOW}  Bypass rules were not applied. Remove $dom from the list and try again.${NC}"
       return 1
     fi
   done <<< "$domains_raw"
@@ -2835,12 +2835,12 @@ probe_test_command() {
     sni_file="/usr/local/etc/xray/sni_list.txt"
   fi
   if [[ ! -f "$sni_file" ]]; then
-    echo -e "${RED}✗ SNI list не найден: $SNI_LIST${NC}"
+    echo -e "${RED}✗ SNI list not found: $SNI_LIST${NC}"
     return 1
   fi
 
   echo -e "${BLUE}════════════════════════════════════════════════════${NC}"
-  echo -e "${BLUE} PROBE TEST: проверка SNI с VPS${NC}"
+  echo -e "${BLUE} PROBE TEST: checking SNI from the VPS${NC}"
   echo -e "${BLUE}════════════════════════════════════════════════════${NC}"
   echo ""
   printf "${CYAN}%-32s | %-10s | %-10s | %6s${NC}\n" "SNI" "HTTP" "TLS" "latency"
@@ -2861,7 +2861,7 @@ probe_test_command() {
   done < "$sni_file"
 
   printf "%-32s-+-%-10s-+-%-10s-+-%6s\n" "--------------------------------" "----------" "----------" "------"
-  echo -e "${GREEN}Доступны: ${ok_count}/${total} SNI${NC}"
+  echo -e "${GREEN}Available: ${ok_count}/${total} SNI${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -5902,48 +5902,48 @@ _tailscale_default_hostname() {
 }
 
 install_tailscale_package() {
-  echo -e "${CYAN}  → Проверяю Tailscale...${NC}"
+  echo -e "${CYAN}  → Checking Tailscale...${NC}"
 
   if ! command -v tailscale >/dev/null 2>&1; then
     local installer_tmp
     installer_tmp=$(mktemp /tmp/tailscale-install.XXXXXX) || {
-      echo -e "${RED}✗ mktemp failed для Tailscale installer${NC}"
+      echo -e "${RED}✗ mktemp failed for the Tailscale installer${NC}"
       return 1
     }
 
-    echo -e "${CYAN}  → Скачиваю официальный installer Tailscale...${NC}"
+    echo -e "${CYAN}  → Downloading the official Tailscale installer...${NC}"
     if ! curl -fsSL --connect-timeout 10 --max-time 120 \
         https://tailscale.com/install.sh -o "$installer_tmp"; then
       rm -f "$installer_tmp"
-      echo -e "${RED}✗ Не удалось скачать https://tailscale.com/install.sh${NC}"
+      echo -e "${RED}✗ Could not download https://tailscale.com/install.sh${NC}"
       return 1
     fi
 
     if ! sh "$installer_tmp"; then
       rm -f "$installer_tmp"
-      echo -e "${RED}✗ Tailscale installer завершился с ошибкой${NC}"
+      echo -e "${RED}✗ The Tailscale installer failed${NC}"
       return 1
     fi
     rm -f "$installer_tmp"
   fi
 
   if ! command -v tailscale >/dev/null 2>&1; then
-    echo -e "${RED}✗ tailscale CLI не найден после установки${NC}"
+    echo -e "${RED}✗ tailscale CLI not found after install${NC}"
     return 1
   fi
 
   if ! systemctl enable --now tailscaled >/dev/null 2>&1; then
-    echo -e "${RED}✗ Не удалось запустить tailscaled.service${NC}"
-    echo -e "${YELLOW}  Проверьте: systemctl status tailscaled --no-pager -l${NC}"
+    echo -e "${RED}✗ Could not start tailscaled.service${NC}"
+    echo -e "${YELLOW}  Check: systemctl status tailscaled --no-pager -l${NC}"
     return 1
   fi
 
-  echo -e "${GREEN}  ✓ Tailscale установлен, tailscaled запущен${NC}"
+  echo -e "${GREEN}  ✓ Tailscale installed, tailscaled started${NC}"
   return 0
 }
 
 enable_tailscale_ip_forwarding() {
-  echo -e "${CYAN}  → Включаю IP forwarding для Tailscale exit node...${NC}"
+  echo -e "${CYAN}  → Enabling IP forwarding for the Tailscale exit node...${NC}"
 
   mkdir -p "$(dirname "$TAILSCALE_SYSCTL_FILE")"
   cat > "$TAILSCALE_SYSCTL_FILE" << 'TAILSCALE_SYSCTL_EOF'
@@ -5955,11 +5955,11 @@ TAILSCALE_SYSCTL_EOF
 
   chmod 644 "$TAILSCALE_SYSCTL_FILE"
   if ! sysctl -p "$TAILSCALE_SYSCTL_FILE" >/dev/null 2>&1; then
-    echo -e "${RED}✗ sysctl не применил $TAILSCALE_SYSCTL_FILE${NC}"
+    echo -e "${RED}✗ sysctl did not apply $TAILSCALE_SYSCTL_FILE${NC}"
     return 1
   fi
 
-  echo -e "${GREEN}  ✓ IP forwarding включен${NC}"
+  echo -e "${GREEN}  ✓ IP forwarding enabled${NC}"
   return 0
 }
 
@@ -5971,27 +5971,27 @@ configure_tailscale_exit_node() {
   backend_state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // ""' 2>/dev/null || true)
 
   if [[ "$backend_state" == "Running" ]]; then
-    echo -e "${CYAN}  → Tailscale уже подключен к tailnet, включаю exit-node advertising...${NC}"
+    echo -e "${CYAN}  → Tailscale is already joined to the tailnet, enabling exit-node advertising...${NC}"
     if ! tailscale set --advertise-exit-node; then
-      echo -e "${RED}✗ Не удалось выполнить tailscale set --advertise-exit-node${NC}"
+      echo -e "${RED}✗ Could not run tailscale set --advertise-exit-node${NC}"
       return 1
     fi
   else
     local default_hostname node_hostname auth_key
     default_hostname=$(_tailscale_default_hostname)
-    echo -n -e "${YELLOW}Hostname в tailnet [${default_hostname}]: ${NC}"
+    echo -n -e "${YELLOW}Hostname in the tailnet [${default_hostname}]: ${NC}"
     read -r node_hostname
     node_hostname="${node_hostname:-$default_hostname}"
 
     if [[ ! "$node_hostname" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]]; then
-      echo -e "${RED}✗ Некорректный hostname. Используйте буквы, цифры и дефис.${NC}"
+      echo -e "${RED}✗ Invalid hostname. Use letters, digits and hyphens.${NC}"
       return 1
     fi
 
     echo ""
-    echo -e "${CYAN}Можно вставить Tailscale auth key для unattended-login.${NC}"
-    echo -e "${YELLOW}Если оставить пустым, Tailscale покажет URL для ручного входа.${NC}"
-    echo -n -e "${YELLOW}Auth key (скрытый ввод, Enter=ручной login): ${NC}"
+    echo -e "${CYAN}You can paste a Tailscale auth key for unattended login.${NC}"
+    echo -e "${YELLOW}If you leave it empty, Tailscale will show a URL for manual login.${NC}"
+    echo -n -e "${YELLOW}Auth key (hidden input, Enter=manual login): ${NC}"
     read -r -s auth_key
     echo ""
 
@@ -6002,7 +6002,7 @@ configure_tailscale_exit_node() {
 
     if ! tailscale "${up_args[@]}"; then
       auth_key=""
-      echo -e "${RED}✗ tailscale up не смог подключить exit node${NC}"
+      echo -e "${RED}✗ tailscale up could not connect the exit node${NC}"
       return 1
     fi
     auth_key=""
@@ -6013,17 +6013,17 @@ configure_tailscale_exit_node() {
   fi
 
   echo ""
-  echo -e "${GREEN}✓ Tailscale exit node объявлен${NC}"
-  echo -e "${YELLOW}Важно: в Tailscale admin console нужно разрешить 'Use as exit node' для этой машины.${NC}"
-  echo -e "${CYAN}Tailscale IPv4:${NC} $(tailscale ip -4 2>/dev/null || echo 'пока недоступен')"
+  echo -e "${GREEN}✓ Tailscale exit node advertised${NC}"
+  echo -e "${YELLOW}Important: in the Tailscale admin console allow 'Use as exit node' for this machine.${NC}"
+  echo -e "${CYAN}Tailscale IPv4:${NC} $(tailscale ip -4 2>/dev/null || echo 'not available yet')"
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
 show_tailscale_status() {
   if ! command -v tailscale >/dev/null 2>&1; then
-    echo -e "${YELLOW}Tailscale не установлен${NC}"
+    echo -e "${YELLOW}Tailscale is not installed${NC}"
     return 0
   fi
 
@@ -6033,29 +6033,29 @@ show_tailscale_status() {
   echo -e "${BLUE}tailscale status:${NC}"
   tailscale status 2>/dev/null || true
   echo ""
-  echo -e "${BLUE}tailscale ip:${NC} $(tailscale ip -4 2>/dev/null || echo 'нет IPv4')"
+  echo -e "${BLUE}tailscale ip:${NC} $(tailscale ip -4 2>/dev/null || echo 'no IPv4')"
 }
 
 disable_tailscale_exit_node() {
   if ! command -v tailscale >/dev/null 2>&1; then
-    echo -e "${YELLOW}Tailscale не установлен${NC}"
+    echo -e "${YELLOW}Tailscale is not installed${NC}"
     sleep 1
     return 0
   fi
 
-  echo -n -e "${YELLOW}Отключить advertise exit node на этой машине? [y/N]: ${NC}"
+  echo -n -e "${YELLOW}Disable advertise-exit-node on this machine? [y/N]: ${NC}"
   local confirm
   read -r confirm
   if [[ ! "$confirm" =~ ^[yYдД]$ ]]; then
-    echo -e "${CYAN}✓ Отменено${NC}"
+    echo -e "${CYAN}✓ Cancelled${NC}"
     sleep 1
     return 0
   fi
 
   if tailscale set --advertise-exit-node=false; then
-    echo -e "${GREEN}✓ Exit-node advertising отключен${NC}"
+    echo -e "${GREEN}✓ Exit-node advertising disabled${NC}"
   else
-    echo -e "${RED}✗ Не удалось отключить advertise-exit-node${NC}"
+    echo -e "${RED}✗ Could not disable advertise-exit-node${NC}"
   fi
   sleep 2
 }
@@ -6074,19 +6074,19 @@ tailscale_exit_node_menu() {
       if [[ -n "$ts_ip" ]]; then
         echo -e "${GREEN}  ✓ Tailscale IPv4: ${ts_ip}${NC}"
       else
-        echo -e "${YELLOW}  ⚠ Tailscale установлен, но node ещё не подключен${NC}"
+        echo -e "${YELLOW}  ⚠ Tailscale is installed, but the node is not joined yet${NC}"
       fi
     else
-      echo -e "${YELLOW}  ⚠ Tailscale не установлен${NC}"
+      echo -e "${YELLOW}  ⚠ Tailscale is not installed${NC}"
     fi
     echo ""
 
-    echo -e "${CYAN} 1)${NC} Установить/настроить Tailscale exit node"
-    echo -e "${CYAN} 2)${NC} Показать статус Tailscale"
-    echo -e "${CYAN} 3)${NC} Отключить advertise exit node"
-    echo -e "${CYAN} 0)${NC} Назад в главное меню"
+    echo -e "${CYAN} 1)${NC} Install/configure the Tailscale exit node"
+    echo -e "${CYAN} 2)${NC} Show the Tailscale status"
+    echo -e "${CYAN} 3)${NC} Disable advertise-exit-node"
+    echo -e "${CYAN} 0)${NC} Back to the main menu"
     echo ""
-    echo -n -e "${YELLOW}Выбор: ${NC}"
+    echo -n -e "${YELLOW}Choice: ${NC}"
     local choice
     read -r choice
     case "$choice" in
@@ -6094,12 +6094,12 @@ tailscale_exit_node_menu() {
       2)
         show_tailscale_status
         echo ""
-        echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+        echo -n -e "${YELLOW}Press Enter to continue...${NC}"
         read -r _
         ;;
       3) disable_tailscale_exit_node ;;
       0) return ;;
-      *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
+      *) echo -e "${RED}Invalid choice${NC}"; sleep 1 ;;
     esac
   done
 }
@@ -6883,12 +6883,12 @@ main_menu() {
   local pq_migration_allowed=1
   local pq_migration_answered_yes=0
   if [[ ! -f "$pq_migration_warned" ]] && [[ -n "$(_list_legacy_pq_profile_names)" ]]; then
-    echo -e "${YELLOW}Внимание: старые single-route профили будут переведены на XHTTP+PQ. Ручные vless://-ссылки перестанут работать (подписки обновятся сами).${NC}"
-    echo -n -e "${YELLOW}Продолжить PQ-миграцию? [Y/n]: ${NC}"
+    echo -e "${YELLOW}Warning: old single-route profiles will be switched to XHTTP+PQ. Manual vless:// links stop working (subscriptions update themselves).${NC}"
+    echo -n -e "${YELLOW}Continue the PQ migration? [Y/n]: ${NC}"
     local pq_migration_answer=""
     read -r pq_migration_answer || {
       echo
-      echo -e "${YELLOW}Ввод завершён без ответа — PQ-миграция пропущена до следующего запуска${NC}"
+      echo -e "${YELLOW}Input ended without an answer — the PQ migration is skipped until the next run${NC}"
       pq_migration_allowed=0
     }
     if [[ $pq_migration_allowed -eq 1 ]]; then
@@ -6897,7 +6897,7 @@ main_menu() {
         # иначе упавшая миграция повторялась бы уже молча, без предупреждения.
         pq_migration_answered_yes=1
       else
-        echo -e "${YELLOW}PQ-миграция пропущена. Предупреждение появится снова при следующем запуске.${NC}"
+        echo -e "${YELLOW}PQ migration skipped. The warning will appear again on the next run.${NC}"
         pq_migration_allowed=0
       fi
     fi
@@ -6918,14 +6918,14 @@ main_menu() {
   run_migration "happ_legacy_xhttp_route_2026"         "HAPP subscription не меняет существующие профили" _migrate_happ_legacy_xhttp_route_2026 || ((migration_failures++))
 
   if [[ ! -f /usr/local/etc/xray/.sni_list_2026 ]]; then
-    echo -e "${YELLOW}Перед SNI миграцией доступна команда probe-test для проверки доступности SNI.${NC}"
-    echo -n -e "${YELLOW}Запустить probe-test сейчас? [y/N]: ${NC}"
+    echo -e "${YELLOW}Before the SNI migration you can run probe-test to check SNI availability.${NC}"
+    echo -n -e "${YELLOW}Run probe-test now? [y/N]: ${NC}"
     local probe_ans
     read -r probe_ans
     probe_ans=${probe_ans:-N}
     if [[ "$probe_ans" =~ ^[yYдД]$ ]]; then
       probe_test_command
-      echo -n -e "${YELLOW}Нажмите Enter для продолжения миграции...${NC}"
+      echo -n -e "${YELLOW}Press Enter to continue the migration...${NC}"
       read -r _
     fi
   fi
@@ -6939,15 +6939,15 @@ main_menu() {
   run_migration "subhttp_happ_legacy_xhttp_2026" "HAPP subscription: prefer legacy XHTTP route" _migrate_subhttp_happ_legacy_xhttp_2026 || ((migration_failures++))
 
   if ! migrate_remove_legacy_tcp_tuning_v3; then
-    echo -e "${YELLOW}⚠ Legacy host TCP tuning cleanup не завершён. Проверьте sysctl-конфиги вручную.${NC}"
+    echo -e "${YELLOW}⚠ The legacy host TCP tuning cleanup did not finish. Check the sysctl configs manually.${NC}"
   fi
 
   # Aggregate report (RESEARCH §«Error reporting»): чтобы пользователь не пропустил
   # failure среди скроллящегося TUI вывода.
   if [[ $migration_failures -gt 0 ]]; then
     echo
-    echo -e "${YELLOW}⚠ $migration_failures миграций не завершились — повторятся при следующем запуске${NC}"
-    echo -e "${YELLOW}  Логи бэкапов: /usr/local/etc/xray/backups/${NC}"
+    echo -e "${YELLOW}⚠ $migration_failures migrations did not finish — they will retry on the next run${NC}"
+    echo -e "${YELLOW}  Backup logs: /usr/local/etc/xray/backups/${NC}"
     read -n 1 -p "Нажмите любую клавишу для продолжения..."
     echo
   fi
@@ -6974,7 +6974,7 @@ main_menu() {
       return 0
     fi
     # Fallback, если модули не подгружены — просто выход с подсказкой.
-    echo -e "${RED}Модули мастера/статуса не загружены. Пересоберите ./build.sh${NC}"
+    echo -e "${RED}The wizard/status modules are not loaded. Rebuild with ./build.sh${NC}"
     return 1
   done
 }
@@ -11214,28 +11214,28 @@ manage_profile_advanced_menu() {
 }
 
 _bypass_add_single_domain() {
-  echo -n -e "${YELLOW}Введите домен (без domain:, например steamcontent.com): ${NC}"
+  echo -n -e "${YELLOW}Enter a domain (without domain:, e.g. steamcontent.com): ${NC}"
   local user_dom
   read -r user_dom
   user_dom="${user_dom#domain:}"
 
   if [[ ! "$user_dom" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$ ]]; then
-    echo -e "${RED}✗ Некорректный домен${NC}"
+    echo -e "${RED}✗ Invalid domain${NC}"
     sleep 2
     return
   fi
 
-  echo -n -e "${YELLOW}Добавить domain:${user_dom} в обход VPN? [y/N]: ${NC}"
+  echo -n -e "${YELLOW}Add domain:${user_dom} to the VPN bypass? [y/N]: ${NC}"
   local confirm
   read -r confirm
-  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Отменено${NC}"; sleep 1; return; }
+  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Cancelled${NC}"; sleep 1; return; }
 
   if _apply_bypass_rule "[\"domain:${user_dom}\"]"; then
-    echo -e "${GREEN}✓ domain:${user_dom} добавлен в обход VPN${NC}"
+    echo -e "${GREEN}✓ domain:${user_dom} added to the VPN bypass${NC}"
   else
-    echo -e "${RED}✗ Правило не применено${NC}"
+    echo -e "${RED}✗ The rule was not applied${NC}"
   fi
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
@@ -11258,11 +11258,11 @@ _bypass_apply_bundle() {
   while true; do
     show_ascii
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}    ДЕФОЛТНЫЙ BYPASS BUNDLE                   ${NC}"
+    echo -e "${BLUE}    DEFAULT BYPASS BUNDLE                   ${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${YELLOW}Выберите группы для применения:${NC}"
-    echo -e "${CYAN}↑/↓ — выбор, Space — вкл/выкл, Enter — применить, q/Esc — отмена${NC}"
+    echo -e "${YELLOW}Choose the groups to apply:${NC}"
+    echo -e "${CYAN}↑/↓ to move, Space to toggle, Enter to apply, q/Esc to cancel${NC}"
     echo ""
 
     local i
@@ -11273,11 +11273,11 @@ _bypass_apply_bundle() {
       count=$(awk -F',' '{print NF}' <<< "${group_domains[$i]}")
       local pointer=" "
       [[ $i -eq $cursor ]] && pointer=">"
-      echo -e "${CYAN}${pointer} $((i+1)))${NC} $mark ${group_names[$i]} (${count} доменов)"
+      echo -e "${CYAN}${pointer} $((i+1)))${NC} $mark ${group_names[$i]} (${count} domains)"
     done
 
     echo ""
-    echo -n -e "${YELLOW}Клавиша: ${NC}"
+    echo -n -e "${YELLOW}Key: ${NC}"
     local key rest
     IFS= read -rsn1 key
     case "$key" in
@@ -11290,7 +11290,7 @@ _bypass_apply_bundle() {
         done
 
         if [[ -z "$all_doms_csv" ]]; then
-          echo -e "${YELLOW}Нет выбранных групп. Отменено.${NC}"
+          echo -e "${YELLOW}No groups selected. Cancelled.${NC}"
           sleep 1
           return
         fi
@@ -11299,14 +11299,14 @@ _bypass_apply_bundle() {
         doms_json=$(printf '%s' "$all_doms_csv" | tr ',' '\n' | sed '/^$/d' | jq -R '"domain:" + .' | jq -s '.')
         local domain_count
         domain_count=$(printf '%s' "$doms_json" | jq 'length')
-        echo -e "${CYAN}Применяю ${domain_count} доменов...${NC}"
+        echo -e "${CYAN}Applying ${domain_count} domains...${NC}"
 
         if _apply_bypass_rule "$doms_json"; then
-          echo -e "${GREEN}✓ Дефолтный bundle применен${NC}"
+          echo -e "${GREEN}✓ Default bundle applied${NC}"
         else
-          echo -e "${RED}✗ Bundle не применен. Если был создан бэкап, config.json откатан safe_restart_xray.${NC}"
+          echo -e "${RED}✗ Bundle not applied. If a backup was made, config.json was rolled back by safe_restart_xray.${NC}"
         fi
-        echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+        echo -n -e "${YELLOW}Press Enter to continue...${NC}"
         read -r _
         return
         ;;
@@ -11358,63 +11358,63 @@ _bypass_remove_domain_interactive() {
   mapfile -t current_domains < <(_bypass_list_current)
 
   if [[ ${#current_domains[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}Нет правил для удаления${NC}"
+    echo -e "${YELLOW}No rules to delete${NC}"
     sleep 1
     return
   fi
 
-  echo -e "${CYAN}Текущие bypass-домены:${NC}"
+  echo -e "${CYAN}Current bypass domains:${NC}"
   local i
   for i in "${!current_domains[@]}"; do
     echo -e "${CYAN} $((i+1)))${NC} ${current_domains[$i]}"
   done
-  echo -e "${CYAN} 0)${NC} Отмена"
+  echo -e "${CYAN} 0)${NC} Cancel"
   echo ""
-  echo -n -e "${YELLOW}Выберите правило для удаления: ${NC}"
+  echo -n -e "${YELLOW}Choose a rule to delete: ${NC}"
   local choice
   read -r choice
   [[ "$choice" == "0" ]] && return
   if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -gt ${#current_domains[@]} ]]; then
-    echo -e "${RED}Неверный выбор${NC}"
+    echo -e "${RED}Invalid choice${NC}"
     sleep 1
     return
   fi
 
   local selected="${current_domains[$((choice-1))]}"
   local dom="${selected#domain:}"
-  echo -n -e "${YELLOW}Удалить ${selected}? [y/N]: ${NC}"
+  echo -n -e "${YELLOW}Delete ${selected}? [y/N]: ${NC}"
   local confirm
   read -r confirm
-  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Отменено${NC}"; sleep 1; return; }
+  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Cancelled${NC}"; sleep 1; return; }
 
   if _bypass_remove_rule "$dom"; then
-    echo -e "${GREEN}✓ ${selected} удален из обхода${NC}"
+    echo -e "${GREEN}✓ ${selected} removed from the bypass${NC}"
   else
-    echo -e "${RED}✗ Не удалось удалить ${selected}${NC}"
+    echo -e "${RED}✗ Could not remove ${selected}${NC}"
   fi
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
 _bypass_reset_all_interactive() {
   echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║  СБРОС ВСЕХ BYPASS-ПРАВИЛ                                ║${NC}"
+  echo -e "${RED}║  RESET ALL BYPASS RULES                                ║${NC}"
   echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "${YELLOW}Будут удалены только domain bypass-правила.${NC}"
-  echo -e "${CYAN}Дефолтные правила install.sh (ads, QUIC block, direct catch-all) останутся.${NC}"
+  echo -e "${YELLOW}Only domain bypass rules will be removed.${NC}"
+  echo -e "${CYAN}The default install.sh rules (ads, QUIC block, direct catch-all) stay.${NC}"
   echo ""
-  echo -n -e "${RED}Действительно сбросить? [y/N]: ${NC}"
+  echo -n -e "${RED}Really reset? [y/N]: ${NC}"
   local confirm
   read -r confirm
-  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Отменено${NC}"; sleep 1; return; }
+  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Cancelled${NC}"; sleep 1; return; }
 
   if _bypass_reset_all; then
-    echo -e "${GREEN}✓ Все bypass-правила удалены${NC}"
+    echo -e "${GREEN}✓ All bypass rules removed${NC}"
   else
-    echo -e "${RED}✗ Сброс не выполнен${NC}"
+    echo -e "${RED}✗ Reset failed${NC}"
   fi
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
@@ -11422,29 +11422,29 @@ bypass_routing_menu() {
   while true; do
     show_ascii
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}    УПРАВЛЕНИЕ ОБХОДОМ VPN                    ${NC}"
+    echo -e "${BLUE}    VPN BYPASS MANAGEMENT                    ${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
     echo ""
 
     local current
     current=$(_bypass_list_current)
     if [[ -z "$current" ]]; then
-      echo -e "${YELLOW}  Нет правил обхода (весь трафик через VPN)${NC}"
+      echo -e "${YELLOW}  No bypass rules (all traffic goes through the VPN)${NC}"
     else
-      echo -e "${CYAN}Текущие домены в обходе:${NC}"
+      echo -e "${CYAN}Current domains in the bypass:${NC}"
       while IFS= read -r dom; do
         [[ -n "$dom" ]] && echo -e "  ${GREEN}->${NC} $dom"
       done <<< "$current"
     fi
     echo ""
 
-    echo -e "${CYAN} 1)${NC} Добавить домен в обход"
-    echo -e "${CYAN} 2)${NC} Применить дефолтный bundle (5 групп)"
-    echo -e "${CYAN} 3)${NC} Удалить домен из обхода"
-    echo -e "${CYAN} 4)${NC} Сбросить ВСЕ правила обхода"
-    echo -e "${CYAN} 0)${NC} Назад в главное меню"
+    echo -e "${CYAN} 1)${NC} Add a domain to the bypass"
+    echo -e "${CYAN} 2)${NC} Apply the default bundle (5 groups)"
+    echo -e "${CYAN} 3)${NC} Remove a domain from the bypass"
+    echo -e "${CYAN} 4)${NC} Reset ALL bypass rules"
+    echo -e "${CYAN} 0)${NC} Back to the main menu"
     echo ""
-    echo -n -e "${YELLOW}Выбор: ${NC}"
+    echo -n -e "${YELLOW}Choice: ${NC}"
 
     local c
     read -r c
@@ -11454,7 +11454,7 @@ bypass_routing_menu() {
       3) _bypass_remove_domain_interactive ;;
       4) _bypass_reset_all_interactive ;;
       0) return ;;
-      *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
+      *) echo -e "${RED}Invalid choice${NC}"; sleep 1 ;;
     esac
   done
 }
@@ -11956,14 +11956,14 @@ prompt_server_domain() {
   local saved domain
   saved=$(get_server_domain)
   if [[ -n "$saved" ]]; then
-    echo -n -e "${YELLOW}Домен сервера [${CYAN}$saved${YELLOW}]: ${NC}" >&2
+    echo -n -e "${YELLOW}Server domain [${CYAN}$saved${YELLOW}]: ${NC}" >&2
   else
-    echo -n -e "${YELLOW}Домен сервера (A-запись → IP этого VPS): ${NC}" >&2
+    echo -n -e "${YELLOW}Server domain (A record → this VPS IP): ${NC}" >&2
   fi
   read -r domain
   [[ -z "$domain" ]] && domain="$saved"
   if ! validate_server_domain "$domain"; then
-    echo -e "${RED}✗ Некорректный домен: '${domain}'${NC}" >&2
+    echo -e "${RED}✗ Invalid domain: '${domain}'${NC}" >&2
     return 1
   fi
   set_server_domain "$domain" || return 1
@@ -12723,15 +12723,15 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
       main_menu
       ;;
     *)
-      echo -e "${RED}✗ Неизвестная команда: $1${NC}"
-      echo -e "${YELLOW}Использование:${NC}"
-      echo -e "  ${CYAN}sudo xraytailscale${NC}         — открыть меню"
-      echo -e "  ${CYAN}sudo xraytailscale update${NC}  — обновить Xray-core"
-      echo -e "  ${CYAN}sudo xraytailscale subscription-repair${NC}  — восстановить stale HAPP profiles"
-      echo -e "  ${CYAN}sudo xraytailscale bulk-repair${NC}  — alias для subscription-repair"
-      echo -e "  ${CYAN}sudo xraytailscale probe-test${NC}  — проверить доступность SNI с VPS"
-      echo -e "  ${CYAN}sudo xraytailscale selfsteal-auto <domain> [email]${NC}  — self-steal без меню (автодеплой)"
-      echo -e "  ${CYAN}sudo xraytailscale wizard${NC}  — мастер первичной настройки (5 шагов)"
+      echo -e "${RED}✗ Unknown command: $1${NC}"
+      echo -e "${YELLOW}Usage:${NC}"
+      echo -e "  ${CYAN}sudo xraytailscale${NC}         - open the menu"
+      echo -e "  ${CYAN}sudo xraytailscale update${NC}  - update Xray-core"
+      echo -e "  ${CYAN}sudo xraytailscale subscription-repair${NC}  - repair stale HAPP profiles"
+      echo -e "  ${CYAN}sudo xraytailscale bulk-repair${NC}  - alias for subscription-repair"
+      echo -e "  ${CYAN}sudo xraytailscale probe-test${NC}  - check SNI availability from the VPS"
+      echo -e "  ${CYAN}sudo xraytailscale selfsteal-auto <domain> [email]${NC}  - self-steal without the menu (auto-deploy)"
+      echo -e "  ${CYAN}sudo xraytailscale wizard${NC}  - initial setup wizard (5 steps)"
       exit 1
       ;;
   esac

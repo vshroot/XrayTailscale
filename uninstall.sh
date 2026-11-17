@@ -10,72 +10,72 @@ NC='\033[0m'
 
 # Проверка прав root
 if [[ $EUID -ne 0 ]]; then
-   echo -e "${RED}✗ Этот скрипт должен быть запущен с правами root${NC}" 
-   echo -e "${YELLOW}Используйте: sudo bash uninstall.sh${NC}"
+   echo -e "${RED}✗ This script must be run as root${NC}" 
+   echo -e "${YELLOW}Use: sudo bash uninstall.sh${NC}"
    exit 1
 fi
 
 clear
 echo -e "${RED}"
 echo '═══════════════════════════════════════════════════════════'
-echo '              УДАЛЕНИЕ XRAYTAILSCALE                          '
+echo '              REMOVING XRAYTAILSCALE                          '
 echo '═══════════════════════════════════════════════════════════'
 echo -e "${NC}\n"
 
-echo -e "${YELLOW}Это действие удалит:${NC}"
-echo -e "  ${BLUE}•${NC} Xray-core и все его компоненты"
-echo -e "  ${BLUE}•${NC} Все профили и конфигурации"
-echo -e "  ${BLUE}•${NC} Приложение xraytailscale"
-echo -e "  ${BLUE}•${NC} Сгенерированные ключи Reality"
+echo -e "${YELLOW}This action will remove:${NC}"
+echo -e "  ${BLUE}•${NC} Xray-core and all its components"
+echo -e "  ${BLUE}•${NC} All profiles and configurations"
+echo -e "  ${BLUE}•${NC} The xraytailscale app"
+echo -e "  ${BLUE}•${NC} The generated Reality keys"
 echo ""
-echo -e "${RED}⚠ Все данные будут потеряны безвозвратно!${NC}"
+echo -e "${RED}⚠ ALL DATA WILL BE LOST PERMANENTLY!${NC}"
 echo ""
-echo -n -e "${YELLOW}Вы уверены, что хотите удалить XrayTailscale? (yes/no): ${NC}"
+echo -n -e "${YELLOW}Are you sure you want to remove XrayTailscale? (yes/no): ${NC}"
 read confirmation
 
 if [[ "$confirmation" != "yes" ]]; then
-    echo -e "${CYAN}✓ Удаление отменено${NC}"
+    echo -e "${CYAN}✓ Removal cancelled${NC}"
     exit 0
 fi
 
 echo ""
-echo -e "${BLUE}[1/6]${NC} ${YELLOW}Остановка сервиса Xray...${NC}"
+echo -e "${BLUE}[1/6]${NC} ${YELLOW}Stopping the Xray service...${NC}"
 systemctl stop xray > /dev/null 2>&1
 systemctl disable xray > /dev/null 2>&1
-echo -e "${GREEN}✓ Сервис остановлен${NC}\n"
+echo -e "${GREEN}✓ Service stopped${NC}\n"
 
-echo -e "${BLUE}[2/6]${NC} ${YELLOW}Удаление Xray-core...${NC}"
+echo -e "${BLUE}[2/6]${NC} ${YELLOW}Removing Xray-core...${NC}"
 bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove > /dev/null 2>&1
-echo -e "${GREEN}✓ Xray-core удален${NC}\n"
+echo -e "${GREEN}✓ Xray-core removed${NC}\n"
 
-echo -e "${BLUE}[3/6]${NC} ${YELLOW}Удаление конфигураций и профилей...${NC}"
+echo -e "${BLUE}[3/6]${NC} ${YELLOW}Removing configurations and profiles...${NC}"
 rm -rf /usr/local/etc/xray
-echo -e "${GREEN}✓ Конфигурации удалены${NC}\n"
+echo -e "${GREEN}✓ Configurations removed${NC}\n"
 
-echo -e "${BLUE}[4/6]${NC} ${YELLOW}Удаление приложения xraytailscale...${NC}"
+echo -e "${BLUE}[4/6]${NC} ${YELLOW}Removing the xraytailscale app...${NC}"
 rm -f /usr/local/bin/xraytailscale
 rm -f /usr/local/bin/xraytailscale-update /usr/local/bin/xraytailscale-uninstall
 legacy_cmd="xrayeba""tor"
 rm -f "/usr/local/bin/${legacy_cmd}" "/usr/local/bin/${legacy_cmd}-update" "/usr/local/bin/${legacy_cmd}-uninstall" 2>/dev/null || true
-echo -e "${GREEN}✓ Приложение удалено${NC}\n"
+echo -e "${GREEN}✓ App removed${NC}\n"
 
-echo -e "${BLUE}[5/6]${NC} ${YELLOW}Очистка systemd...${NC}"
+echo -e "${BLUE}[5/6]${NC} ${YELLOW}Cleaning systemd...${NC}"
 rm -f /etc/systemd/system/xray.service
 rm -f /etc/systemd/system/xray@.service
 systemctl daemon-reload > /dev/null 2>&1
-echo -e "${GREEN}✓ Systemd очищен${NC}\n"
+echo -e "${GREEN}✓ Systemd cleaned${NC}\n"
 
-echo -e "${BLUE}[6/6]${NC} ${YELLOW}Очистка логов...${NC}"
+echo -e "${BLUE}[6/6]${NC} ${YELLOW}Cleaning logs...${NC}"
 journalctl --rotate > /dev/null 2>&1
 journalctl --vacuum-time=1s > /dev/null 2>&1
-echo -e "${GREEN}✓ Логи очищены${NC}\n"
+echo -e "${GREEN}✓ Logs cleaned${NC}\n"
 
 clear
 echo -e "${GREEN}"
 echo '═══════════════════════════════════════════════════════════'
-echo '           ✓ УДАЛЕНИЕ ЗАВЕРШЕНО УСПЕШНО!                   '
+echo '           ✓ REMOVAL COMPLETED SUCCESSFULLY!                   '
 echo '═══════════════════════════════════════════════════════════'
 echo -e "${NC}\n"
 
-echo -e "${CYAN}XrayTailscale полностью удален с вашего сервера.${NC}"
-echo -e "${BLUE}Спасибо за использование!${NC}\n"
+echo -e "${CYAN}XrayTailscale has been completely removed from your server.${NC}"
+echo -e "${BLUE}Thanks for using it!${NC}\n"

@@ -28,15 +28,15 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
       main_menu
       ;;
     *)
-      echo -e "${RED}✗ Неизвестная команда: $1${NC}"
-      echo -e "${YELLOW}Использование:${NC}"
-      echo -e "  ${CYAN}sudo xraytailscale${NC}         — открыть меню"
-      echo -e "  ${CYAN}sudo xraytailscale update${NC}  — обновить Xray-core"
-      echo -e "  ${CYAN}sudo xraytailscale subscription-repair${NC}  — восстановить stale HAPP profiles"
-      echo -e "  ${CYAN}sudo xraytailscale bulk-repair${NC}  — alias для subscription-repair"
-      echo -e "  ${CYAN}sudo xraytailscale probe-test${NC}  — проверить доступность SNI с VPS"
-      echo -e "  ${CYAN}sudo xraytailscale selfsteal-auto <domain> [email]${NC}  — self-steal без меню (автодеплой)"
-      echo -e "  ${CYAN}sudo xraytailscale wizard${NC}  — мастер первичной настройки (5 шагов)"
+      echo -e "${RED}✗ Unknown command: $1${NC}"
+      echo -e "${YELLOW}Usage:${NC}"
+      echo -e "  ${CYAN}sudo xraytailscale${NC}         - open the menu"
+      echo -e "  ${CYAN}sudo xraytailscale update${NC}  - update Xray-core"
+      echo -e "  ${CYAN}sudo xraytailscale subscription-repair${NC}  - repair stale HAPP profiles"
+      echo -e "  ${CYAN}sudo xraytailscale bulk-repair${NC}  - alias for subscription-repair"
+      echo -e "  ${CYAN}sudo xraytailscale probe-test${NC}  - check SNI availability from the VPS"
+      echo -e "  ${CYAN}sudo xraytailscale selfsteal-auto <domain> [email]${NC}  - self-steal without the menu (auto-deploy)"
+      echo -e "  ${CYAN}sudo xraytailscale wizard${NC}  - initial setup wizard (5 steps)"
       exit 1
       ;;
   esac

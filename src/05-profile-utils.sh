@@ -11,23 +11,23 @@ update_transport_settings_for_sni() {
     '.inbounds[] | select(.port == $port) | .streamSettings.network' \
     "$config_file")
 
-  echo -e "${CYAN}  → Обновление SNI на порту $port (транспорт: $transport)...${NC}"
+  echo -e "${CYAN}  → Updating SNI on port $port (transport: $transport)...${NC}"
 
   # Base updates (ALL transports) - search by port number, not tag
   if ! safe_jq_write --argjson port "$port_num" --arg sni "$new_sni" '
     (.inbounds[] | select(.port == $port) | .streamSettings.realitySettings.dest) |= ($sni + ":443") |
     (.inbounds[] | select(.port == $port) | .streamSettings.realitySettings.serverNames) |= [$sni]
   ' "$config_file"; then
-    echo -e "${RED}  ✗ Ошибка обновления SNI${NC}"
+    echo -e "${RED}  ✗ SNI update error${NC}"
     return 1
   fi
-  echo -e "${GREEN}  ✓ Reality SNI обновлен → $new_sni${NC}"
+  echo -e "${GREEN}  ✓ Reality SNI updated → $new_sni${NC}"
 
   if [[ "$transport" == "xhttp" ]]; then
     safe_jq_write --argjson port "$port_num" '
       (.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings) |= del(.host)
     ' "$config_file" >/dev/null 2>&1 || true
-    echo -e "${GREEN}  ✓ XHTTP Host header не форсируется${NC}"
+    echo -e "${GREEN}  ✓ XHTTP Host header is not forced${NC}"
   fi
 }
 
@@ -79,7 +79,7 @@ find_available_random_port() {
     ((attempts++))
   done
 
-  echo -e "${RED}✗ Не удалось подобрать свободный случайный порт 30000-60000${NC}" >&2
+  echo -e "${RED}✗ Could not pick a free random port 30000-60000${NC}" >&2
   return 1
 }
 
@@ -519,9 +519,9 @@ _ensure_certbot_ip_tls() {
     fi
   done
 
-  echo -e "${YELLOW}  → Системный certbot не поддерживает IP certificates; ставлю актуальный certbot через snap...${NC}"
+  echo -e "${YELLOW}  → The system certbot does not support IP certificates; installing the current certbot via snap...${NC}"
   if ! apt-get install -y snapd >/dev/null 2>&1; then
-    echo -e "${RED}✗ Не удалось установить snapd для Certbot 5.4+${NC}"
+    echo -e "${RED}✗ Could not install snapd for Certbot 5.4+${NC}"
     return 1
   fi
 
@@ -532,7 +532,7 @@ _ensure_certbot_ip_tls() {
     if snap list core >/dev/null 2>&1; then
       snap refresh core >/tmp/snap-core.log 2>&1 || true
     elif ! snap install core >/tmp/snap-core.log 2>&1; then
-      echo -e "${RED}✗ snap install core не удался. Лог: /tmp/snap-core.log${NC}"
+      echo -e "${RED}✗ snap install core failed. Log: /tmp/snap-core.log${NC}"
       tail -20 /tmp/snap-core.log
       return 1
     fi
@@ -540,12 +540,12 @@ _ensure_certbot_ip_tls() {
     if snap list certbot >/dev/null 2>&1; then
       snap refresh certbot >/tmp/snap-certbot.log 2>&1 || true
     elif ! snap install --classic certbot >/tmp/snap-certbot.log 2>&1; then
-      echo -e "${RED}✗ snap install certbot не удался. Лог: /tmp/snap-certbot.log${NC}"
+      echo -e "${RED}✗ snap install certbot failed. Log: /tmp/snap-certbot.log${NC}"
       tail -20 /tmp/snap-certbot.log
       return 1
     fi
   else
-    echo -e "${RED}✗ snap command не найден после установки snapd${NC}"
+    echo -e "${RED}✗ snap command not found after installing snapd${NC}"
     return 1
   fi
 
@@ -557,7 +557,7 @@ _ensure_certbot_ip_tls() {
     fi
   done
 
-  echo -e "${RED}✗ Не найден Certbot 5.4+ с поддержкой --ip-address${NC}"
+  echo -e "${RED}✗ Certbot 5.4+ with --ip-address support not found${NC}"
   return 1
 }
 
@@ -584,11 +584,11 @@ write_profile_transport_metadata() {
 confirm_vision_443_risk() {
   echo ""
   echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║         ⚠ VISION НА 443 — РУЧНОЙ РИСКОВЫЙ РЕЖИМ         ║${NC}"
+  echo -e "${RED}║         ⚠ VISION ON 443 — MANUAL RISKY MODE         ║${NC}"
   echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
-  echo -e "${YELLOW}В 2026 году ТСПУ часто режет Vision на 443, особенно на мобильных сетях.${NC}"
-  echo -e "${YELLOW}Используйте 443 только осознанно, если случайный высокий порт/XHTTP не подходят.${NC}"
-  echo -n -e "${YELLOW}Продолжить несмотря на риск? (y/N): ${NC}"
+  echo -e "${YELLOW}In 2026 the DPI often cuts Vision on 443, especially on mobile networks.${NC}"
+  echo -e "${YELLOW}Use 443 only deliberately, when a random high port/XHTTP does not fit.${NC}"
+  echo -n -e "${YELLOW}Continue despite the risk? (y/N): ${NC}"
   read confirm
   [[ "$confirm" =~ ^[yYдД]$ ]]
 }
