@@ -405,8 +405,36 @@ SUBUNIT_EOF
 # ═══════════════════════════════════════════════════════════
 # Phase 7 Plan 7.3 — public TLS / local-only / port preflight
 # ═══════════════════════════════════════════════════════════
-# Public HTTPS port preflight. Эхает 443 если порт свободен, иначе 8443.
-# Если порт занят Xray inbound — предупреждение и fallback на 8443.
+# Свободный внешний порт для HAPP-подписки, когда :443 занят.
+# Кандидаты совпадают с _selfsteal_pick_backend_port (85-selfsteal.sh).
+# Порт занят, если ss -tln показывает listener (любой адрес) ИЛИ порт
+# совпадает с self-steal backend (файл SELFSTEAL_PORT_FILE): backend
+# слушает 127.0.0.1:<port>, но коллизия с nginx listen <port> ssl на
+# 0.0.0.0 всё равно фатальна для nginx -t/reload (реальный инцидент).
+# stdout: первый свободный порт. return 1 + stderr, если все заняты.
+_subscription_find_free_port() {
+  local p
+  local selfsteal_port_file="${SELFSTEAL_PORT_FILE:-/usr/local/etc/xray/.selfsteal_backend_port}"
+  local selfsteal_backend=""
+  selfsteal_backend=$(cat "$selfsteal_port_file" 2>/dev/null || true)
+  for p in 8443 9443 10443 11443 12443; do
+    if ss -tlnH "sport = :$p" 2>/dev/null | grep -q .; then
+      continue
+    fi
+    if [[ -n "$selfsteal_backend" && "$p" == "$selfsteal_backend" ]]; then
+      continue
+    fi
+    echo "$p"
+    return 0
+  done
+  echo -e "${RED}✗ Нет свободного порта для подписки из диапазона 8443–12443${NC}" >&2
+  return 1
+}
+
+# Public HTTPS port preflight. Эхает 443 если порт свободен, иначе первый
+# свободный из _subscription_find_free_port (НЕ хардкод 8443 — он может
+# быть занят self-steal backend'ом или чужим сервисом).
+# Если порт занят Xray inbound — предупреждение и fallback.
 # Если занят системным сервисом (nginx/apache/др.) — fallback + warning.
 # Выбранный порт пишется в /usr/local/etc/xray/.subscription_port (читается
 # _subscription_base_url).
@@ -417,12 +445,49 @@ _select_subscription_port() {
     echo 443
     return 0
   fi
-  if echo "$listener" | grep -q "xray"; then
-    echo -e "${YELLOW}  ⚠ Порт 443 занят Xray inbound — fallback на 8443${NC}" >&2
-  else
-    echo -e "${YELLOW}  ⚠ Порт 443 занят сторонним процессом — fallback на 8443${NC}" >&2
+  local fallback
+  if ! fallback=$(_subscription_find_free_port); then
+    echo -e "${RED}✗ Порт 443 занят и свободного fallback-порта нет${NC}" >&2
+    return 1
   fi
-  echo 8443
+  if echo "$listener" | grep -q "xray"; then
+    echo -e "${YELLOW}  ⚠ Порт 443 занят Xray inbound — fallback на ${fallback}${NC}" >&2
+  else
+    echo -e "${YELLOW}  ⚠ Порт 443 занят сторонним процессом — fallback на ${fallback}${NC}" >&2
+  fi
+  echo "$fallback"
+  return 0
+}
+
+# Внешний self-check подписки после установки (best-effort).
+# curl на публичный URL (токен профиля, иначе базовый /sub/). При не-2xx/3xx —
+# красная диагностика, но установка НЕ считается проваленной: return 0 всегда.
+# $1 — имя HAPP-профиля (для sub_token), $2 — публичный порт.
+_subscription_external_selfcheck() {
+  local profile_name="$1" port="$2"
+  local base token url code
+  base=$(_subscription_base_url)
+  token=$(jq -r '.sub_token // ""' "$PROFILES_DIR/$profile_name.json" 2>/dev/null)
+  if [[ "$token" =~ ^[a-f0-9]{32}$ ]]; then
+    url="${base}/sub/${token}"
+  else
+    url="${base}/sub/"
+  fi
+  echo -e "${CYAN}  → Проверяю подписку извне: ${url}${NC}"
+  code=$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
+  [[ -z "$code" ]] && code="000"
+  if [[ "$code" =~ ^[23] ]]; then
+    echo -e "${GREEN}  ✓ Подписка проверена извне: HTTP ${code}${NC}"
+    return 0
+  fi
+  echo -e "${RED}╔═══════════════════════════════════════════════${NC}"
+  echo -e "${RED}  ✗ ПОДПИСКА НЕ ОТВЕЧАЕТ ИЗВНЕ (HTTP ${code})${NC}"
+  echo -e "${RED}╚═══════════════════════════════════════════════${NC}"
+  echo -e "${YELLOW}  Что проверить на сервере:${NC}"
+  echo -e "${YELLOW}    ss -tlnp | grep ${port}   — слушает ли nginx порт${NC}"
+  echo -e "${YELLOW}    ufw status | grep ${port} — открыт ли порт в firewall${NC}"
+  echo -e "${YELLOW}    nginx -t                  — валиден ли конфиг nginx${NC}"
+  echo -e "${YELLOW}  Запустите диагностику из меню подписки.${NC}"
   return 0
 }
 
@@ -626,8 +691,16 @@ install_subscription_ip_tls() {
   echo -e "${CYAN}  → VPS IPv4: ${server_ip}${NC}"
 
   local email
-  echo -n -e "${YELLOW}Email для Let's Encrypt (renew/account notices): ${NC}"
-  read -r email
+  # Обратно-совместимый override: мастер (src/56-wizard.sh) спрашивает email
+  # один раз и выставляет SUBSCRIPTION_LE_EMAIL перед вызовом — тогда prompt
+  # пропускается, но валидация остаётся той же.
+  if [[ -n "${SUBSCRIPTION_LE_EMAIL:-}" ]]; then
+    email="$SUBSCRIPTION_LE_EMAIL"
+    echo -e "${CYAN}  → Email для Let's Encrypt (из мастера): ${email}${NC}"
+  else
+    echo -n -e "${YELLOW}Email для Let's Encrypt (renew/account notices): ${NC}"
+    read -r email
+  fi
   if [[ -z "$email" ]] || ! [[ "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
     echo -e "${RED}✗ Некорректный email${NC}"
     sleep 2
@@ -635,7 +708,11 @@ install_subscription_ip_tls() {
   fi
 
   local pub_port
-  pub_port=$(_select_subscription_port)
+  if ! pub_port=$(_select_subscription_port); then
+    echo -e "${RED}✗ Нет свободного порта для подписки (8443–12443 заняты)${NC}"
+    echo -e "${YELLOW}  Освободите один из портов диапазона 8443–12443 и повторите установку.${NC}"
+    return 1
+  fi
   echo -e "${CYAN}  → HTTPS порт подписки: $pub_port${NC}"
 
   echo -e "${CYAN}  → Установка nginx...${NC}"
@@ -804,10 +881,12 @@ NGINX_TLS_EOF
   echo ""
   echo -e "${BLUE}Base URL:${NC} ${GREEN}${_summary_base}${NC}"
   _happ_print_subscription_url_for_profile "$_happ_profile"
+  # Best-effort внешний self-check (не валит установку при неудаче).
+  _subscription_external_selfcheck "$_happ_profile" "$pub_port"
   echo -e "${CYAN}Для ручного контроля маршрутов используйте главное меню → 'Создать новый профиль'.${NC}"
   echo ""
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
-  read -r _
+  read -r _ || true
 }
 
 # Public TLS installer by domain.
@@ -815,7 +894,9 @@ NGINX_TLS_EOF
 # → nginx HTTP-only ACME site on :80 → certbot certonly --webroot → explicit SSL
 # nginx site on selected public port → markers → enable xraytailscale-sub.
 # Важно: не используем certbot --nginx. Он плохо предсказуем на нестандартном
-# HTTPS-порту (8443) и может оставить plain HTTP listener после failed certbot.
+# HTTPS-порту (fallback идёт по списку 8443→9443→10443→11443→12443 через
+# _subscription_find_free_port) и может оставить plain HTTP listener после
+# failed certbot.
 install_subscription_public_tls() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
@@ -869,9 +950,14 @@ install_subscription_public_tls() {
     return 1
   fi
 
-  # Port preflight: 443 (default) или 8443 (если 443 занят).
+  # Port preflight: 443 (default), иначе первый свободный fallback из
+  # 8443→9443→10443→11443→12443 через _subscription_find_free_port.
   local pub_port
-  pub_port=$(_select_subscription_port)
+  if ! pub_port=$(_select_subscription_port); then
+    echo -e "${RED}✗ Нет свободного порта для подписки (8443–12443 заняты)${NC}"
+    echo -e "${YELLOW}  Освободите один из портов диапазона 8443–12443 и повторите установку.${NC}"
+    return 1
+  fi
   echo -e "${CYAN}  → Публичный порт: $pub_port${NC}"
 
   echo -e "${CYAN}  → Установка nginx + certbot...${NC}"
@@ -1044,10 +1130,12 @@ NGINX_TLS_EOF
   _summary_base=$(_subscription_base_url)
   echo -e "${BLUE}URL:${NC} ${GREEN}${_summary_base}${NC} (порт ${pub_port})"
   _happ_print_subscription_url_for_profile "$_happ_profile"
+  # Best-effort внешний self-check (не валит установку при неудаче).
+  _subscription_external_selfcheck "$_happ_profile" "$pub_port"
   echo -e "${CYAN}Для ручного контроля маршрутов используйте главное меню → 'Создать новый профиль'.${NC}"
   echo ""
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
-  read -r _
+  read -r _ || true
 }
 
 # Local-only fallback installer (REQ-C03).
@@ -1104,7 +1192,7 @@ manage_subscription_menu() {
   echo ""
 
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${RED}✗ Подписка не установлена. Сначала выберите 'Установить'.${NC}"
+    echo -e "${RED}✗ Подписка не установлена. Создайте её в «Дополнительно → Управление подпиской HAPP».${NC}"
     sleep 2
     return
   fi
@@ -1516,11 +1604,11 @@ happ_subscription_menu() {
     echo -e "${CYAN} 4)${NC} Управление существующими подписками (URL / QR / revoke)"
     echo -e "${CYAN} 5)${NC} Настройки HAPP (.happ_defaults.env)"
     echo -e "${CYAN} 6)${NC} Настроить announcement (HAPP)"
-    echo -e "${CYAN} 0)${NC} Назад в главное меню"
+    echo -e "${CYAN} 0)${NC} Назад"
     echo ""
     echo -n -e "${YELLOW}Выбор: ${NC}"
     local c
-    read -r c
+    read -r c || return 0
     case "$c" in
       1|"") install_subscription_ip_tls ;;
       2) install_subscription_public_tls ;;

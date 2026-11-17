@@ -91,8 +91,5 @@ url2=$(_generate_vless_url_pure "$PROFILES_DIR/plain.json") || fail "URL для 
 [[ "$url2" == *"@203.0.113.10:443?"* ]] || fail "plain профиль: глобальный адрес не применился"
 unset XRAYTAILSCALE_SERVER_ADDR_OVERRIDE
 
-# ── Меню: пункт 16 маршрутизирует в selfsteal_menu ──
-grep -q '16) selfsteal_menu' "$REPO_ROOT/xraytailscale" || \
-  fail "главное меню: пункт 16 не ведёт в selfsteal_menu"
 
 echo "PASS: selfsteal (nginx/site/reality_dest/server_address/menu)"

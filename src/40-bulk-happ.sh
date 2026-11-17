@@ -392,7 +392,7 @@ bulk_generate_users_core() {
   [[ -z "$batch_id" ]] && batch_id="bulk-$(date +%Y%m%d-%H%M%S)"
 
   if ! _bulk_subscription_installed; then
-    echo -e "${RED}✗ HAPP subscription не установлена. Сначала включите пункт 9.${NC}"
+    echo -e "${RED}✗ HAPP subscription не установлена. Сначала создайте её: «Дополнительно → Управление подпиской HAPP».${NC}"
     return 1
   fi
   if [[ ! "$count" =~ ^[0-9]+$ || "$count" -lt 1 || "$count" -gt 500 ]]; then

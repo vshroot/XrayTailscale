@@ -249,8 +249,10 @@ _selfsteal_pick_convert_port() {
          | .[0].port // empty' "$CONFIG_FILE" 2>/dev/null
 }
 
-# Авто-перенос HAPP-подписки nginx с :443 на :8443 (нон-интерактивно).
+# Авто-перенос HAPP-подписки nginx с :443 на свободный порт (нон-интерактивно).
 # Умеет переносить ТОЛЬКО свой сайт xraytailscale-sub; чужой listener → отказ.
+# Порт НЕ хардкод 8443: он может быть занят self-steal backend'ом — выбираем
+# первый свободный через _subscription_find_free_port (35-subscription.sh).
 SELFSTEAL_SUB_NGINX_AVAILABLE="${SELFSTEAL_SUB_NGINX_AVAILABLE:-/etc/nginx/sites-available/xraytailscale-sub}"
 SUBSCRIPTION_PORT_FILE="${SUBSCRIPTION_PORT_FILE:-/usr/local/etc/xray/.subscription_port}"
 
@@ -261,9 +263,14 @@ _selfsteal_free_443_from_nginx() {
     echo -e "${YELLOW}  Найдите процесс: ss -tlnp 'sport = :443' — и освободите порт вручную.${NC}"
     return 1
   fi
-  echo -e "${CYAN}  → Перенос HAPP-подписки nginx :443 → :8443...${NC}"
+  local new_port
+  if ! new_port=$(_subscription_find_free_port); then
+    echo -e "${RED}✗ Нет свободного порта для переноса подписки (8443–12443 заняты)${NC}"
+    return 1
+  fi
+  echo -e "${CYAN}  → Перенос HAPP-подписки nginx :443 → :${new_port}...${NC}"
   # -i.bak: кросс-платформенно (GNU/BSD), .bak удаляется после успешного nginx -t.
-  if ! sed -i.bak -E 's/listen 443 ssl/listen 8443 ssl/; s/listen \[::\]:443 ssl/listen \[::\]:8443 ssl/' "$sub_avail"; then
+  if ! sed -i.bak -E "s/listen 443 ssl/listen ${new_port} ssl/; s/listen \\[::\\]:443 ssl/listen \\[::\\]:${new_port} ssl/" "$sub_avail"; then
     echo -e "${RED}✗ Не удалось переписать $sub_avail${NC}"
     return 1
   fi
@@ -277,11 +284,11 @@ _selfsteal_free_443_from_nginx() {
     echo -e "${RED}✗ nginx не перечитал конфиг${NC}"
     return 1
   fi
-  printf '8443\n' > "$SUBSCRIPTION_PORT_FILE"
+  printf '%s\n' "$new_port" > "$SUBSCRIPTION_PORT_FILE"
   chown xray:xray "$SUBSCRIPTION_PORT_FILE" 2>/dev/null || true
-  open_firewall_port 8443 tcp || \
-    echo -e "${YELLOW}  ⚠ Не удалось открыть 8443/tcp через UFW — проверьте firewall${NC}"
-  echo -e "${GREEN}  ✓ Подписка перенесена на :8443 (URL теперь с явным портом)${NC}"
+  open_firewall_port "$new_port" tcp || \
+    echo -e "${YELLOW}  ⚠ Не удалось открыть ${new_port}/tcp через UFW — проверьте firewall${NC}"
+  echo -e "${GREEN}  ✓ Подписка перенесена на :${new_port} (URL теперь с явным портом)${NC}"
   return 0
 }
 
@@ -554,7 +561,8 @@ selfsteal_setup() {
   echo -e "${CYAN}Схема: VLESS + Reality + Vision (xtls-rprx-vision), RAW TCP :443,${NC}"
   echo -e "${CYAN}uTLS firefox. Reality маскируется под ВАШ сайт с LE-сертификатом.${NC}"
   echo -e "${CYAN}Главный профиль КОНВЕРТИРУЕТСЯ в self-steal: UUID сохраняются,${NC}"
-  echo -e "${CYAN}ссылки перевыпускаются. nginx-подписка на :443 уйдёт на :8443.${NC}"
+  echo -e "${CYAN}ссылки перевыпускаются. nginx-подписка на :443 уйдёт на свободный${NC}"
+  echo -e "${CYAN}порт из диапазона 8443–12443.${NC}"
   echo ""
 
   # Домен: автоподстановка сохранённого, ввод один раз.
@@ -658,7 +666,7 @@ selfsteal_remove() {
   rm -f "$SELFSTEAL_DOMAIN_FILE" "$SELFSTEAL_PORT_FILE"
   echo -e "${GREEN}✓ Сайт и nginx-конфиг self-steal удалены${NC}"
   echo -e "${YELLOW}⚠ Профиль и inbound :443 НЕ удалены автоматически.${NC}"
-  echo -e "${YELLOW}  Удалите профиль через меню 2 — иначе Reality dest указывает на несуществующий сайт.${NC}"
+  echo -e "${YELLOW}  Удалите пользователя через «Дополнительно → Удалить пользователя» — иначе Reality dest указывает на несуществующий сайт.${NC}"
   if [[ -n "$domain" && -d "/etc/letsencrypt/live/${domain}" ]]; then
     echo -e "${YELLOW}  Сертификат LE оставлен. Удалить вручную: certbot delete --cert-name ${domain}${NC}"
   fi

@@ -20,6 +20,10 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
       shift
       selfsteal_auto_command "$@"
       ;;
+    wizard)
+      shift
+      wizard_command
+      ;;
     ""|menu)
       main_menu
       ;;
@@ -32,6 +36,7 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
       echo -e "  ${CYAN}sudo xraytailscale bulk-repair${NC}  — alias для subscription-repair"
       echo -e "  ${CYAN}sudo xraytailscale probe-test${NC}  — проверить доступность SNI с VPS"
       echo -e "  ${CYAN}sudo xraytailscale selfsteal-auto <domain> [email]${NC}  — self-steal без меню (автодеплой)"
+      echo -e "  ${CYAN}sudo xraytailscale wizard${NC}  — мастер первичной настройки (5 шагов)"
       exit 1
       ;;
   esac

@@ -818,7 +818,7 @@ echo '║          ✓ УСТАНОВКА ЗАВЕРШЕНА УСПЕШНО!    
 echo '║                                                           ║'
 echo '╚═══════════════════════════════════════════════════════════╝'
 echo -e "${NC}\n"
-echo -e "${CYAN}Для управления профилями используйте команду:${NC}"
+echo -e "${CYAN}Для управления сервером используйте команду:${NC}"
 echo -e "${YELLOW}╭──────────────────────────╮${NC}"
 echo -e "${YELLOW}│ ${GREEN}sudo xraytailscale${YELLOW}          │${NC}"
 echo -e "${YELLOW}╰──────────────────────────╯${NC}\n"
@@ -828,27 +828,40 @@ echo -e "  ${CYAN}sudo xraytailscale-uninstall${NC} - удалить XrayTailsca
 echo ""
 echo -e "${BLUE}Открытые порты в firewall:${NC}"
 echo -e "  ${GREEN}443/tcp${NC}  - HTTPS (основной)"
-echo -e "  ${GREEN}8443/tcp${NC} - Альтернативный порт"
 echo ""
 echo -e "${BLUE}GitHub:${NC} https://github.com/${GITHUB_USER}/${GITHUB_REPO}"
 echo -e "${BLUE}Версия:${NC} 2.0"
 echo ""
 
-# Опционально: self-steal автодеплой (нон-интерактивно), ПОСЛЕ финального
-# сообщения — ссылка и QR должны остаться на экране (final message делает clear).
-# Включается переменной окружения XT_DOMAIN (A-запись домена → IP этого VPS):
-#   curl -fsSL .../install.sh -o /tmp/i.sh && sudo XT_DOMAIN=example.com bash /tmp/i.sh
-# Главный профиль сразу создаётся self-steal на :443; без XT_DOMAIN — прежняя схема,
-# self-steal доступен позже через меню 16 или `xraytailscale selfsteal-auto`.
+# ── Первичная настройка ──────────────────────────────────────────────────────
+# Три сценария:
+#   XT_DOMAIN=<домен>  — нон-интерактивно: self-steal + главный профиль на :443;
+#   интерактивный tty  — сразу запускаем мастер (домен/без домена, первый
+#                        пользователь, подписка, внешняя проверка, ссылка/QR);
+#   без tty            — печатаем, как запустить мастер вручную.
 if [[ -n "${XT_DOMAIN:-}" ]]; then
   echo -e "${BLUE}[self-steal]${NC} ${YELLOW}Автодеплой для домена ${XT_DOMAIN}...${NC}"
   XT_SS_EMAIL="${XT_LE_EMAIL:-admin@${XT_DOMAIN}}"
   if /usr/local/bin/xraytailscale selfsteal-auto "$XT_DOMAIN" "$XT_SS_EMAIL"; then
     echo -e "\n${GREEN}✓ Self-steal развёрнут: главный профиль на :443 (${XT_DOMAIN})${NC}"
+    echo -e "${CYAN}  Подписку и остальных пользователей добавьте: sudo xraytailscale${NC}"
   else
     echo -e "\n${YELLOW}⚠ Self-steal автодеплой не удался — базовая установка OK.${NC}"
     echo -e "${YELLOW}  Повторите: sudo xraytailscale selfsteal-auto ${XT_DOMAIN}${NC}"
   fi
+  echo ""
+elif [[ -t 0 ]]; then
+  echo -e "${BLUE}[мастер]${NC} ${YELLOW}Первичная настройка: 5 шагов до рабочей подписки.${NC}"
+  echo ""
+  /usr/local/bin/xraytailscale wizard || {
+    echo -e "${YELLOW}⚠ Мастер не завершён — базовые компоненты установлены.${NC}"
+    echo -e "${YELLOW}  Запустите позже: sudo xraytailscale wizard${NC}"
+  }
+  echo ""
+else
+  echo -e "${BLUE}Дальше:${NC} запустите мастер первичной настройки:"
+  echo -e "  ${GREEN}sudo xraytailscale wizard${NC}   (5 шагов до рабочей подписки)"
+  echo -e "  или просто ${GREEN}sudo xraytailscale${NC} — на чистом сервере мастер стартует сам"
   echo ""
 fi
 echo -e "${MAGENTA}════════════════════════════════════════════════════════════${NC}"

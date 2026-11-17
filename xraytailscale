@@ -2259,6 +2259,76 @@ _migrate_xhttp_default_2026() {
   return 1
 }
 
+# Общий поиск single-route legacy профилей для предупреждения и миграции.
+# Multi-route, уже включённые PQ и служебный bulk-seed не попадают в список.
+_list_legacy_pq_profile_names() {
+  local profile_file profile_name
+  for profile_file in "$PROFILES_DIR"/*.json; do
+    [[ -f "$profile_file" ]] || continue
+    _profile_is_bulk_seed_file "$profile_file" && continue
+    profile_has_routes "$profile_file" && continue
+    [[ "$(jq -r '.pq_enabled // false' "$profile_file" 2>/dev/null)" == "true" ]] && continue
+    profile_name=$(basename "$profile_file" .json)
+    echo "$profile_name"
+  done | sort
+}
+
+# Автоматический перевод старых single-route профилей на XHTTP+PQ.
+# run_migration уже создал общий бэкап; каждый helper дополнительно создаёт свой
+# точечный бэкап и применяет один inbound сразу через safe_restart_xray.
+# Return: 0=changed, 1=no-op, 2=fail.
+_migrate_pq_all_profiles_2026() {
+  local legacy_profiles=()
+  local profile_name
+  while IFS= read -r profile_name; do
+    [[ -n "$profile_name" ]] && legacy_profiles+=("$profile_name")
+  done < <(_list_legacy_pq_profile_names)
+
+  if [[ ${#legacy_profiles[@]} -eq 0 ]]; then
+    echo -e "${GREEN}✓ Single-route legacy профилей для PQ-миграции не найдено${NC}"
+    return 1
+  fi
+
+  if [[ ! -f "$VLESS_DECRYPTION_FILE" ]] || [[ ! -f "$VLESS_ENCRYPTION_FILE" ]]; then
+    echo -e "${YELLOW}⚠ PQ-миграция отложена: не найдены ключи VLESS Encryption${NC}"
+    echo -e "${YELLOW}  Ожидаются: $VLESS_DECRYPTION_FILE и $VLESS_ENCRYPTION_FILE${NC}"
+    echo -e "${YELLOW}  Их должна сгенерировать миграция _migrate_mlkem_keys; config.json не изменён${NC}"
+    return 1
+  fi
+
+  local ok=0
+  local fail=0
+  for profile_name in "${legacy_profiles[@]}"; do
+    # Профиль на общем порту мог уже обновиться вместе с предыдущим.
+    [[ -f "$PROFILES_DIR/$profile_name.json" ]] || continue
+    if profile_has_routes "$PROFILES_DIR/$profile_name.json" || \
+       _profile_is_bulk_seed_file "$PROFILES_DIR/$profile_name.json" || \
+       [[ "$(jq -r '.pq_enabled // false' "$PROFILES_DIR/$profile_name.json" 2>/dev/null)" == "true" ]]; then
+      continue
+    fi
+
+    echo -e "${CYAN}  → PQ-миграция профиля '$profile_name'${NC}"
+    if _pq_upgrade_one_profile "$profile_name"; then
+      ((ok += 1))
+    else
+      echo -e "${RED}  ✗ Не удалось мигрировать профиль '$profile_name'${NC}"
+      ((fail += 1))
+    fi
+  done
+
+  if [[ $fail -gt 0 ]]; then
+    echo -e "${RED}✗ PQ-миграция: успешно $ok, с ошибками $fail${NC}"
+    return 2
+  fi
+  if [[ $ok -gt 0 ]]; then
+    echo -e "${GREEN}✓ PQ-миграция завершена: обновлено профилей $ok${NC}"
+    return 0
+  fi
+
+  echo -e "${GREEN}✓ Все найденные профили уже обновлены${NC}"
+  return 1
+}
+
 # Phase 7 REQ-C04: догенерируем sub_token для существующих профилей,
 # созданных до Phase 7 (нет поля .sub_token).
 # Return: 0 = были изменения config.json (НЕ наш случай, миграция не трогает config.json),
@@ -2404,7 +2474,7 @@ _migrate_bypass_routing_2026() {
   if [[ "$ans" =~ ^[yYдД]$ ]]; then
     _bypass_apply_bundle
   else
-    echo -e "${CYAN}Пропущено. Можно настроить позже через главное меню → пункт 11.${NC}"
+    echo -e "${CYAN}Пропущено. Можно настроить позже через «Дополнительно → Каскад / upstream → Обход VPN».${NC}"
     sleep 1
   fi
 
@@ -3080,7 +3150,10 @@ _cleanup_xray_backups() {
 }
 
 # CLI subcommand: xraytailscale update (REQ-B02)
-# Запускает update_xray_core, отображает заголовок, возвращает exit code функции.
+# Запускает update_xray_core, отображает заголовок.
+# Возвращает exit code функции, НЕ exit: иначе вызов из «Дополнительно»
+# закрыл бы весь менеджер вместо возврата в меню. CLI (src/99-dispatch.sh)
+# и так отдаёт код возврата как статус процесса.
 update_command() {
   echo -e "${BLUE}╔════════════════════════════════════════════════════╗${NC}"
   echo -e "${BLUE}║  XrayTailscale: обновление Xray-core               ║${NC}"
@@ -3095,7 +3168,7 @@ update_command() {
     2) echo -e "${RED}✗ Критическая ошибка обновления${NC}" ;;
     3) echo -e "${YELLOW}⚠ Откат на старую версию${NC}" ;;
   esac
-  exit $rc
+  return $rc
 }
 
 # Nag: предупреждение об устаревшем Xray-core в main_menu (REQ-B02)
@@ -3631,8 +3704,36 @@ SUBUNIT_EOF
 # ═══════════════════════════════════════════════════════════
 # Phase 7 Plan 7.3 — public TLS / local-only / port preflight
 # ═══════════════════════════════════════════════════════════
-# Public HTTPS port preflight. Эхает 443 если порт свободен, иначе 8443.
-# Если порт занят Xray inbound — предупреждение и fallback на 8443.
+# Свободный внешний порт для HAPP-подписки, когда :443 занят.
+# Кандидаты совпадают с _selfsteal_pick_backend_port (85-selfsteal.sh).
+# Порт занят, если ss -tln показывает listener (любой адрес) ИЛИ порт
+# совпадает с self-steal backend (файл SELFSTEAL_PORT_FILE): backend
+# слушает 127.0.0.1:<port>, но коллизия с nginx listen <port> ssl на
+# 0.0.0.0 всё равно фатальна для nginx -t/reload (реальный инцидент).
+# stdout: первый свободный порт. return 1 + stderr, если все заняты.
+_subscription_find_free_port() {
+  local p
+  local selfsteal_port_file="${SELFSTEAL_PORT_FILE:-/usr/local/etc/xray/.selfsteal_backend_port}"
+  local selfsteal_backend=""
+  selfsteal_backend=$(cat "$selfsteal_port_file" 2>/dev/null || true)
+  for p in 8443 9443 10443 11443 12443; do
+    if ss -tlnH "sport = :$p" 2>/dev/null | grep -q .; then
+      continue
+    fi
+    if [[ -n "$selfsteal_backend" && "$p" == "$selfsteal_backend" ]]; then
+      continue
+    fi
+    echo "$p"
+    return 0
+  done
+  echo -e "${RED}✗ Нет свободного порта для подписки из диапазона 8443–12443${NC}" >&2
+  return 1
+}
+
+# Public HTTPS port preflight. Эхает 443 если порт свободен, иначе первый
+# свободный из _subscription_find_free_port (НЕ хардкод 8443 — он может
+# быть занят self-steal backend'ом или чужим сервисом).
+# Если порт занят Xray inbound — предупреждение и fallback.
 # Если занят системным сервисом (nginx/apache/др.) — fallback + warning.
 # Выбранный порт пишется в /usr/local/etc/xray/.subscription_port (читается
 # _subscription_base_url).
@@ -3643,12 +3744,49 @@ _select_subscription_port() {
     echo 443
     return 0
   fi
-  if echo "$listener" | grep -q "xray"; then
-    echo -e "${YELLOW}  ⚠ Порт 443 занят Xray inbound — fallback на 8443${NC}" >&2
-  else
-    echo -e "${YELLOW}  ⚠ Порт 443 занят сторонним процессом — fallback на 8443${NC}" >&2
+  local fallback
+  if ! fallback=$(_subscription_find_free_port); then
+    echo -e "${RED}✗ Порт 443 занят и свободного fallback-порта нет${NC}" >&2
+    return 1
   fi
-  echo 8443
+  if echo "$listener" | grep -q "xray"; then
+    echo -e "${YELLOW}  ⚠ Порт 443 занят Xray inbound — fallback на ${fallback}${NC}" >&2
+  else
+    echo -e "${YELLOW}  ⚠ Порт 443 занят сторонним процессом — fallback на ${fallback}${NC}" >&2
+  fi
+  echo "$fallback"
+  return 0
+}
+
+# Внешний self-check подписки после установки (best-effort).
+# curl на публичный URL (токен профиля, иначе базовый /sub/). При не-2xx/3xx —
+# красная диагностика, но установка НЕ считается проваленной: return 0 всегда.
+# $1 — имя HAPP-профиля (для sub_token), $2 — публичный порт.
+_subscription_external_selfcheck() {
+  local profile_name="$1" port="$2"
+  local base token url code
+  base=$(_subscription_base_url)
+  token=$(jq -r '.sub_token // ""' "$PROFILES_DIR/$profile_name.json" 2>/dev/null)
+  if [[ "$token" =~ ^[a-f0-9]{32}$ ]]; then
+    url="${base}/sub/${token}"
+  else
+    url="${base}/sub/"
+  fi
+  echo -e "${CYAN}  → Проверяю подписку извне: ${url}${NC}"
+  code=$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
+  [[ -z "$code" ]] && code="000"
+  if [[ "$code" =~ ^[23] ]]; then
+    echo -e "${GREEN}  ✓ Подписка проверена извне: HTTP ${code}${NC}"
+    return 0
+  fi
+  echo -e "${RED}╔═══════════════════════════════════════════════${NC}"
+  echo -e "${RED}  ✗ ПОДПИСКА НЕ ОТВЕЧАЕТ ИЗВНЕ (HTTP ${code})${NC}"
+  echo -e "${RED}╚═══════════════════════════════════════════════${NC}"
+  echo -e "${YELLOW}  Что проверить на сервере:${NC}"
+  echo -e "${YELLOW}    ss -tlnp | grep ${port}   — слушает ли nginx порт${NC}"
+  echo -e "${YELLOW}    ufw status | grep ${port} — открыт ли порт в firewall${NC}"
+  echo -e "${YELLOW}    nginx -t                  — валиден ли конфиг nginx${NC}"
+  echo -e "${YELLOW}  Запустите диагностику из меню подписки.${NC}"
   return 0
 }
 
@@ -3852,8 +3990,16 @@ install_subscription_ip_tls() {
   echo -e "${CYAN}  → VPS IPv4: ${server_ip}${NC}"
 
   local email
-  echo -n -e "${YELLOW}Email для Let's Encrypt (renew/account notices): ${NC}"
-  read -r email
+  # Обратно-совместимый override: мастер (src/56-wizard.sh) спрашивает email
+  # один раз и выставляет SUBSCRIPTION_LE_EMAIL перед вызовом — тогда prompt
+  # пропускается, но валидация остаётся той же.
+  if [[ -n "${SUBSCRIPTION_LE_EMAIL:-}" ]]; then
+    email="$SUBSCRIPTION_LE_EMAIL"
+    echo -e "${CYAN}  → Email для Let's Encrypt (из мастера): ${email}${NC}"
+  else
+    echo -n -e "${YELLOW}Email для Let's Encrypt (renew/account notices): ${NC}"
+    read -r email
+  fi
   if [[ -z "$email" ]] || ! [[ "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
     echo -e "${RED}✗ Некорректный email${NC}"
     sleep 2
@@ -3861,7 +4007,11 @@ install_subscription_ip_tls() {
   fi
 
   local pub_port
-  pub_port=$(_select_subscription_port)
+  if ! pub_port=$(_select_subscription_port); then
+    echo -e "${RED}✗ Нет свободного порта для подписки (8443–12443 заняты)${NC}"
+    echo -e "${YELLOW}  Освободите один из портов диапазона 8443–12443 и повторите установку.${NC}"
+    return 1
+  fi
   echo -e "${CYAN}  → HTTPS порт подписки: $pub_port${NC}"
 
   echo -e "${CYAN}  → Установка nginx...${NC}"
@@ -4030,10 +4180,12 @@ NGINX_TLS_EOF
   echo ""
   echo -e "${BLUE}Base URL:${NC} ${GREEN}${_summary_base}${NC}"
   _happ_print_subscription_url_for_profile "$_happ_profile"
+  # Best-effort внешний self-check (не валит установку при неудаче).
+  _subscription_external_selfcheck "$_happ_profile" "$pub_port"
   echo -e "${CYAN}Для ручного контроля маршрутов используйте главное меню → 'Создать новый профиль'.${NC}"
   echo ""
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
-  read -r _
+  read -r _ || true
 }
 
 # Public TLS installer by domain.
@@ -4041,7 +4193,9 @@ NGINX_TLS_EOF
 # → nginx HTTP-only ACME site on :80 → certbot certonly --webroot → explicit SSL
 # nginx site on selected public port → markers → enable xraytailscale-sub.
 # Важно: не используем certbot --nginx. Он плохо предсказуем на нестандартном
-# HTTPS-порту (8443) и может оставить plain HTTP listener после failed certbot.
+# HTTPS-порту (fallback идёт по списку 8443→9443→10443→11443→12443 через
+# _subscription_find_free_port) и может оставить plain HTTP listener после
+# failed certbot.
 install_subscription_public_tls() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
@@ -4095,9 +4249,14 @@ install_subscription_public_tls() {
     return 1
   fi
 
-  # Port preflight: 443 (default) или 8443 (если 443 занят).
+  # Port preflight: 443 (default), иначе первый свободный fallback из
+  # 8443→9443→10443→11443→12443 через _subscription_find_free_port.
   local pub_port
-  pub_port=$(_select_subscription_port)
+  if ! pub_port=$(_select_subscription_port); then
+    echo -e "${RED}✗ Нет свободного порта для подписки (8443–12443 заняты)${NC}"
+    echo -e "${YELLOW}  Освободите один из портов диапазона 8443–12443 и повторите установку.${NC}"
+    return 1
+  fi
   echo -e "${CYAN}  → Публичный порт: $pub_port${NC}"
 
   echo -e "${CYAN}  → Установка nginx + certbot...${NC}"
@@ -4270,10 +4429,12 @@ NGINX_TLS_EOF
   _summary_base=$(_subscription_base_url)
   echo -e "${BLUE}URL:${NC} ${GREEN}${_summary_base}${NC} (порт ${pub_port})"
   _happ_print_subscription_url_for_profile "$_happ_profile"
+  # Best-effort внешний self-check (не валит установку при неудаче).
+  _subscription_external_selfcheck "$_happ_profile" "$pub_port"
   echo -e "${CYAN}Для ручного контроля маршрутов используйте главное меню → 'Создать новый профиль'.${NC}"
   echo ""
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
-  read -r _
+  read -r _ || true
 }
 
 # Local-only fallback installer (REQ-C03).
@@ -4330,7 +4491,7 @@ manage_subscription_menu() {
   echo ""
 
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${RED}✗ Подписка не установлена. Сначала выберите 'Установить'.${NC}"
+    echo -e "${RED}✗ Подписка не установлена. Создайте её в «Дополнительно → Управление подпиской HAPP».${NC}"
     sleep 2
     return
   fi
@@ -4742,11 +4903,11 @@ happ_subscription_menu() {
     echo -e "${CYAN} 4)${NC} Управление существующими подписками (URL / QR / revoke)"
     echo -e "${CYAN} 5)${NC} Настройки HAPP (.happ_defaults.env)"
     echo -e "${CYAN} 6)${NC} Настроить announcement (HAPP)"
-    echo -e "${CYAN} 0)${NC} Назад в главное меню"
+    echo -e "${CYAN} 0)${NC} Назад"
     echo ""
     echo -n -e "${YELLOW}Выбор: ${NC}"
     local c
-    read -r c
+    read -r c || return 0
     case "$c" in
       1|"") install_subscription_ip_tls ;;
       2) install_subscription_public_tls ;;
@@ -5157,7 +5318,7 @@ bulk_generate_users_core() {
   [[ -z "$batch_id" ]] && batch_id="bulk-$(date +%Y%m%d-%H%M%S)"
 
   if ! _bulk_subscription_installed; then
-    echo -e "${RED}✗ HAPP subscription не установлена. Сначала включите пункт 9.${NC}"
+    echo -e "${RED}✗ HAPP subscription не установлена. Сначала создайте её: «Дополнительно → Управление подпиской HAPP».${NC}"
     return 1
   fi
   if [[ ! "$count" =~ ^[0-9]+$ || "$count" -lt 1 || "$count" -gt 500 ]]; then
@@ -6325,21 +6486,29 @@ cascade_mode_menu() {
     show_ascii
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
     echo -e "${BLUE}    КАСКАД / UPSTREAM-НОДЫ                    ${NC}"
-    echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
+    echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW} Обход VPN имеет смысл только при включённом каскаде${NC}\n"
     _cascade_print_status
     echo ""
     echo -e "${CYAN} 1)${NC} Настроить зарубежную upstream-ноду"
     echo -e "${CYAN} 2)${NC} Включить каскад"
     echo -e "${CYAN} 3)${NC} Отключить каскад"
+    echo -e "${CYAN} 4)${NC} Обход VPN (банки/госуслуги напрямую)"
+    echo -e "${CYAN} 5)${NC} Поднять outbound-сервер (зарубежная нода)"
     echo -e "${CYAN} 0)${NC} Назад"
     echo ""
     echo -n -e "${YELLOW}Выбор: ${NC}"
     local c
-    read -r c
+    if ! read -r c; then
+      echo ""
+      return 0
+    fi
     case "$c" in
       1) configure_cascade_upstream ;;
       2) enable_cascade_mode ;;
       3) disable_cascade_mode ;;
+      4) bypass_routing_menu ;;
+      5) setup_outbound_server_menu ;;
       0) return ;;
       *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
     esac
@@ -6475,26 +6644,37 @@ main_menu() {
   run_migration "xmux_explicit_2026"                   "Explicit xmux block для XHTTP"     migrate_xmux_explicit_2026         || ((migration_failures++))
   run_migration "xhttp_xmux_throughput_2026"           "XHTTP XMUX throughput profile"      _migrate_xhttp_xmux_throughput_2026 || ((migration_failures++))
   run_migration "mlkem_keys_generated"                 "PQ ключи VLESS Encryption (mlkem768x25519plus)" _migrate_mlkem_keys || ((migration_failures++))
+
+  # Одноразовое предупреждение перед необратимой сменой старых vless:// ссылок.
+  # Отказ не создаёт маркер предупреждения, поэтому вопрос повторится при следующем запуске.
+  local pq_migration_warned="/usr/local/etc/xray/.pq_migration_warned"
+  local pq_migration_allowed=1
+  if [[ ! -f "$pq_migration_warned" ]] && [[ -n "$(_list_legacy_pq_profile_names)" ]]; then
+    echo -e "${YELLOW}Внимание: старые single-route профили будут переведены на XHTTP+PQ. Ручные vless://-ссылки перестанут работать (подписки обновятся сами).${NC}"
+    echo -n -e "${YELLOW}Продолжить PQ-миграцию? [Y/n]: ${NC}"
+    local pq_migration_answer=""
+    read -r pq_migration_answer || {
+      echo
+      echo -e "${YELLOW}Ввод завершён без ответа — PQ-миграция пропущена до следующего запуска${NC}"
+      pq_migration_allowed=0
+    }
+    if [[ $pq_migration_allowed -eq 1 ]]; then
+      if [[ -z "$pq_migration_answer" ]] || [[ "$pq_migration_answer" =~ ^[yYдД]$ ]]; then
+        touch "$pq_migration_warned"
+        chown xray:xray "$pq_migration_warned" 2>/dev/null || true
+      else
+        echo -e "${YELLOW}PQ-миграция пропущена. Предупреждение появится снова при следующем запуске.${NC}"
+        pq_migration_allowed=0
+      fi
+    fi
+  fi
+  if [[ $pq_migration_allowed -eq 1 ]]; then
+    run_migration "pq_all_2026" "PQ: legacy-профили → XHTTP+PQ" _migrate_pq_all_profiles_2026 || ((migration_failures++))
+  fi
   run_migration "xhttp_default_2026"                   "XHTTP+PQ как дефолтный пресет создания профиля" _migrate_xhttp_default_2026 || ((migration_failures++))
   run_migration "subscription_tokens_2026"             "Subscription tokens (Phase 7) для существующих профилей" _migrate_subscription_tokens_2026 || ((migration_failures++))
   run_migration "happ_legacy_xhttp_route_2026"         "HAPP subscription не меняет существующие профили" _migrate_happ_legacy_xhttp_route_2026 || ((migration_failures++))
 
-  # Авто-конвертация в self-steal: одноразово, если домен уже сохранён
-  # (задан при прошлых настройках), self-steal ещё не развёрнут и есть
-  # хотя бы один inbound. Маркер выставляется ДО попытки: при сбое
-  # ретрай только вручную (меню 16 / selfsteal-auto), чтобы каждый запуск
-  # меню не превращался в многоминутный certbot-цикл.
-  if [[ ! -f /usr/local/etc/xray/.selfsteal_autoconvert_seen \
-     && -f "$SERVER_DOMAIN_FILE" && ! -f "$SELFSTEAL_DOMAIN_FILE" ]] \
-     && jq -e '.inbounds | length > 0' "$CONFIG_FILE" >/dev/null 2>&1; then
-    touch /usr/local/etc/xray/.selfsteal_autoconvert_seen 2>/dev/null || true
-    chown xray:xray /usr/local/etc/xray/.selfsteal_autoconvert_seen 2>/dev/null || true
-    local _ss_auto_domain
-    _ss_auto_domain=$(get_server_domain)
-    echo -e "${MAGENTA}[auto] Self-steal: конвертация главного профиля → :443 (${_ss_auto_domain})${NC}"
-    _selfsteal_provision "$_ss_auto_domain" "admin@${_ss_auto_domain}" || \
-      echo -e "${YELLOW}  ⚠ Авто-конвертация не удалась — повторите: меню 16 или sudo xraytailscale selfsteal-auto${NC}"
-  fi
   if [[ ! -f /usr/local/etc/xray/.sni_list_2026 ]]; then
     echo -e "${YELLOW}Перед SNI миграцией доступна команда probe-test для проверки доступности SNI.${NC}"
     echo -n -e "${YELLOW}Запустить probe-test сейчас? [y/N]: ${NC}"
@@ -6541,86 +6721,2069 @@ main_menu() {
   fix_xray_permissions
 
   while true; do
-    show_ascii
+    if declare -F wizard_is_fresh_install >/dev/null 2>&1 && wizard_is_fresh_install; then
+      # Чистый сервер → мастер. При отказе не зацикливаемся: показываем статус.
+      if declare -F run_first_run_wizard >/dev/null 2>&1; then
+        run_first_run_wizard || true
+      fi
+    fi
+    if declare -F status_screen >/dev/null 2>&1; then
+      status_screen
+      return 0
+    fi
+    # Fallback, если модули не подгружены — просто выход с подсказкой.
+    echo -e "${RED}Модули мастера/статуса не загружены. Пересоберите ./build.sh${NC}"
+    return 1
+  done
+}
 
-    # Показываем текущую ветку
-    local current_branch=$(cat /usr/local/etc/xray/.current_branch 2>/dev/null || echo "main")
-    case $current_branch in
-      main)
-        echo -e "${GREEN}[Stable]${NC} Стабильная версия"
-        ;;
-      dev)
-        echo -e "${BLUE}[Dev]${NC} Версия с быстрыми фиксами"
-        ;;
-      experimental)
-        echo -e "${MAGENTA}[Experimental]${NC} Экспериментальная версия"
-        ;;
-      *)
-        echo -e "${MAGENTA}[Branch]${NC} ${current_branch}"
-        ;;
-    esac
-    echo ""
+# Меню создания профиля
+# ═══════════════════════════════════════════════════════════
+# Мастер первичной настройки: «чистый сервер → рабочая подписка»
+# ═══════════════════════════════════════════════════════════
+# 5 шагов, два режима (домен / без домена), state + resume.
+# Каждый шаг идемпотентен: повторный запуск не дублирует профили и подписку.
+#
+# Порядок в шаге 4 КРИТИЧЕН: сначала _selfsteal_provision (занимает :443 и
+# берёт localhost-backend из диапазона 8443–12443), и только после успеха —
+# подписка. Подписка ВСЕГДА ставится в IP-режиме (install_subscription_ip_tls):
+# при self-steal домен уже занят decoy-сайтом, доменный режим подписки даёт
+# конфликт server_name во втором nginx-vhost (инвариант проекта).
+#
+# State: /usr/local/etc/xray/.wizard_state — KEY=VALUE, STEP = шаг, который
+# нужно выполнить (он же — точка resume).  Маркер завершения: .wizard_done.
 
-    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║            ГЛАВНОЕ МЕНЮ                ║${NC}"
-    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+# Пути вынесены в переменные с override через env — только для тестов
+# (прод всегда /usr/local/etc/xray/).
+WIZARD_STATE_FILE="${WIZARD_STATE_FILE:-/usr/local/etc/xray/.wizard_state}"
+WIZARD_DONE_FILE="${WIZARD_DONE_FILE:-/usr/local/etc/xray/.wizard_done}"
+WIZARD_URL_FILE="${WIZARD_URL_FILE:-/usr/local/etc/xray/.wizard_subscription_url}"
+# Маркер установленной подписки (пишет 35-subscription.sh). Переопределяется
+# только в тестах — в проде всегда /usr/local/etc/xray/.subscription_installed.
+WIZARD_SUBSCRIPTION_MARKER="${WIZARD_SUBSCRIPTION_MARKER:-/usr/local/etc/xray/.subscription_installed}"
+WIZARD_SUB_PORT_FILE="${WIZARD_SUB_PORT_FILE:-/usr/local/etc/xray/.subscription_port}"
+WIZARD_SUB_MODE_FILE="${WIZARD_SUB_MODE_FILE:-/usr/local/etc/xray/.subscription_mode}"
+WIZARD_TOTAL_STEPS=5
+WIZARD_DEFAULT_USER="user-001"
+
+# ─── Детект «чистого» сервера ───────────────────────────────
+# return 0: мастер ещё не проходили И (inbound'ов нет ИЛИ подписка не стоит).
+wizard_is_fresh_install() {
+  [[ -f "$WIZARD_DONE_FILE" ]] && return 1
+
+  local inbound_count=0
+  if [[ -f "$CONFIG_FILE" ]] && command -v jq >/dev/null 2>&1; then
+    inbound_count=$(jq -r '.inbounds | length' "$CONFIG_FILE" 2>/dev/null || echo 0)
+    [[ "$inbound_count" =~ ^[0-9]+$ ]] || inbound_count=0
+  fi
+  if [[ "$inbound_count" -eq 0 ]]; then
+    return 0
+  fi
+
+  [[ -f "$WIZARD_SUBSCRIPTION_MARKER" ]] || return 0
+  return 1
+}
+
+# ─── root-проверка ──────────────────────────────────────────
+# Вынесена в helper: тесты подменяют её, не трогая прод-логику.
+_wizard_has_root() {
+  [[ $EUID -eq 0 ]]
+}
+
+# ─── State (resume) ─────────────────────────────────────────
+# Атомарная запись KEY=VALUE: tmp-файл в том же каталоге + mv.
+_wizard_state_set() {
+  local key="${1:-}"
+  local value="${2:-}"
+  [[ -n "$key" ]] || return 1
+
+  local dir tmp lock_fd
+  dir=$(dirname "$WIZARD_STATE_FILE")
+  mkdir -p "$dir" 2>/dev/null || true
+
+  # Сериализация read-modify-write: два одновременных запуска мастера
+  # (меню + CLI) иначе теряют ключи друг друга (проверено: 3 писателя → 1 ключ).
+  # flock может отсутствовать (util-linux) — тогда пишем без блокировки.
+  if command -v flock >/dev/null 2>&1; then
+    exec {lock_fd}>"${WIZARD_STATE_FILE}.lock" 2>/dev/null || lock_fd=""
+    if [[ -n "$lock_fd" ]]; then
+      flock -w 5 "$lock_fd" 2>/dev/null || true
+    fi
+  fi
+
+  tmp=$(mktemp "${WIZARD_STATE_FILE}.XXXXXX" 2>/dev/null) || {
+    [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
+    return 1
+  }
+  if [[ -f "$WIZARD_STATE_FILE" ]]; then
+    grep -v "^${key}=" "$WIZARD_STATE_FILE" > "$tmp" 2>/dev/null || true
+  fi
+  if ! printf '%s=%s\n' "$key" "$value" >> "$tmp"; then
+    rm -f "$tmp"
+    [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
+    return 1
+  fi
+  chmod 600 "$tmp" 2>/dev/null || true
+  if ! mv "$tmp" "$WIZARD_STATE_FILE"; then
+    rm -f "$tmp"
+    [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
+    return 1
+  fi
+  [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
+  return 0
+}
+
+# stdout: значение ключа. return 1 если ключа/файла нет.
+_wizard_state_get() {
+  local key="${1:-}"
+  [[ -n "$key" && -f "$WIZARD_STATE_FILE" ]] || return 1
+
+  local line
+  line=$(grep -m1 "^${key}=" "$WIZARD_STATE_FILE" 2>/dev/null || true)
+  [[ -n "$line" ]] || return 1
+  printf '%s\n' "${line#*=}"
+  return 0
+}
+
+_wizard_state_clear() {
+  rm -f "$WIZARD_STATE_FILE" 2>/dev/null || true
+  return 0
+}
+
+# ─── UI ─────────────────────────────────────────────────────
+_wizard_print_header() {
+  echo ""
+  echo -e "${BLUE}╔═══════════════════════════════════════════════╗${NC}"
+  echo -e "${BLUE}║      МАСТЕР ПЕРВИЧНОЙ НАСТРОЙКИ СЕРВЕРА       ║${NC}"
+  echo -e "${BLUE}║     от чистого VPS до готовой подписки        ║${NC}"
+  echo -e "${BLUE}╚═══════════════════════════════════════════════╝${NC}"
+  echo ""
+}
+
+_wizard_step_title() {
+  case "${1:-}" in
+    1) echo "Проверка сервера" ;;
+    2) echo "Домен и email" ;;
+    3) echo "Первый пользователь" ;;
+    4) echo "Режим домена и подписка" ;;
+    5) echo "Проверка и ссылка" ;;
+    *) echo "продолжение" ;;
+  esac
+}
+
+_wizard_step_banner() {
+  local step="${1:-}"
+  echo ""
+  echo -e "${MAGENTA}═══ Шаг ${step}/${WIZARD_TOTAL_STEPS}. $(_wizard_step_title "$step") ═══${NC}"
+  echo ""
+}
+
+# Спросить «повторить шаг или выйти». return 0 = повторить, 1 = выйти.
+_wizard_confirm_retry_or_exit() {
+  local ans attempts=0
+  while true; do
+    ((attempts++))
+    if [[ $attempts -gt 10 ]]; then
+      echo ""
+      echo -e "${RED}  Слишком много неверных попыток — выход${NC}"
+      return 1
+    fi
     echo ""
-    echo -e "${CYAN} 1)${NC} Создать новый профиль"
-    echo -e "${CYAN} 2)${NC} Удалить существующий профиль"
-    echo -e "${CYAN} 3)${NC} Подключиться по профилю"
-    echo ""
-    echo -e "${MAGENTA} УПРАВЛЕНИЕ ПРОФИЛЕМ:${NC}"
-    echo -e "${CYAN} 4)${NC} Управление профилем (SNI / fingerprint / port / advanced)"
-    echo ""
-    echo -e "${MAGENTA} POST-QUANTUM ENCRYPTION:${NC}"
-    echo -e "${CYAN} 8)${NC} Обновить профиль до post-quantum (PQ XHTTP+Reality)"
-    echo ""
-    echo -e "${MAGENTA} HAPP SUBSCRIPTION:${NC}"
-    echo -e "${CYAN} 9)${NC} Подписка HAPP (авто 7 маршрутов + URL/QR)"
-    echo -e "${CYAN}10)${NC} Bulk HAPP users (multi-route URLs)"
-    echo ""
-    echo -e "${MAGENTA} ОБНОВЛЕНИЕ:${NC}"
-    echo -e "${CYAN}11)${NC} Обновить Xray-core"
-    echo ""
-    echo -e "${MAGENTA} BYPASS ROUTING:${NC}"
-    echo -e "${CYAN}12)${NC} Управление обходом VPN"
-    echo ""
-    echo -e "${MAGENTA} TAILSCALE:${NC}"
-    echo -e "${CYAN}13)${NC} Tailscale exit node"
-    echo ""
-    echo -e "${MAGENTA} CASCADE:${NC}"
-    echo -e "${CYAN}14)${NC} Каскад / upstream-ноды"
-    echo -e "${CYAN}15)${NC} Поднять outbound-сервер (зарубежная нода)"
-    echo ""
-    echo -e "${MAGENTA} SELF-STEAL (свой сайт):${NC}"
-    echo -e "${CYAN}16)${NC} Self-steal: VLESS+Reality+Vision :443 под свой домен"
-    echo ""
-    echo -e "${RED} 0)${NC} Выход"
-    echo ""
-    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+    echo -e "${CYAN}  [1]${NC} Повторить шаг   ${CYAN}[0]${NC} Выйти"
     echo -n -e "${YELLOW}Выберите действие: ${NC}"
-    read choice
-    case $choice in
-      1) create_profile_menu ;;
-      2) delete_profile_menu ;;
-      3) connect_profile_menu ;;
-      4) manage_profile_menu ;;
-      8) upgrade_profile_to_pq_menu ;;
-      9) happ_subscription_menu ;;
-      10) bulk_happ_users_menu ;;
-      11) update_command ;;
-      12) bypass_routing_menu ;;
-      13) tailscale_exit_node_menu ;;
-      14) cascade_mode_menu ;;
-      15) setup_outbound_server_menu ;;
-      16) selfsteal_menu ;;
-      0) exit 0 ;;
+    if ! read -r ans; then
+      echo ""
+      return 1
+    fi
+    case "$ans" in
+      1) return 0 ;;
+      0) return 1 ;;
+      *) echo -e "${RED}  Неверный выбор — введите 1 или 0${NC}" ;;
+    esac
+  done
+}
+
+# Резолв домена для диагностики DNS (stdout: IP или «не резолвится»).
+_wizard_dns_resolved_ip() {
+  local domain="${1:-}"
+  local ip=""
+  if [[ -n "$domain" ]]; then
+    ip=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' | head -1)
+  fi
+  [[ -n "$ip" ]] || ip="не резолвится"
+  echo "$ip"
+}
+
+# Уже стоит рабочая подписка (ip_tls) и её порт реально слушается.
+_wizard_subscription_ready() {
+  [[ -f "$WIZARD_SUBSCRIPTION_MARKER" ]] || return 1
+  [[ "$(cat "$WIZARD_SUB_MODE_FILE" 2>/dev/null || true)" == "ip_tls" ]] || return 1
+
+  local port
+  port=$(cat "$WIZARD_SUB_PORT_FILE" 2>/dev/null || true)
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  # Без ss подтвердить listen нельзя — считаем «не готово» и переустанавливаем
+  # (installer идемпотентен: certbot переиспользует действующий сертификат).
+  command -v ss >/dev/null 2>&1 || return 1
+  ss -tlnH "sport = :${port}" 2>/dev/null | grep -q .
+}
+
+# Пояснение про порты: в режиме домена backend self-steal занимает первый
+# свободный порт диапазона, поэтому подписка уезжает на следующий (ожидаемо).
+_wizard_detect_ports_note() {
+  local mode="" backend_port="" sub_port="" ufw_active="no"
+  mode=$(_wizard_state_get MODE 2>/dev/null || true)
+  [[ -n "$mode" ]] || mode=$(cat "$WIZARD_SUB_MODE_FILE" 2>/dev/null || echo "ip")
+  backend_port=$(cat "$SELFSTEAL_PORT_FILE" 2>/dev/null || true)
+  sub_port=$(cat "$WIZARD_SUB_PORT_FILE" 2>/dev/null || true)
+  [[ -n "$sub_port" ]] || return 0
+
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+    ufw_active="yes"
+  fi
+
+  local ufw_note=""
+  if [[ "$ufw_active" == "yes" ]]; then
+    if ufw status 2>/dev/null | grep -qE "^${sub_port}/tcp"; then
+      ufw_note="порт открыт в ufw"
+    else
+      ufw_note="⚠ порта ${sub_port}/tcp нет в ufw — откройте: ufw allow ${sub_port}/tcp"
+    fi
+  else
+    ufw_note="ufw неактивен — порты открываются iptables-правилами проекта"
+  fi
+
+  if [[ "$mode" == "domain" && -n "$backend_port" && "$sub_port" != "$backend_port" ]]; then
+    echo -e "${CYAN}  ℹ Подписка на :${sub_port}${NC} ${YELLOW}(localhost-backend self-steal занял ${backend_port})${NC}"
+    echo -e "${CYAN}    ${ufw_note}${NC}"
+  else
+    echo -e "${CYAN}  ℹ Подписка на :${sub_port} — ${ufw_note}${NC}"
+  fi
+  return 0
+}
+
+# ─── Шаг 5: финальный блок + маркеры ────────────────────────
+_wizard_final_report() {
+  local mode="$1" domain="$2" sub_port="$3" url="$4" user_name="$5"
+
+  echo ""
+  echo -e "${GREEN}╔═══════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}║         ✓ ГОТОВО: СЕРВЕР НАСТРОЕН             ║${NC}"
+  echo -e "${GREEN}╚═══════════════════════════════════════════════╝${NC}"
+  echo ""
+  if [[ "$mode" == "domain" ]]; then
+    echo -e "${BLUE}Режим:${NC}          ${GREEN}домен ${domain} (self-steal, :443)${NC}"
+  else
+    echo -e "${BLUE}Режим:${NC}          ${GREEN}без домена (Reality, :443)${NC}"
+  fi
+  echo -e "${BLUE}Пользователь:${NC}   ${GREEN}${user_name}${NC}"
+  echo -e "${BLUE}Порт подписки:${NC}  ${GREEN}${sub_port}${NC}"
+  _wizard_detect_ports_note
+  echo ""
+  echo -e "${BLUE}Ссылка подписки (HAPP / v2rayNG / Streisand):${NC}"
+  echo -e "${GREEN}${url}${NC}"
+  echo ""
+
+  # umask 077: файл создаётся сразу 600 (в URL — sub_token, это секрет).
+  # chmod ниже — страховка (defense-in-depth) и контракт для тестов.
+  if ( umask 077; printf '%s\n' "$url" > "$WIZARD_URL_FILE" ) 2>/dev/null; then
+    chmod 600 "$WIZARD_URL_FILE" 2>/dev/null || true
+    echo -e "${CYAN}Ссылка сохранена в файл: ${WIZARD_URL_FILE}${NC}"
+  else
+    echo -e "${YELLOW}⚠ Не удалось сохранить ссылку в ${WIZARD_URL_FILE}${NC}"
+  fi
+  echo ""
+
+  if command -v qrencode >/dev/null 2>&1; then
+    if ! qrencode -t ANSIUTF8 "$url" 2>/dev/null; then
+      echo -e "${YELLOW}⚠ qrencode не построил QR — скопируйте ссылку выше${NC}"
+    fi
+  else
+    echo -e "${YELLOW}⚠ qrencode не установлен — QR не показан.${NC}"
+    echo -e "${YELLOW}  Установите: apt-get install -y qrencode${NC}"
+  fi
+  echo ""
+  echo -e "${CYAN}Импортируйте ссылку в клиент: одна подписка отдаёт все маршруты.${NC}"
+
+  touch "$WIZARD_DONE_FILE" 2>/dev/null || true
+  chmod 600 "$WIZARD_DONE_FILE" 2>/dev/null || true
+  _wizard_state_clear
+
+  echo ""
+  echo -e "${GREEN}✓ Мастер завершён. Повторный запуск: sudo xraytailscale wizard${NC}"
+  echo ""
+}
+
+# ─── Главный сценарий ───────────────────────────────────────
+# $1 = "force" — игнорировать .wizard_done (CLI `xraytailscale wizard`).
+run_first_run_wizard() {
+  local force="${1:-}"
+  local resume_step=1 ans=""
+
+  _wizard_print_header
+
+  if ! _wizard_has_root; then
+    echo -e "${RED}✗ Мастеру нужны права root${NC}"
+    echo -e "${YELLOW}  Запустите: sudo xraytailscale wizard${NC}"
+    return 1
+  fi
+
+  if [[ -f "$WIZARD_DONE_FILE" && "$force" != "force" ]]; then
+    echo -e "${YELLOW}Сервер уже настроен мастером (маркер ${WIZARD_DONE_FILE}).${NC}"
+    echo -e "${YELLOW}  Перезапустить принудительно: sudo xraytailscale wizard${NC}"
+    return 0
+  fi
+
+  # ── Resume: есть незавершённый state ──
+  if [[ -f "$WIZARD_STATE_FILE" ]]; then
+    local saved_step=""
+    saved_step=$(_wizard_state_get STEP || true)
+    if [[ "$saved_step" =~ ^[1-5]$ ]]; then
+      local saved_mode="" saved_domain=""
+      saved_mode=$(_wizard_state_get MODE || true)
+      saved_domain=$(_wizard_state_get DOMAIN || true)
+
+      echo -e "${YELLOW}Найден незавершённый мастер: последний шаг ${saved_step}/${WIZARD_TOTAL_STEPS}.${NC}"
+      if [[ -n "$saved_mode" ]]; then
+        if [[ -n "$saved_domain" ]]; then
+          echo -e "${CYAN}  Сохранено: режим ${saved_mode} (${saved_domain})${NC}"
+        else
+          echo -e "${CYAN}  Сохранено: режим ${saved_mode}${NC}"
+        fi
+      fi
+      echo -n -e "${YELLOW}Продолжить с шага ${saved_step}? [Y/n]: ${NC}"
+      if ! read -r ans; then
+        echo ""
+        echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+        return 1
+      fi
+      if [[ "$ans" =~ ^[nNнН]$ ]]; then
+        _wizard_state_clear
+        resume_step=1
+      else
+        resume_step="$saved_step"
+      fi
+      echo ""
+    fi
+  fi
+
+  # ─────────────── Шаг 1/5: Проверка сервера ───────────────
+  if [[ $resume_step -le 1 ]]; then
+    while true; do
+      _wizard_state_set STEP 1
+      _wizard_step_banner 1
+
+      local step1_failed=0
+      local xray_bin="" listener=""
+
+      echo -e "${GREEN}✓ root-права${NC}"
+
+      if command -v xray >/dev/null 2>&1; then
+        xray_bin=$(command -v xray)
+      elif [[ -x /usr/local/bin/xray ]]; then
+        xray_bin="/usr/local/bin/xray"
+      fi
+      if [[ -n "$xray_bin" ]]; then
+        echo -e "${GREEN}✓ xray-core: ${xray_bin}${NC}"
+      else
+        echo -e "${RED}✗ xray-core не найден (ни в PATH, ни в /usr/local/bin/xray)${NC}"
+        echo -e "${YELLOW}  Установите: sudo bash install.sh${NC}"
+        step1_failed=1
+      fi
+
+      if command -v systemctl >/dev/null 2>&1; then
+        echo -e "${GREEN}✓ systemd доступен (systemctl)${NC}"
+      else
+        echo -e "${RED}✗ systemctl не найден — сервер не на systemd${NC}"
+        echo -e "${YELLOW}  Проект рассчитан на Debian/Ubuntu с systemd.${NC}"
+        step1_failed=1
+      fi
+
+      if command -v ufw >/dev/null 2>&1; then
+        local ufw_status_line=""
+        ufw_status_line=$(ufw status 2>/dev/null | head -1)
+        echo -e "${GREEN}✓ ufw: ${ufw_status_line:-статус неизвестен}${NC}"
+        if ! ufw status 2>/dev/null | grep -q "Status: active"; then
+          echo -e "${YELLOW}  ℹ ufw выключен — порты откроются iptables-правилами проекта${NC}"
+        fi
+      else
+        echo -e "${YELLOW}⚠ ufw не установлен — порты откроются iptables-правилами проекта${NC}"
+      fi
+
+      if ! command -v ss >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠ ss не найден (iproute2) — пропускаю проверку :443${NC}"
+      else
+        # -p нужен, чтобы показать, кто именно слушает порт.
+        listener=$(ss -tlnpH 'sport = :443' 2>/dev/null | head -1)
+        if [[ -z "$listener" ]]; then
+          echo -e "${GREEN}✓ порт :443 свободен${NC}"
+        elif [[ "$listener" == *xray* ]]; then
+          echo -e "${GREEN}✓ порт :443 уже слушает Xray${NC}"
+        else
+          echo -e "${RED}✗ порт :443 занят сторонним процессом${NC}"
+          echo -e "${YELLOW}  Слушает: ${listener}${NC}"
+          echo -e "${YELLOW}  Освободите порт: systemctl stop <сервис> (nginx/apache/др.)${NC}"
+          step1_failed=1
+        fi
+      fi
+
+      if [[ $step1_failed -eq 0 ]]; then
+        echo ""
+        echo -e "${GREEN}✓ Проверка сервера пройдена${NC}"
+        break
+      fi
+      echo ""
+      echo -e "${YELLOW}  Устраните замечания выше и повторите шаг.${NC}"
+      _wizard_confirm_retry_or_exit || return 1
+    done
+  fi
+
+  # ─────────────── Шаг 2/5: Домен и email ──────────────────
+  if [[ $resume_step -le 2 ]]; then
+    _wizard_state_set STEP 2
+    _wizard_step_banner 2
+
+    local mode="" domain="" email=""
+    local have_domain="n"
+    local saved_mode="" saved_domain=""
+    saved_mode=$(_wizard_state_get MODE || true)
+    saved_domain=$(_wizard_state_get DOMAIN || true)
+
+    echo -e "${CYAN}Свой домен даёт режим self-steal: на :443 для чужих — ваш сайт${NC}"
+    echo -e "${CYAN}с валидным сертификатом, для ваших клиентов — VLESS+Reality.${NC}"
+    echo -e "${CYAN}Без домена — классический Reality по IP (SNI из whitelist).${NC}"
+    echo ""
+    echo -n -e "${YELLOW}У вас есть свой домен, направленный на этот сервер? [д/Н]: ${NC}"
+    if ! read -r have_domain; then
+      echo ""
+      echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+      return 1
+    fi
+    [[ -z "$have_domain" ]] && have_domain="n"
+
+    if [[ "$have_domain" =~ ^[yYдД]$ ]]; then
+      mode="domain"
+      while true; do
+        local domain_hint="$saved_domain"
+        if [[ -n "$domain_hint" ]]; then
+          echo -n -e "${YELLOW}Домен [${CYAN}${domain_hint}${YELLOW}]: ${NC}"
+        else
+          echo -n -e "${YELLOW}Домен (A-запись → этот сервер): ${NC}"
+        fi
+        read -r domain || {
+          echo ""
+          echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+          return 1
+        }
+        [[ -z "$domain" ]] && domain="$domain_hint"
+
+        if ! validate_server_domain "$domain"; then
+          echo -e "${RED}✗ Некорректный домен: '${domain}'${NC}"
+          echo -e "${YELLOW}  Нужен FQDN без схемы и пути, например example.com${NC}"
+          continue
+        fi
+
+        if _selfsteal_dns_check "$domain"; then
+          echo -e "${GREEN}✓ DNS: ${domain} → $(get_server_ip)${NC}"
+          break
+        fi
+
+        echo -e "${RED}✗ DNS не совпадает${NC}"
+        echo -e "${YELLOW}  Ожидается IP этого VPS: ${CYAN}$(get_server_ip)${NC}"
+        echo -e "${YELLOW}  Фактический резолв:     ${CYAN}$(_wizard_dns_resolved_ip "$domain")${NC}"
+        echo -e "${YELLOW}  Подождите обновления DNS или поменяйте A-запись у регистратора.${NC}"
+        echo ""
+        echo -e "${CYAN}  [1]${NC} Ввести другой домен"
+        echo -e "${CYAN}  [2]${NC} Продолжить без домена (режим IP)"
+        echo -n -e "${YELLOW}Выберите действие: ${NC}"
+        local dns_choice=""
+        if ! read -r dns_choice; then
+          echo ""
+          echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+          return 1
+        fi
+        case "$dns_choice" in
+          2)
+            mode="ip"
+            domain=""
+            echo -e "${YELLOW}  → Продолжаю без домена (Reality по IP)${NC}"
+            break
+            ;;
+          1) continue ;;
+          *)
+            echo -e "${RED}  Неверный выбор — введите 1 или 2${NC}"
+            continue
+            ;;
+        esac
+      done
+    else
+      mode="ip"
+    fi
+
+    if [[ "$mode" == "domain" && -n "$domain" ]]; then
+      _wizard_state_set MODE "domain"
+      _wizard_state_set DOMAIN "$domain"
+      echo -e "${GREEN}✓ Режим: домен ${domain}${NC}"
+    else
+      mode="ip"
+      _wizard_state_set MODE "ip"
+      _wizard_state_set DOMAIN ""
+      echo -e "${GREEN}✓ Режим: без домена (Reality по IP)${NC}"
+    fi
+
+    # Email нужен в обоих режимах: Let's Encrypt (IP-сертификат подписки /
+    # сертификат домена) требует контакт для renew и account notices.
+    local email_default=""
+    if [[ "$mode" == "domain" ]]; then
+      email_default="admin@${domain}"
+    fi
+    local saved_email=""
+    saved_email=$(_wizard_state_get EMAIL || true)
+    [[ -n "$saved_email" ]] && email_default="$saved_email"
+
+    while true; do
+      if [[ -n "$email_default" ]]; then
+        echo -n -e "${YELLOW}Email для Let's Encrypt [${CYAN}${email_default}${YELLOW}]: ${NC}"
+      else
+        echo -n -e "${YELLOW}Email для Let's Encrypt (обязателен для сертификата): ${NC}"
+      fi
+      read -r email || {
+        echo ""
+        echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+        return 1
+      }
+      [[ -z "$email" ]] && email="$email_default"
+      if [[ "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+        break
+      fi
+      echo -e "${RED}✗ Некорректный email: '${email}'${NC}"
+      echo -e "${YELLOW}  Пример: name@example.com${NC}"
+    done
+    _wizard_state_set EMAIL "$email"
+    echo -e "${GREEN}✓ Email: ${email}${NC}"
+  fi
+
+  # ─────────────── Шаг 3/5: Первый пользователь ────────────
+  if [[ $resume_step -le 3 ]]; then
+    while true; do
+      _wizard_state_set STEP 3
+      _wizard_step_banner 3
+
+      local user_name=""
+      local default_user="$WIZARD_DEFAULT_USER"
+      local bulk_default=""
+      if declare -F _bulk_target_name >/dev/null 2>&1; then
+        bulk_default=$(_bulk_target_name user 1 1 2>/dev/null || true)
+        [[ -n "$bulk_default" ]] && default_user="$bulk_default"
+      fi
+      local saved_user=""
+      saved_user=$(_wizard_state_get USER_NAME || true)
+      # Ревалидация: state-файл может быть подправлен вручную (../../etc/...).
+      # Имя идёт в путь $PROFILES_DIR/<name>.json — инвариант «валидация до
+      # любых файловых операций» соблюдается и в resume-ветке.
+      if [[ -n "$saved_user" ]] && [[ "$saved_user" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+        default_user="$saved_user"
+      fi
+
+      if [[ -f "$PROFILES_DIR/${default_user}.json" ]]; then
+        echo -e "${YELLOW}ℹ Пользователь ${default_user} уже существует — создание не нужно${NC}"
+        user_name="$default_user"
+      else
+        echo -e "${CYAN}Имя пользователя — это имя профиля (7 маршрутов, XHTTP+PQ).${NC}"
+        while true; do
+          echo -n -e "${YELLOW}Имя первого пользователя [${CYAN}${default_user}${YELLOW}]: ${NC}"
+          read -r user_name || {
+            echo ""
+            echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+            return 1
+          }
+          [[ -z "$user_name" ]] && user_name="$default_user"
+
+          if [[ ! "$user_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+            echo -e "${RED}✗ Недопустимое имя: '${user_name}'${NC}"
+            echo -e "${YELLOW}  Латиница, цифры, '-' и '_'; первый символ — буква или цифра.${NC}"
+            continue
+          fi
+          if [[ -f "$PROFILES_DIR/${user_name}.json" ]]; then
+            echo -e "${RED}✗ Пользователь ${user_name} уже существует${NC}"
+            echo -e "${YELLOW}  Введите другое имя.${NC}"
+            continue
+          fi
+          break
+        done
+
+        echo ""
+        echo -e "${CYAN}  → Создаю профиль ${user_name}: 7 маршрутов (XHTTP+PQ дефолт)...${NC}"
+        if ! create_profile_all_routes "$user_name" "no_pause" "hide_subscription"; then
+          echo ""
+          echo -e "${RED}✗ Профиль ${user_name} не создан${NC}"
+          echo -e "${YELLOW}  Что проверить:${NC}"
+          echo -e "${YELLOW}    jq . ${CONFIG_FILE} >/dev/null  — валиден ли config.json${NC}"
+          echo -e "${YELLOW}    systemctl status xray --no-pager -l${NC}"
+          echo -e "${YELLOW}    ss -tlnH | grep LISTEN        — не заняты ли порты маршрутов${NC}"
+          echo -e "${YELLOW}    Бэкапы конфига: ${XRAY_BACKUPS_DIR}${NC}"
+          _wizard_confirm_retry_or_exit || return 1
+          continue
+        fi
+        echo -e "${GREEN}✓ Профиль ${user_name} создан (7 маршрутов)${NC}"
+      fi
+
+      _wizard_state_set USER_NAME "$user_name"
+      break
+    done
+  fi
+
+  # ─────────── Шаг 4/5: Домен-режим и подписка ─────────────
+  if [[ $resume_step -le 4 ]]; then
+    while true; do
+      _wizard_state_set STEP 4
+      _wizard_step_banner 4
+
+      local mode="" domain="" email=""
+      local step4_ok=1
+      local sub_rc=0
+      mode=$(_wizard_state_get MODE || true)
+      domain=$(_wizard_state_get DOMAIN || true)
+      email=$(_wizard_state_get EMAIL || true)
+      [[ -n "$mode" ]] || mode="ip"
+
+      if [[ -z "$email" ]]; then
+        echo -e "${RED}✗ Не найден email для Let's Encrypt${NC}"
+        echo -e "${YELLOW}  Вернитесь к шагу 2 и укажите email.${NC}"
+        _wizard_confirm_retry_or_exit || return 1
+        continue
+      fi
+
+      if [[ "$mode" == "domain" ]]; then
+        if [[ -z "$domain" ]]; then
+          echo -e "${RED}✗ Не найден домен для self-steal${NC}"
+          echo -e "${YELLOW}  Вернитесь к шагу 2 и укажите домен.${NC}"
+          step4_ok=0
+        else
+        # КРИТИЧНО: self-steal первым — он занимает :443 и забирает
+        # localhost-backend порт, подписка затем выбирает следующий свободный.
+        echo -e "${CYAN}  → Self-steal для ${domain}: :443 под ваш сайт + Reality...${NC}"
+        if ! _selfsteal_provision "$domain" "$email"; then
+          echo ""
+          echo -e "${RED}✗ Self-steal не развернулся${NC}"
+          echo -e "${YELLOW}  Что проверить:${NC}"
+          echo -e "${YELLOW}    dig +short ${domain}   — должен вернуть $(get_server_ip)${NC}"
+          echo -e "${YELLOW}    ss -tlnH 'sport = :443' — порт должен освободиться под Xray${NC}"
+          echo -e "${YELLOW}    tail -30 /var/log/letsencrypt/letsencrypt.log${NC}"
+          echo -e "${YELLOW}    nginx -t               — валиден ли конфиг nginx${NC}"
+          step4_ok=0
+        else
+          echo -e "${GREEN}✓ Self-steal готов: https://${domain}${NC}"
+        fi
+        fi
+      fi
+
+      if [[ $step4_ok -eq 1 ]]; then
+        if _wizard_subscription_ready; then
+          echo -e "${GREEN}✓ Подписка уже установлена на :$(cat "$WIZARD_SUB_PORT_FILE" 2>/dev/null) — пропускаю установку${NC}"
+        else
+          echo ""
+          echo -e "${CYAN}  → Подписка HAPP: IP-режим (HTTPS по IP сервера).${NC}"
+          echo -e "${CYAN}    Доменный режим здесь нельзя: домен уже занят self-steal.${NC}"
+          # Email override: мастер уже спросил email на шаге 2 —
+          # installer не должен спрашивать его повторно. Сохраняем прежнее
+          # значение (если было), чтобы не затирать его у вызывающей стороны.
+          local _prev_le_email="${SUBSCRIPTION_LE_EMAIL-}"
+          local _had_le_email=0
+          [[ -n "${SUBSCRIPTION_LE_EMAIL+x}" ]] && _had_le_email=1
+          SUBSCRIPTION_LE_EMAIL="$email"
+          if install_subscription_ip_tls; then
+            sub_rc=0
+          else
+            sub_rc=1
+          fi
+          if [[ $_had_le_email -eq 1 ]]; then
+            SUBSCRIPTION_LE_EMAIL="$_prev_le_email"
+          else
+            unset SUBSCRIPTION_LE_EMAIL
+          fi
+
+          if [[ $sub_rc -ne 0 ]]; then
+            echo ""
+            echo -e "${RED}✗ Подписка не установлена${NC}"
+            echo -e "${YELLOW}  Что проверить:${NC}"
+            echo -e "${YELLOW}    ss -tlnH 'sport = :80'   — порт 80 нужен для выпуска сертификата${NC}"
+            echo -e "${YELLOW}    ss -tlnp | grep nginx    — не занят ли выбранный порт подписки${NC}"
+            echo -e "${YELLOW}    tail -30 /tmp/certbot-ip.log${NC}"
+            echo -e "${YELLOW}    systemctl status xraytailscale-sub --no-pager -l${NC}"
+            step4_ok=0
+          else
+            echo -e "${GREEN}✓ Подписка установлена${NC}"
+          fi
+        fi
+      fi
+
+      if [[ $step4_ok -eq 1 ]]; then
+        break
+      fi
+      _wizard_confirm_retry_or_exit || return 1
+    done
+  fi
+
+  # ─────────────── Шаг 5/5: Проверка и ссылка ──────────────
+  if [[ $resume_step -le 5 ]]; then
+    while true; do
+      _wizard_state_set STEP 5
+      _wizard_step_banner 5
+
+      local user_name="" mode="" domain="" sub_port=""
+      local token="" url="" curl_code="" xray_state=""
+      local step5_ok=1
+      user_name=$(_wizard_state_get USER_NAME || true)
+      [[ -n "$user_name" ]] || user_name="$WIZARD_DEFAULT_USER"
+      mode=$(_wizard_state_get MODE || true)
+      [[ -n "$mode" ]] || mode="ip"
+      domain=$(_wizard_state_get DOMAIN || true)
+      sub_port=$(cat "$WIZARD_SUB_PORT_FILE" 2>/dev/null || true)
+
+      xray_state=$(systemctl is-active xray 2>/dev/null || true)
+      if [[ "$xray_state" == "active" ]]; then
+        echo -e "${GREEN}✓ Xray: active${NC}"
+      else
+        echo -e "${RED}✗ Xray не запущен (${xray_state:-неизвестно})${NC}"
+        echo -e "${YELLOW}  Проверьте: systemctl status xray --no-pager -l${NC}"
+        echo -e "${YELLOW}  Перезапуск: systemctl restart xray${NC}"
+        step5_ok=0
+      fi
+
+      if [[ -n "$sub_port" ]] && command -v ss >/dev/null 2>&1 \
+         && ss -tlnH "sport = :${sub_port}" 2>/dev/null | grep -q .; then
+        echo -e "${GREEN}✓ Порт подписки :${sub_port} слушается${NC}"
+      else
+        echo -e "${RED}✗ Порт подписки ${sub_port:-неизвестен} не слушается${NC}"
+        echo -e "${YELLOW}  Проверьте: nginx -t && systemctl reload nginx${NC}"
+        echo -e "${YELLOW}             systemctl status xraytailscale-sub --no-pager -l${NC}"
+        echo -e "${YELLOW}             ss -tlnp | grep ${sub_port:-443}${NC}"
+        step5_ok=0
+      fi
+
+      token=$(jq -r '.sub_token // ""' "$PROFILES_DIR/${user_name}.json" 2>/dev/null || true)
+      if [[ "$token" =~ ^[a-f0-9]{32}$ ]]; then
+        url="$(_subscription_base_url)/sub/${token}"
+        curl_code=$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
+        [[ -z "$curl_code" ]] && curl_code="000"
+        if [[ "$curl_code" =~ ^[23] ]]; then
+          echo -e "${GREEN}✓ Подписка отвечает: HTTP ${curl_code}${NC}"
+        else
+          echo -e "${RED}✗ Подписка не отвечает: HTTP ${curl_code}${NC}"
+          echo -e "${YELLOW}  Проверьте: curl -sk ${url}${NC}"
+          echo -e "${YELLOW}             ufw status | grep ${sub_port:-443}${NC}"
+          echo -e "${YELLOW}             journalctl -u xraytailscale-sub -n 50 --no-pager${NC}"
+          step5_ok=0
+        fi
+      else
+        echo -e "${RED}✗ У профиля ${user_name} нет валидного sub_token${NC}"
+        echo -e "${YELLOW}  Пересоздайте профиль или проверьте ${PROFILES_DIR}/${user_name}.json${NC}"
+        step5_ok=0
+      fi
+
+      if [[ $step5_ok -eq 1 ]]; then
+        _wizard_final_report "$mode" "$domain" "$sub_port" "$url" "$user_name"
+        break
+      fi
+      echo ""
+      echo -e "${YELLOW}  Устраните замечания выше и повторите проверку.${NC}"
+      _wizard_confirm_retry_or_exit || return 1
+    done
+  fi
+
+  return 0
+}
+
+# ─── CLI: `xraytailscale wizard` (принудительный перезапуск) ─
+wizard_command() {
+  if ! _wizard_has_root; then
+    echo -e "${RED}✗ Требуются права root${NC}"
+    echo -e "${YELLOW}Используйте: sudo xraytailscale wizard${NC}"
+    return 1
+  fi
+  run_first_run_wizard "force"
+}
+# ═══════════════════════════════════════════════════════════
+# Статус-экран настроенного сервера + диагностика с автопочинкой
+# ═══════════════════════════════════════════════════════════
+# Показывается, когда сервер уже настроен (мастер пройден, inbound'ы есть):
+# компактная сводка здоровья из 7 строк + меню действий.
+# Второй блок — diagnose_and_repair(): 7 типовых поломок, каждая с
+# предложением автопочинки, перепроверкой и точными командами для ручной
+# проверки, если автопочинка не помогла.
+#
+# Инварианты модуля:
+#   - все внешние вызовы (ss/curl/openssl/ufw/nginx/systemctl/journalctl/
+#     certbot/getent) защищены command -v; отсутствие утилиты — это ⚠/n-a,
+#     а не падение (сервер без iproute2 обязан показывать статус);
+#   - URL подписки строится ТОЛЬКО через _subscription_base_url (или чужой
+#     хелпер _happ_print_subscription_url_for_profile) — своей склейки
+#     схемы/хоста здесь нет;
+#   - пути маркеров — через ${VAR:-default}: тесты подменяют их на /tmp,
+#     прод всегда /usr/local/etc/xray/ (как в src/56-wizard.sh).
+
+STATUS_SUB_MARKER="${STATUS_SUB_MARKER:-/usr/local/etc/xray/.subscription_installed}"
+STATUS_SUB_PORT_FILE="${STATUS_SUB_PORT_FILE:-/usr/local/etc/xray/.subscription_port}"
+STATUS_SUB_MODE_FILE="${STATUS_SUB_MODE_FILE:-/usr/local/etc/xray/.subscription_mode}"
+STATUS_SUB_DOMAIN_FILE="${STATUS_SUB_DOMAIN_FILE:-/usr/local/etc/xray/.subscription_domain}"
+STATUS_SELFSTEAL_DOMAIN_FILE="${STATUS_SELFSTEAL_DOMAIN_FILE:-/usr/local/etc/xray/.selfsteal_domain}"
+STATUS_SELFSTEAL_PORT_FILE="${STATUS_SELFSTEAL_PORT_FILE:-/usr/local/etc/xray/.selfsteal_backend_port}"
+STATUS_NGINX_SUB_SITE="${STATUS_NGINX_SUB_SITE:-/etc/nginx/sites-available/xraytailscale-sub}"
+STATUS_LE_LIVE_DIR="${STATUS_LE_LIVE_DIR:-/etc/letsencrypt/live}"
+STATUS_SUB_SERVICE="${STATUS_SUB_SERVICE:-xraytailscale-sub}"
+# Число дней, ниже которого сертификат считается «скоро истечёт».
+STATUS_CERT_WARN_DAYS="${STATUS_CERT_WARN_DAYS:-7}"
+
+# ─── Мини-хелперы вывода ────────────────────────────────────
+_status_ok()   { echo -e "  ${GREEN}✓${NC} $*"; }
+_status_bad()  { echo -e "  ${RED}✗${NC} $*"; }
+_status_warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }
+
+_status_pause() {
+  echo ""
+  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  read -r _ || true
+}
+
+# ─── Чтение маркеров (безопасно к отсутствию файлов) ────────
+_status_sub_port() {
+  local port=""
+  port=$(cat "$STATUS_SUB_PORT_FILE" 2>/dev/null || true)
+  [[ "$port" =~ ^[0-9]+$ ]] || port=""
+  printf '%s\n' "$port"
+}
+
+_status_selfsteal_backend_port() {
+  local port=""
+  port=$(cat "$STATUS_SELFSTEAL_PORT_FILE" 2>/dev/null || true)
+  [[ "$port" =~ ^[0-9]+$ ]] || port=""
+  printf '%s\n' "$port"
+}
+
+# stdout: строка listen из ss для порта (пусто = никто не слушает / нет ss).
+_status_port_listener() {
+  local port="${1:-}"
+  command -v ss >/dev/null 2>&1 || return 0
+  [[ "$port" =~ ^[0-9]+$ ]] || return 0
+  ss -tlnpH "sport = :${port}" 2>/dev/null | head -1 || true
+}
+
+# stdout: имя процесса из строки ss (или «неизвестный процесс»).
+_status_listener_process() {
+  local line="${1:-}" name=""
+  [[ -n "$line" ]] || { echo ""; return 0; }
+  name=$(sed -nE 's/.*users:\(\("([^"]+)".*/\1/p' <<< "$line" | head -1)
+  [[ -n "$name" ]] || name="неизвестный процесс"
+  printf '%s\n' "$name"
+}
+
+# Есть ли inbound на :443 в config.json.
+_status_has_443_inbound() {
+  [[ -f "$CONFIG_FILE" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -e '.inbounds[]? | select(.port == 443)' "$CONFIG_FILE" >/dev/null 2>&1
+}
+
+# ─── Режим: self-steal (свой домен) или Reality по IP ───────
+# Пишет _STATUS_MODE_KIND (selfsteal|ip) и _STATUS_MODE_DOMAIN.
+# Признаки self-steal: маркер .selfsteal_domain ИЛИ dest 127.0.0.1:<port>
+# у inbound :443 (Reality отправляет не-VLESS TLS на локальный nginx).
+_status_detect_mode() {
+  _STATUS_MODE_KIND="ip"
+  _STATUS_MODE_DOMAIN=""
+
+  local domain="" dest=""
+  domain=$(cat "$STATUS_SELFSTEAL_DOMAIN_FILE" 2>/dev/null || true)
+  if [[ -z "$domain" ]] && command -v jq >/dev/null 2>&1 && [[ -f "$CONFIG_FILE" ]]; then
+    dest=$(jq -r '(.inbounds[]? | select(.port == 443) | .streamSettings.realitySettings.dest) // ""' \
+      "$CONFIG_FILE" 2>/dev/null | head -1 || true)
+    [[ "$dest" == 127.0.0.1:* ]] || dest=""
+  fi
+
+  if [[ -n "$domain" || -n "$dest" ]]; then
+    _STATUS_MODE_KIND="selfsteal"
+    [[ -n "$domain" ]] || domain=$(get_server_domain 2>/dev/null || true)
+    _STATUS_MODE_DOMAIN="$domain"
+  fi
+  return 0
+}
+
+# ─── Сертификат: остаток дней ──────────────────────────────
+# $1 = домен или IP. stdout: целое число дней (может быть отрицательным).
+# return 1: файла нет / openssl нет / не удалось разобрать дату.
+_status_cert_days() {
+  local name="${1:-}" file="" end="" end_epoch="" now_epoch="" days=""
+  [[ -n "$name" ]] || return 1
+  command -v openssl >/dev/null 2>&1 || return 1
+  command -v date >/dev/null 2>&1 || return 1
+
+  file="${STATUS_LE_LIVE_DIR}/${name}/fullchain.pem"
+  [[ -f "$file" ]] || return 1
+
+  end=$(openssl x509 -enddate -noout -in "$file" 2>/dev/null | sed -n 's/^notAfter=//p')
+  [[ -n "$end" ]] || return 1
+
+  # GNU date (Linux), затем BSD date (macOS — локальные прогоны тестов).
+  end_epoch=$(date -d "$end" +%s 2>/dev/null || true)
+  if [[ ! "$end_epoch" =~ ^[0-9]+$ ]]; then
+    end_epoch=$(date -j -f "%b %e %T %Y %Z" "$end" +%s 2>/dev/null || true)
+  fi
+  [[ "$end_epoch" =~ ^[0-9]+$ ]] || return 1
+
+  now_epoch=$(date +%s 2>/dev/null || true)
+  [[ "$now_epoch" =~ ^[0-9]+$ ]] || return 1
+
+  days=$(( (end_epoch - now_epoch) / 86400 ))
+  printf '%s\n' "$days"
+}
+
+# ─── UFW: сводка по 80/443/порту подписки ──────────────────
+# stdout: человекочитаемое состояние. return 0 всегда.
+_status_ufw_state() {
+  local sub_port="${1:-}"
+  if ! command -v ufw >/dev/null 2>&1; then
+    echo "не используется (ufw не установлен)"
+    return 0
+  fi
+  local st=""
+  st=$(ufw status 2>/dev/null || true)
+  if ! grep -q "Status: active" <<< "$st"; then
+    echo "не активен (iptables-правила проекта)"
+    return 0
+  fi
+
+  local missing="" p
+  for p in 80 443 ${sub_port:+"$sub_port"}; do
+    [[ -n "$p" ]] || continue
+    # ufw печатает как «8443/tcp», так и мульти-порты «80,443/tcp».
+    grep -qE "^([0-9]+,)*${p}(,[0-9]+)*/tcp[[:space:]]+ALLOW" <<< "$st" || \
+      missing="${missing}${missing:+, }${p}"
+  done
+  if [[ -z "$missing" ]]; then
+    echo "активен, порты открыты (80/443${sub_port:+/$sub_port})"
+  else
+    echo "активен, НЕТ правил для port/tcp: ${missing}"
+  fi
+  return 0
+}
+
+# ─── URL подписки профиля (единственное место сборки) ──────
+# База — всегда _subscription_base_url (никакой своей схемы/хоста), путь —
+# /sub/<32hex-токен> из профиля. return 1 если токена нет.
+_status_profile_sub_url() {
+  local profile_name="${1:-}" token=""
+  [[ -n "$profile_name" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  token=$(jq -r '.sub_token // ""' "$PROFILES_DIR/${profile_name}.json" 2>/dev/null || true)
+  [[ "$token" =~ ^[a-f0-9]{32}$ ]] || return 1
+  printf '%s/sub/%s\n' "$(_subscription_base_url)" "$token"
+}
+
+# Токен первого видимого профиля (для локальной проверки подписки).
+_status_first_profile_token() {
+  local name="" token=""
+  name=$(_list_visible_profile_names 2>/dev/null | head -1 || true)
+  [[ -n "$name" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  token=$(jq -r '.sub_token // ""' "$PROFILES_DIR/${name}.json" 2>/dev/null || true)
+  [[ "$token" =~ ^[a-f0-9]{32}$ ]] || return 1
+  printf '%s\n' "$token"
+}
+
+# HTTP-код ЛОКАЛЬНОЙ проверки подписки (127.0.0.1, ≤5с, без внешней сети).
+# Handler отвечает 404 на «/sub/» без токена (strict regex) — поэтому при
+# наличии профиля проверяем реальный токен, а голый /sub/ оставляем как
+# проверку «жив ли nginx». stdout: код или «000».
+_status_sub_http_code() {
+  local port="${1:-}" token="" code=""
+  command -v curl >/dev/null 2>&1 || return 1
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+
+  if token=$(_status_first_profile_token 2>/dev/null); then
+    code=$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' \
+      "https://127.0.0.1:${port}/sub/${token}" 2>/dev/null || true)
+  else
+    code=$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' \
+      "https://127.0.0.1:${port}/sub/" 2>/dev/null || true)
+  fi
+  [[ -n "$code" ]] || code="000"
+  printf '%s\n' "$code"
+}
+
+# ─── Сводка (без меню — тесты вызывают отдельно) ───────────
+# return 0: проблем нет. return 1: есть хотя бы один ✗/⚠.
+status_render_summary() {
+  local problems=0
+
+  echo -e "${BLUE}═══ СТАТУС СЕРВЕРА ═══${NC}"
+  echo ""
+
+  # 1. Режим работы -----------------------------------------
+  _status_detect_mode
+  if [[ "$_STATUS_MODE_KIND" == "selfsteal" ]]; then
+    if [[ -n "$_STATUS_MODE_DOMAIN" ]]; then
+      echo -e "  ${BLUE}Режим:${NC}     ${GREEN}✓${NC} self-steal (${_STATUS_MODE_DOMAIN})"
+    else
+      echo -e "  ${BLUE}Режим:${NC}     ${YELLOW}⚠${NC} self-steal (домен не сохранён)"
+      problems=$((problems + 1))
+    fi
+  else
+    echo -e "  ${BLUE}Режим:${NC}     ${GREEN}✓${NC} Reality по IP"
+  fi
+
+  # 2. Xray -------------------------------------------------
+  local xray_state=""
+  if command -v systemctl >/dev/null 2>&1; then
+    xray_state=$(systemctl is-active xray 2>/dev/null || true)
+  fi
+  if [[ "$xray_state" == "active" ]]; then
+    echo -e "  ${BLUE}Xray:${NC}      ${GREEN}✓${NC} active"
+  elif [[ -z "$xray_state" ]]; then
+    echo -e "  ${BLUE}Xray:${NC}      ${YELLOW}⚠${NC} неизвестно (systemctl недоступен)"
+    problems=$((problems + 1))
+  else
+    echo -e "  ${BLUE}Xray:${NC}      ${RED}✗${NC} ${xray_state}"
+    problems=$((problems + 1))
+  fi
+
+  # 3. :443 -------------------------------------------------
+  local listener="" proc=""
+  listener=$(_status_port_listener 443)
+  if ! command -v ss >/dev/null 2>&1; then
+    echo -e "  ${BLUE}:443${NC}       ${YELLOW}⚠${NC} неизвестно (ss не найден)"
+    problems=$((problems + 1))
+  elif [[ -z "$listener" ]]; then
+    echo -e "  ${BLUE}:443${NC}       ${RED}✗${NC} никто не слушает"
+    problems=$((problems + 1))
+  elif grep -q 'xray' <<< "$listener"; then
+    echo -e "  ${BLUE}:443${NC}       ${GREEN}✓${NC} слушает xray"
+  else
+    proc=$(_status_listener_process "$listener")
+    echo -e "  ${BLUE}:443${NC}       ${RED}✗${NC} занят: ${proc}"
+    problems=$((problems + 1))
+  fi
+
+  # 4. Подписка ---------------------------------------------
+  local sub_port="" sub_line="" sub_mode=""
+  sub_port=$(_status_sub_port)
+  sub_mode=$(cat "$STATUS_SUB_MODE_FILE" 2>/dev/null || true)
+  if [[ ! -f "$STATUS_SUB_MARKER" ]]; then
+    echo -e "  ${BLUE}Подписка:${NC}  ${RED}✗${NC} не установлена"
+    problems=$((problems + 1))
+  elif [[ -z "$sub_port" ]]; then
+    echo -e "  ${BLUE}Подписка:${NC}  ${RED}✗${NC} нет файла порта (${STATUS_SUB_PORT_FILE})"
+    problems=$((problems + 1))
+  else
+    sub_line=$(_status_port_listener "$sub_port")
+    if ! command -v ss >/dev/null 2>&1; then
+      echo -e "  ${BLUE}Подписка:${NC}  ${YELLOW}⚠${NC} :${sub_port} — слушается ли, неизвестно (ss нет)"
+      problems=$((problems + 1))
+    elif [[ -z "$sub_line" ]]; then
+      echo -e "  ${BLUE}Подписка:${NC}  ${RED}✗${NC} порт :${sub_port} не слушается"
+      problems=$((problems + 1))
+    elif ! command -v curl >/dev/null 2>&1; then
+      echo -e "  ${BLUE}Подписка:${NC}  ${YELLOW}⚠${NC} :${sub_port} слушается, HTTP не проверен (curl нет)"
+    else
+      local code=""
+      code=$(_status_sub_http_code "$sub_port")
+      if [[ "$code" =~ ^[23] && "$sub_mode" == "local_only" ]]; then
+        # local-only подписка работает только с самого VPS — снаружи клиент
+        # её не заберёт, поэтому это ⚠, а не успех.
+        echo -e "  ${BLUE}Подписка:${NC}  ${YELLOW}⚠${NC} :${sub_port}, local-only (только с VPS, HTTP ${code})"
+        problems=$((problems + 1))
+      elif [[ "$code" =~ ^[23] ]]; then
+        echo -e "  ${BLUE}Подписка:${NC}  ${GREEN}✓${NC} :${sub_port}${sub_mode:+ (${sub_mode})}, локально HTTP ${code}"
+      elif _status_first_profile_token >/dev/null 2>&1; then
+        echo -e "  ${BLUE}Подписка:${NC}  ${RED}✗${NC} :${sub_port}, локально HTTP ${code}"
+        problems=$((problems + 1))
+      elif [[ "$code" == "404" ]]; then
+        # 404 на /sub/ — это ответ handler'а (strict regex требует 32-hex
+        # токен): цепочка nginx → handler жива. Проверять нечего, профилей
+        # с sub_token нет — лечится пунктом 1 (добавить пользователя).
+        echo -e "  ${BLUE}Подписка:${NC}  ${GREEN}✓${NC} :${sub_port}, handler отвечает (профилей с токеном нет)"
+      else
+        echo -e "  ${BLUE}Подписка:${NC}  ${YELLOW}⚠${NC} :${sub_port}, HTTP ${code} (нет профилей с sub_token)"
+      fi
+    fi
+  fi
+
+  # 5. Сертификат -------------------------------------------
+  local cert_subject="" days=""
+  if [[ "$_STATUS_MODE_KIND" == "selfsteal" && -n "$_STATUS_MODE_DOMAIN" ]]; then
+    cert_subject="$_STATUS_MODE_DOMAIN"
+  elif [[ -f "$STATUS_SUB_MARKER" ]]; then
+    # IP-режим подписки: сертификат выпущен на IP сервера.
+    cert_subject=$(cat "$STATUS_SUB_DOMAIN_FILE" 2>/dev/null || true)
+    [[ "$cert_subject" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || cert_subject=""
+  fi
+
+  if [[ -z "$cert_subject" ]]; then
+    echo -e "  ${BLUE}Сертификат:${NC} ${YELLOW}⚠${NC} n/a (IP-режим)"
+  elif days=$(_status_cert_days "$cert_subject"); then
+    if [[ "$days" -lt 0 ]]; then
+      echo -e "  ${BLUE}Сертификат:${NC} ${RED}✗${NC} истёк ${days#-} дн. назад (${cert_subject})"
+      problems=$((problems + 1))
+    elif [[ "$days" -lt "$STATUS_CERT_WARN_DAYS" ]]; then
+      echo -e "  ${BLUE}Сертификат:${NC} ${YELLOW}⚠${NC} ${days} дн. до истечения (${cert_subject})"
+      problems=$((problems + 1))
+    else
+      echo -e "  ${BLUE}Сертификат:${NC} ${GREEN}✓${NC} ${days} дн. (${cert_subject})"
+    fi
+  elif ! command -v openssl >/dev/null 2>&1; then
+    echo -e "  ${BLUE}Сертификат:${NC} ${YELLOW}⚠${NC} не проверен (openssl нет)"
+  elif [[ "$_STATUS_MODE_KIND" != "selfsteal" ]]; then
+    echo -e "  ${BLUE}Сертификат:${NC} ${YELLOW}⚠${NC} n/a (IP-режим, файла нет)"
+  else
+    echo -e "  ${BLUE}Сертификат:${NC} ${RED}✗${NC} нет ${STATUS_LE_LIVE_DIR}/${cert_subject}/fullchain.pem"
+    problems=$((problems + 1))
+  fi
+
+  # 6. UFW --------------------------------------------------
+  local ufw_state=""
+  ufw_state=$(_status_ufw_state "$sub_port")
+  if [[ "$ufw_state" == *"НЕТ правил"* ]]; then
+    # Проверяем «НЕТ правил» РАНЬШЕ «активен»: активный ufw с закрытым
+    # портом подписки — это проблема, а не успех.
+    echo -e "  ${BLUE}UFW:${NC}       ${YELLOW}⚠${NC} ${ufw_state}"
+    problems=$((problems + 1))
+  elif [[ "$ufw_state" == активен* ]]; then
+    echo -e "  ${BLUE}UFW:${NC}       ${GREEN}✓${NC} ${ufw_state}"
+  else
+    echo -e "  ${BLUE}UFW:${NC}       ${YELLOW}⚠${NC} ${ufw_state}"
+  fi
+
+  # 7. Пользователи -----------------------------------------
+  local users=() u="" count=0
+  while IFS= read -r u; do
+    [[ -n "$u" ]] || continue
+    users+=("$u")
+  done < <(_list_visible_profile_names 2>/dev/null || true)
+  count=${#users[@]}
+  if [[ "$count" -eq 0 ]]; then
+    echo -e "  ${BLUE}Пользователи:${NC} ${RED}✗${NC} нет профилей"
+    problems=$((problems + 1))
+  else
+    echo -e "  ${BLUE}Пользователи:${NC} ${GREEN}✓${NC} ${count} ($(IFS=', '; echo "${users[*]}"))"
+  fi
+
+  echo ""
+  [[ "$problems" -eq 0 ]] && return 0
+  return 1
+}
+
+# ─── Пункт 1: добавить пользователя ────────────────────────
+# Дефолт — следующий свободный user-NNN.
+_status_next_default_user() {
+  local f name max=0
+  for f in "$PROFILES_DIR"/user-*.json; do
+    [[ -f "$f" ]] || continue
+    name=$(basename "$f" .json)
+    if [[ "$name" =~ ^user-([0-9]+)$ ]]; then
+      max=$(( 10#${BASH_REMATCH[1]} > max ? 10#${BASH_REMATCH[1]} : max ))
+    fi
+  done
+  printf 'user-%03d\n' $((max + 1))
+}
+
+_status_add_user() {
+  local default_user="" user_name="" attempts=0
+
+  echo ""
+  echo -e "${MAGENTA}═══ ДОБАВИТЬ ПОЛЬЗОВАТЕЛЯ ═══${NC}"
+  default_user=$(_status_next_default_user)
+
+  while true; do
+    attempts=$((attempts + 1))
+    if [[ "$attempts" -gt 10 ]]; then
+      echo -e "${RED}  Слишком много неверных попыток — отмена${NC}"
+      _status_pause
+      return 1
+    fi
+    echo -n -e "${YELLOW}Имя профиля [${CYAN}${default_user}${YELLOW}]: ${NC}"
+    if ! read -r user_name; then
+      echo ""
+      echo -e "${RED}  Нет ввода — отмена${NC}"
+      return 1
+    fi
+    [[ -z "$user_name" ]] && user_name="$default_user"
+
+    if [[ ! "$user_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+      echo -e "${RED}  ✗ Недопустимое имя: '${user_name}'${NC}"
+      echo -e "${YELLOW}    Латиница, цифры, '-' и '_'; первый символ — буква или цифра.${NC}"
+      continue
+    fi
+    if [[ -f "$PROFILES_DIR/${user_name}.json" ]]; then
+      echo -e "${RED}  ✗ Пользователь ${user_name} уже существует${NC}"
+      continue
+    fi
+    break
+  done
+
+  echo ""
+  echo -e "${CYAN}  → Создаю профиль ${user_name}: 7 маршрутов (XHTTP+PQ дефолт)...${NC}"
+  if ! declare -F create_profile_all_routes >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ create_profile_all_routes недоступна${NC}"
+    _status_pause
+    return 1
+  fi
+  if ! create_profile_all_routes "$user_name" "no_pause" "hide_subscription"; then
+    echo ""
+    echo -e "${RED}  ✗ Профиль ${user_name} не создан${NC}"
+    echo -e "${YELLOW}    Что проверить:${NC}"
+    echo -e "${YELLOW}      jq . ${CONFIG_FILE} >/dev/null     — валиден ли config.json${NC}"
+    echo -e "${YELLOW}      systemctl status xray --no-pager -l${NC}"
+    echo -e "${YELLOW}      ss -tlnH | grep LISTEN            — не заняты ли порты маршрутов${NC}"
+    _status_pause
+    return 1
+  fi
+  echo -e "${GREEN}  ✓ Профиль ${user_name} создан (7 маршрутов)${NC}"
+
+  if declare -F _happ_print_subscription_url_for_profile >/dev/null 2>&1; then
+    _happ_print_subscription_url_for_profile "$user_name" || true
+  else
+    local url=""
+    if url=$(_status_profile_sub_url "$user_name"); then
+      echo -e "${BLUE}  URL:${NC} ${GREEN}${url}${NC}"
+    fi
+  fi
+  _status_pause
+  return 0
+}
+
+# ─── Пункт 2: ссылки / QR ──────────────────────────────────
+_status_show_links() {
+  local names=() name url i choice
+
+  echo ""
+  echo -e "${MAGENTA}═══ ССЫЛКИ ПОДПИСКИ ═══${NC}"
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    names+=("$name")
+  done < <(_list_visible_profile_names 2>/dev/null || true)
+
+  if [[ ${#names[@]} -eq 0 ]]; then
+    echo -e "${YELLOW}  Профилей нет — добавьте пользователя (пункт 1).${NC}"
+    _status_pause
+    return 0
+  fi
+
+  for i in "${!names[@]}"; do
+    name="${names[$i]}"
+    if url=$(_status_profile_sub_url "$name"); then
+      echo -e "  ${CYAN}$((i + 1)))${NC} ${GREEN}${name}${NC}"
+      echo -e "      ${url}"
+    else
+      echo -e "  ${CYAN}$((i + 1)))${NC} ${GREEN}${name}${NC}"
+      echo -e "      ${YELLOW}⚠ нет валидного sub_token — пересоздайте профиль${NC}"
+    fi
+  done
+  echo ""
+  echo -e "${CYAN}  [номер]${NC} показать QR   ${CYAN}[0]${NC} назад"
+  echo -n -e "${YELLOW}Выбор: ${NC}"
+  if ! read -r choice; then
+    echo ""
+    return 0
+  fi
+  [[ "$choice" == "0" || -z "$choice" ]] && return 0
+
+  if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -gt ${#names[@]} ]]; then
+    echo -e "${RED}  ✗ Неверный выбор${NC}"
+    return 0
+  fi
+
+  name="${names[$((choice - 1))]}"
+  echo ""
+  if ! url=$(_status_profile_sub_url "$name"); then
+    echo -e "${RED}  ✗ У профиля ${name} нет валидного sub_token — QR не построить${NC}"
+    return 0
+  fi
+  echo -e "${BLUE}Профиль:${NC} ${GREEN}${name}${NC}"
+  echo -e "${BLUE}URL:${NC} ${GREEN}${url}${NC}"
+  echo ""
+  if command -v qrencode >/dev/null 2>&1; then
+    qrencode -t ANSIUTF8 "$url" 2>/dev/null || \
+      echo -e "${YELLOW}⚠ qrencode не построил QR — скопируйте ссылку выше${NC}"
+  else
+    echo -e "${YELLOW}⚠ qrencode не установлен — QR не показан (apt-get install -y qrencode)${NC}"
+  fi
+  return 0
+}
+
+# ─── Пункт 4: дополнительно ────────────────────────────────
+_status_extra_menu() {
+  local choice=""
+  while true; do
+    echo ""
+    echo -e "${MAGENTA}═══ ДОПОЛНИТЕЛЬНО ═══${NC}"
+    echo -e "${CYAN} 1)${NC} Пакетное добавление пользователей"
+    echo -e "${CYAN} 2)${NC} Tailscale exit node"
+    echo -e "${CYAN} 3)${NC} Каскад / upstream"
+    echo -e "${CYAN} 4)${NC} Подписка HAPP (создать / управлять)"
+    echo -e "${CYAN} 5)${NC} Self-steal (статус/удаление)"
+    echo -e "${CYAN} 6)${NC} Профили advanced (SNI/порт/fingerprint)"
+    echo -e "${CYAN} 7)${NC} Удалить пользователя"
+    echo -e "${CYAN} 8)${NC} Обновить Xray-core"
+    echo -e "${CYAN} 0)${NC} Назад"
+    echo -n -e "${YELLOW}Выбор: ${NC}"
+    if ! read -r choice; then return 0; fi
+    case "$choice" in
+      1) declare -F bulk_happ_users_menu >/dev/null 2>&1 && bulk_happ_users_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      2) declare -F tailscale_exit_node_menu >/dev/null 2>&1 && tailscale_exit_node_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      3) declare -F cascade_mode_menu >/dev/null 2>&1 && cascade_mode_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      4) declare -F happ_subscription_menu >/dev/null 2>&1 && happ_subscription_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      5) declare -F selfsteal_menu >/dev/null 2>&1 && selfsteal_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      6) declare -F manage_profile_menu >/dev/null 2>&1 && manage_profile_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      7) declare -F delete_profile_menu >/dev/null 2>&1 && delete_profile_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      8) if declare -F update_command >/dev/null 2>&1; then
+           update_command
+           _status_pause
+         else
+           echo -e "${YELLOW}  Модуль недоступен${NC}"
+           _status_pause
+         fi ;;
+      0|"") return 0 ;;
+      *) echo -e "${RED}  Неверный выбор${NC}" ;;
+    esac
+  done
+}
+
+# ─── Статус-экран: сводка + меню ───────────────────────────
+status_screen() {
+  local choice=""
+  while true; do
+    if declare -F show_ascii >/dev/null 2>&1; then
+      show_ascii
+    fi
+    status_render_summary || true
+    echo -e "${BLUE}─── ДЕЙСТВИЯ ───${NC}"
+    echo -e "${CYAN} 1)${NC} Добавить пользователя"
+    echo -e "${CYAN} 2)${NC} Показать ссылки / QR"
+    echo -e "${CYAN} 3)${NC} Диагностика и починка"
+    echo -e "${CYAN} 4)${NC} Дополнительно →"
+    echo -e "${RED} 0)${NC} Выход"
+    echo -n -e "${YELLOW}Выберите действие: ${NC}"
+    if ! read -r choice; then
+      echo ""
+      return 0
+    fi
+    case "$choice" in
+      1) _status_add_user ;;
+      2) _status_show_links ;;
+      3) diagnose_and_repair ;;
+      4) _status_extra_menu ;;
+      0) return 0 ;;
       *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
     esac
   done
 }
 
-# Меню создания профиля
+# ═══════════════════════════════════════════════════════════
+# ДИАГНОСТИКА И ПОЧИНКА (7 проверок)
+# ═══════════════════════════════════════════════════════════
+# Формат: «✓ пункт» или «✗ пункт → причина». При ✗ — предложение
+# автопочинки, затем перепроверка тем же check_fn. Если починка не
+# удалась — точные команды для ручной проверки (_status_manual_hints).
+
+_DIAG_PROBLEMS=0
+_DIAG_FIXED=0
+_DIAG_ABORT=0
+_STATUS_REASON=""
+
+# Точные команды ручной проверки по номеру проверки.
+_status_manual_hints() {
+  local num="${1:-}"
+  echo -e "${YELLOW}  Что проверить вручную:${NC}"
+  case "$num" in
+    1)
+      echo -e "${YELLOW}    systemctl status xray --no-pager -l${NC}"
+      echo -e "${YELLOW}    journalctl -u xray -n 40 --no-pager${NC}"
+      echo -e "${YELLOW}    xray run -test -format json -config ${CONFIG_FILE}${NC}"
+      ;;
+    2)
+      echo -e "${YELLOW}    ss -tlnpH 'sport = :443'      — кто держит порт${NC}"
+      echo -e "${YELLOW}    systemctl stop <сервис>        — освободить порт (nginx/apache)${NC}"
+      echo -e "${YELLOW}    jq '.inbounds[] | select(.port == 443)' ${CONFIG_FILE}${NC}"
+      ;;
+    3)
+      echo -e "${YELLOW}    ss -tlnH 'sport = :80'         — порт 80 нужен для выпуска сертификата${NC}"
+      echo -e "${YELLOW}    tail -30 /tmp/certbot-ip.log${NC}"
+      echo -e "${YELLOW}    systemctl status ${STATUS_SUB_SERVICE} --no-pager -l${NC}"
+      ;;
+    4)
+      echo -e "${YELLOW}    nginx -t                       — валиден ли конфиг${NC}"
+      echo -e "${YELLOW}    ss -tlnpH 'sport = :$( _status_sub_port )'${NC}"
+      echo -e "${YELLOW}    grep listen ${STATUS_NGINX_SUB_SITE}${NC}"
+      echo -e "${YELLOW}    cat ${STATUS_SELFSTEAL_PORT_FILE}   — backend self-steal (коллизия?)${NC}"
+      ;;
+    5)
+      echo -e "${YELLOW}    journalctl -u ${STATUS_SUB_SERVICE} -n 40 --no-pager${NC}"
+      echo -e "${YELLOW}    systemctl status ${STATUS_SUB_SERVICE} --no-pager -l${NC}"
+      echo -e "${YELLOW}    curl -sk https://127.0.0.1:$( _status_sub_port )/sub/ -v${NC}"
+      ;;
+    6)
+      echo -e "${YELLOW}    certbot certificates${NC}"
+      echo -e "${YELLOW}    certbot renew --dry-run${NC}"
+      echo -e "${YELLOW}    tail -40 /var/log/letsencrypt/letsencrypt.log${NC}"
+      ;;
+    7)
+      echo -e "${YELLOW}    ufw status numbered${NC}"
+      echo -e "${YELLOW}    ufw allow 80/tcp${NC}"
+      echo -e "${YELLOW}    dig +short ${_STATUS_MODE_DOMAIN:-<домен>}   — A-запись должна указывать на этот VPS${NC}"
+      ;;
+  esac
+}
+
+# Один шаг диагностики: check → (при ✗) предложение починки → перепроверка.
+_diag_step() {
+  local num="$1" title="$2" check_fn="$3" repair_fn="$4" ans="" attempts=0
+
+  _STATUS_REASON=""
+  if "$check_fn"; then
+    echo -e "${GREEN}✓ ${num}. ${title}${NC}"
+    return 0
+  fi
+
+  _DIAG_PROBLEMS=$((_DIAG_PROBLEMS + 1))
+  echo -e "${RED}✗ ${num}. ${title} → ${_STATUS_REASON:-причина неизвестна}${NC}"
+
+  while true; do
+    attempts=$((attempts + 1))
+    if [[ "$attempts" -gt 10 ]]; then
+      _DIAG_ABORT=1
+      return 2
+    fi
+    echo -e "${CYAN}  [1]${NC} Починить   ${CYAN}[2]${NC} Пропустить   ${CYAN}[0]${NC} Выход"
+    echo -n -e "${YELLOW}  Действие: ${NC}"
+    if ! read -r ans; then
+      echo ""
+      echo -e "${YELLOW}  → Нет ввода: пропускаю проверку${NC}"
+      _status_manual_hints "$num"
+      return 1
+    fi
+    case "$ans" in
+      1)
+        if ! "$repair_fn"; then
+          echo -e "${RED}  ✗ Автопочинка не удалась${NC}"
+        fi
+        # Перепроверка ТЕМ ЖЕ check_fn: «починка выполнена» ≠ «починено».
+        _STATUS_REASON=""
+        echo -e "${CYAN}  → Перепроверка...${NC}"
+        if "$check_fn"; then
+          echo -e "${GREEN}  ✓ Исправлено: ${title}${NC}"
+          _DIAG_FIXED=$((_DIAG_FIXED + 1))
+          return 0
+        fi
+        echo -e "${RED}  ✗ Проблема осталась: ${_STATUS_REASON:-проверка не проходит}${NC}"
+        _status_manual_hints "$num"
+        return 1
+        ;;
+      2)
+        echo -e "${YELLOW}  → Пропущено${NC}"
+        _status_manual_hints "$num"
+        return 1
+        ;;
+      0)
+        echo -e "${YELLOW}  → Выход из диагностики${NC}"
+        _DIAG_ABORT=1
+        return 2
+        ;;
+      *)
+        echo -e "${RED}  Неверный выбор — введите 1, 2 или 0${NC}"
+        ;;
+    esac
+  done
+}
+
+# ── Проверка 1/7: Xray active ──────────────────────────────
+_status_diag_1_xray() {
+  command -v systemctl >/dev/null 2>&1 || { _STATUS_REASON="systemctl не найден"; return 1; }
+  local state=""
+  state=$(systemctl is-active xray 2>/dev/null || true)
+  if [[ "$state" == "active" ]]; then
+    return 0
+  fi
+  _STATUS_REASON="сервис ${state:-неизвестно}"
+  return 1
+}
+
+_status_repair_1_xray() {
+  command -v systemctl >/dev/null 2>&1 || { _status_bad "systemctl не найден"; return 1; }
+  # safe_restart_xray валидирует конфиг и откатывает его при ошибке —
+  # перезапуск «вслепую» на битом config.json уронил бы рабочий VPN.
+  if declare -F safe_restart_xray >/dev/null 2>&1; then
+    echo -e "${CYAN}  → Перезапуск Xray с проверкой конфига...${NC}"
+    if safe_restart_xray; then
+      return 0
+    fi
+    echo -e "${YELLOW}  ⚠ safe_restart_xray не удался — пробую обычный restart${NC}"
+  fi
+  echo -e "${CYAN}  → systemctl restart xray${NC}"
+  systemctl restart xray 2>/dev/null || return 1
+  sleep 1
+  systemctl is-active --quiet xray 2>/dev/null
+}
+
+# ── Проверка 2/7: :443 слушает xray ────────────────────────
+_status_diag_2_port443() {
+  command -v ss >/dev/null 2>&1 || { _STATUS_REASON="ss не найден (iproute2)"; return 1; }
+  local listener=""
+  listener=$(_status_port_listener 443)
+  if [[ -z "$listener" ]]; then
+    _STATUS_REASON="никто не слушает :443"
+    return 1
+  fi
+  if grep -q 'xray' <<< "$listener"; then
+    return 0
+  fi
+  _STATUS_REASON=":443 занят процессом $(_status_listener_process "$listener")"
+  return 1
+}
+
+_status_repair_2_port443() {
+  local listener=""
+  listener=$(_status_port_listener 443)
+  if [[ -n "$listener" ]] && ! grep -q 'xray' <<< "$listener"; then
+    echo -e "${RED}  ✗ Порт :443 держит чужой процесс: ${listener}${NC}"
+    echo -e "${YELLOW}  Автоперенос :443 невозможен — освободите порт вручную:${NC}"
+    echo -e "${YELLOW}    ss -tlnp 'sport = :443'  →  systemctl stop <сервис>${NC}"
+    return 1
+  fi
+  if ! _status_has_443_inbound; then
+    echo -e "${RED}  ✗ В ${CONFIG_FILE} нет inbound на :443 — перезапуск не поможет${NC}"
+    echo -e "${YELLOW}  Создайте пользователя или запустите мастер: sudo xraytailscale wizard${NC}"
+    return 1
+  fi
+  echo -e "${CYAN}  → Inbound :443 есть, но не слушается — перезапуск Xray...${NC}"
+  if declare -F safe_restart_xray >/dev/null 2>&1; then
+    safe_restart_xray && return 0
+  fi
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl restart xray 2>/dev/null || return 1
+  sleep 1
+  systemctl is-active --quiet xray 2>/dev/null
+}
+
+# ── Проверка 3/7: подписка установлена ────────────────────
+_status_diag_3_subscription() {
+  if [[ ! -f "$STATUS_SUB_MARKER" ]]; then
+    _STATUS_REASON="нет маркера ${STATUS_SUB_MARKER}"
+    return 1
+  fi
+  local port=""
+  port=$(_status_sub_port)
+  if [[ -z "$port" ]]; then
+    _STATUS_REASON="нет файла порта ${STATUS_SUB_PORT_FILE}"
+    return 1
+  fi
+  return 0
+}
+
+# Email для Let's Encrypt: спрашиваем ОДИН раз здесь, чтобы installer не
+# задавал вопрос повторно (SUBSCRIPTION_LE_EMAIL override, как в мастере).
+_status_ask_le_email() {
+  local email="" tries=0 default="" domain=""
+  domain=$(get_server_domain 2>/dev/null || true)
+  [[ -n "$domain" ]] && default="admin@${domain}"
+
+  while [[ "$tries" -lt 3 ]]; do
+    tries=$((tries + 1))
+    if [[ -n "$default" ]]; then
+      echo -n -e "${YELLOW}  Email для Let's Encrypt [${CYAN}${default}${YELLOW}]: ${NC}" >&2
+    else
+      echo -n -e "${YELLOW}  Email для Let's Encrypt (нужен для сертификата): ${NC}" >&2
+    fi
+    if ! read -r email; then
+      echo "" >&2
+      return 1
+    fi
+    [[ -z "$email" ]] && email="$default"
+    if [[ "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+      printf '%s\n' "$email"
+      return 0
+    fi
+    echo -e "${RED}  ✗ Некорректный email: '${email}'${NC}" >&2
+  done
+  return 1
+}
+
+_status_repair_3_subscription() {
+  if ! declare -F install_subscription_ip_tls >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ install_subscription_ip_tls недоступна${NC}"
+    return 1
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ systemctl не найден — установка сервиса невозможна${NC}"
+    return 1
+  fi
+
+  echo -e "${YELLOW}  ⚠ Подписка ставится в IP-режиме (HTTPS по IP VPS): при self-steal${NC}"
+  echo -e "${YELLOW}    доменный режим даёт конфликт server_name во втором nginx-vhost.${NC}"
+  echo ""
+  # Blast radius явно: установка — не «мелкая починка», а выпуск сертификата
+  # + установка nginx + перезапись vhost. Требуем отдельного подтверждения.
+  echo -e "${YELLOW}  Будет выполнено:${NC}"
+  echo -e "${YELLOW}    • выпуск сертификата Let's Encrypt по IP VPS${NC}"
+  echo -e "${YELLOW}    • установка/настройка nginx и systemd-сервиса xraytailscale-sub${NC}"
+  echo -e "${YELLOW}    • запись /etc/nginx/sites-available/xraytailscale-sub${NC}"
+  echo -e "${YELLOW}    • открытие порта в UFW${NC}"
+  echo -n -e "${YELLOW}  Продолжить установку? [д/Н]: ${NC}"
+  local ans
+  if ! read -r ans; then
+    echo ""
+    return 1
+  fi
+  if [[ ! "$ans" =~ ^[yYдД]$ ]]; then
+    echo -e "${YELLOW}  Установка отменена пользователем${NC}"
+    return 1
+  fi
+
+  local email=""
+  if ! email=$(_status_ask_le_email); then
+    echo -e "${RED}  ✗ Email не получен — установка отменена${NC}"
+    return 1
+  fi
+
+  # Восстанавливаем прежнее значение переменной после вызова installer'а.
+  local prev_email="${SUBSCRIPTION_LE_EMAIL-}" had=0 rc=0
+  [[ -n "${SUBSCRIPTION_LE_EMAIL+x}" ]] && had=1
+  SUBSCRIPTION_LE_EMAIL="$email"
+  install_subscription_ip_tls || rc=1
+  if [[ "$had" -eq 1 ]]; then
+    SUBSCRIPTION_LE_EMAIL="$prev_email"
+  else
+    unset SUBSCRIPTION_LE_EMAIL
+  fi
+  return "$rc"
+}
+
+# ── Проверка 4/7: порт подписки слушается ─────────────────
+# Конфликт определяет _status_sub_port_check ниже (дубль удалён в ревью).
+
+# Проверка порта подписки: 0 = конфликт/не слушается (причина в _STATUS_REASON).
+_status_sub_port_check() {
+  local port="${1:-}" backend="" line=""
+  _STATUS_REASON=""
+  if [[ -z "$port" ]]; then
+    _STATUS_REASON="порт подписки неизвестен"
+    return 1
+  fi
+  if ! command -v ss >/dev/null 2>&1; then
+    _STATUS_REASON="ss не найден — проверить listen нельзя"
+    return 1
+  fi
+  backend=$(_status_selfsteal_backend_port)
+  if [[ -n "$backend" && "$port" == "$backend" ]]; then
+    _STATUS_REASON="порт :${port} совпадает с backend'ом self-steal"
+    return 1
+  fi
+  line=$(_status_port_listener "$port")
+  if [[ -z "$line" ]]; then
+    _STATUS_REASON="никто не слушает :${port}"
+    return 1
+  fi
+  if ! grep -q 'nginx' <<< "$line"; then
+    _STATUS_REASON="порт :${port} занят чужим процессом ($(_status_listener_process "$line"))"
+    return 1
+  fi
+  return 0
+}
+
+# Есть ли конфликт порта (чужой процесс или backend self-steal) — без вывода.
+_status_sub_port_conflict() {
+  local port="${1:-}" backend=""
+  [[ -n "$port" ]] || return 1
+  backend=$(_status_selfsteal_backend_port)
+  [[ -n "$backend" && "$port" == "$backend" ]] && return 0
+  [[ -n "$(_status_port_listener "$port")" ]] || return 1
+  [[ -n "$port" ]] || return 1
+  _status_sub_port_check "$port" >/dev/null 2>&1 && return 1
+  grep -q 'nginx' <<< "$(_status_port_listener "$port")" && return 1
+  return 0
+}
+
+_status_diag_4_subport() {
+  local port=""
+  port=$(_status_sub_port)
+  _status_sub_port_check "$port"
+}
+
+# Автоперенос подписки на свободный порт из диапазона 8443–12443.
+# Инвариант консистентности: конфиг nginx и маркер .subscription_port
+# меняются АТОМАРНО как пара. Любой сбой на полпути → откат конфига
+# и возврат 1, чтобы не осталось «маркер на новом порту, nginx на старом».
+_status_move_subscription_port() {
+  local old_port="$1" new_port="" site="$STATUS_NGINX_SUB_SITE"
+
+  # Порт из маркера подставляется в sed и в firewall — только цифры.
+  if [[ ! "$old_port" =~ ^[0-9]+$ ]]; then
+    echo -e "${RED}  ✗ Некорректный текущий порт: '${old_port}'${NC}"
+    return 1
+  fi
+  if [[ ! -f "$site" ]]; then
+    echo -e "${RED}  ✗ Нет конфига ${site} — перенос невозможен${NC}"
+    return 1
+  fi
+  if ! command -v nginx >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ nginx не найден${NC}"
+    return 1
+  fi
+  if ! declare -F _subscription_find_free_port >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ _subscription_find_free_port недоступна${NC}"
+    return 1
+  fi
+  if ! new_port=$(_subscription_find_free_port); then
+    echo -e "${RED}  ✗ Нет свободного порта для подписки (8443–12443 заняты)${NC}"
+    return 1
+  fi
+  if [[ ! "$new_port" =~ ^[0-9]+$ ]]; then
+    echo -e "${RED}  ✗ Некорректный новый порт: '${new_port}'${NC}"
+    return 1
+  fi
+  if [[ "$new_port" == "$old_port" ]]; then
+    echo -e "${RED}  ✗ Свободный порт совпал с текущим (:${old_port}) — перенос не требуется${NC}"
+    return 1
+  fi
+
+  # Preflight: в конфиге реально есть listen на старом порту, иначе sed
+  # «успешно» ничего не заменит и мы запишем маркер на несуществующий порт.
+  if ! grep -qE "listen[[:space:]]+\[::\]:${old_port}[[:space:]]|listen[[:space:]]+${old_port}[[:space:]]" "$site"; then
+    echo -e "${RED}  ✗ В ${site} нет listen :${old_port} — перенос не требуется/невозможен${NC}"
+    return 1
+  fi
+
+  echo -e "${CYAN}  → Перенос подписки :${old_port} → :${new_port}...${NC}"
+  # -i.bak остаётся до успешного reload: откатываться может понадобиться позже.
+  if ! sed -i.bak -E \
+      "s/listen ${old_port} ssl/listen ${new_port} ssl/; s/listen \[::\]:${old_port} ssl/listen \[::\]:${new_port} ssl/; s/listen ${old_port} http2/listen ${new_port} http2/; s/listen \[::\]:${old_port} http2/listen \[::\]:${new_port} http2/" \
+      "$site"; then
+    echo -e "${RED}  ✗ Не удалось переписать ${site}${NC}"
+    return 1
+  fi
+  # Пост-проверка: замена реально применилась.
+  if ! grep -qE "listen[[:space:]]+(\[::\]:)?${new_port}[[:space:] ;]" "$site"; then
+    echo -e "${RED}  ✗ sed не применил замену в ${site} — откат${NC}"
+    mv "${site}.bak" "$site" 2>/dev/null || true
+    return 1
+  fi
+  if ! nginx -t >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ nginx -t не прошёл после переноса — откат конфига${NC}"
+    nginx -t 2>&1 | tail -5
+    if ! mv "${site}.bak" "$site" 2>/dev/null; then
+      echo -e "${RED}  ✗✗ ОТКАТ НЕ УДАЛСЯ. Восстановите вручную: mv ${site}.bak ${site}${NC}"
+    fi
+    return 1
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    if ! systemctl reload nginx >/dev/null 2>&1; then
+      echo -e "${RED}  ✗ nginx не перечитал конфиг — откат на :${old_port}${NC}"
+      if mv "${site}.bak" "$site" 2>/dev/null; then
+        systemctl reload nginx >/dev/null 2>&1 || true
+        echo -e "${YELLOW}  Конфиг восстановлен, подписка осталась на :${old_port}${NC}"
+      else
+        echo -e "${RED}  ✗✗ ОТКАТ НЕ УДАЛСЯ. Восстановите вручную: mv ${site}.bak ${site} && systemctl reload nginx${NC}"
+      fi
+      return 1
+    fi
+  fi
+  rm -f "${site}.bak"
+
+  # Firewall ДО маркера: если порт не открылся, снаружи подписка не работает —
+  # молча объявлять успех нельзя. Откатываем всё.
+  if declare -F open_firewall_port >/dev/null 2>&1; then
+    if ! open_firewall_port "$new_port" tcp; then
+      echo -e "${RED}  ✗ Не удалось открыть ${new_port}/tcp — откат на :${old_port}${NC}"
+      sed -i -E "s/listen ${new_port} ssl/listen ${old_port} ssl/; s/listen \[::\]:${new_port} ssl/listen \[::\]:${old_port} ssl/" "$site"
+      nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+      return 1
+    fi
+  fi
+
+  # Атомарная запись маркера (tmp + mv): читатели не увидят недописанный порт.
+  local tmp_marker="${STATUS_SUB_PORT_FILE}.tmp.$$"
+  if ! printf '%s\n' "$new_port" > "$tmp_marker" 2>/dev/null \
+     || ! mv "$tmp_marker" "$STATUS_SUB_PORT_FILE" 2>/dev/null; then
+    rm -f "$tmp_marker"
+    echo -e "${RED}  ✗ Не удалось записать ${STATUS_SUB_PORT_FILE} — откат на :${old_port}${NC}"
+    sed -i -E "s/listen ${new_port} ssl/listen ${old_port} ssl/; s/listen \[::\]:${new_port} ssl/listen \[::\]:${old_port} ssl/" "$site"
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+    return 1
+  fi
+  chown xray:xray "$STATUS_SUB_PORT_FILE" 2>/dev/null || true
+
+  echo ""
+  echo -e "${YELLOW}  ⚠ ВНИМАНИЕ: ссылка подписки ИЗМЕНИЛАСЬ (порт ${old_port} → ${new_port}).${NC}"
+  echo -e "${GREEN}  Новая база URL: $(_subscription_base_url)${NC}"
+  local name="" url=""
+  name=$(_list_visible_profile_names 2>/dev/null | head -1 || true)
+  if [[ -n "$name" ]] && url=$(_status_profile_sub_url "$name"); then
+    echo -e "${GREEN}  Новая URL (${name}): ${url}${NC}"
+  fi
+  echo -e "${YELLOW}  Переимпортируйте подписку в клиенте.${NC}"
+  return 0
+}
+
+_status_repair_4_subport() {
+  local old_port=""
+  old_port=$(_status_sub_port)
+  if [[ -z "$old_port" ]]; then
+    echo -e "${RED}  ✗ Порт подписки неизвестен — сначала установите подписку${NC}"
+    return 1
+  fi
+
+  # Конфликт порта (чужой процесс / backend self-steal) — только автоперенос.
+  if _status_sub_port_conflict "$old_port"; then
+    _status_move_subscription_port "$old_port" || return 1
+    return 0
+  fi
+
+  # Порт свободен (nginx не слушает): конфиг валиден → reload.
+  if ! command -v nginx >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ nginx не найден — подписка без него не поднимется${NC}"
+    return 1
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ systemctl не найден${NC}"
+    return 1
+  fi
+  if ! nginx -t >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ nginx -t не проходит — reload не поможет. Вывод:${NC}"
+    nginx -t 2>&1 | tail -8
+    return 1
+  fi
+  echo -e "${CYAN}  → nginx -t OK: reload...${NC}"
+  if ! systemctl reload nginx >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ nginx не перечитал конфиг${NC}"
+    return 1
+  fi
+  sleep 1
+  if [[ -n "$(_status_port_listener "$old_port")" ]]; then
+    return 0
+  fi
+
+  # Порт не поднялся: конфиг мог указывать на другой порт — переносим.
+  echo -e "${YELLOW}  ⚠ :${old_port} всё ещё не слушается — пробую перенос на свободный порт${NC}"
+  _status_move_subscription_port "$old_port"
+}
+
+# ── Проверка 5/7: подписка отвечает локально ──────────────
+_status_diag_5_subhttp() {
+  local port="" code=""
+  port=$(_status_sub_port)
+  if [[ -z "$port" ]]; then
+    _STATUS_REASON="порт подписки неизвестен"
+    return 1
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    _STATUS_REASON="curl не найден"
+    return 1
+  fi
+  local mode=""
+  mode=$(cat "$STATUS_SUB_MODE_FILE" 2>/dev/null || true)
+  code=$(_status_sub_http_code "$port")
+  if [[ "$code" =~ ^[23] && "$mode" == "local_only" ]]; then
+    _STATUS_REASON="local-only режим: снаружи клиент подписку не заберёт"
+    return 1
+  fi
+  if [[ "$code" =~ ^[23] ]]; then
+    return 0
+  fi
+  if ! _status_first_profile_token >/dev/null 2>&1; then
+    # Нет ни одного профиля с sub_token — проверять содержимое подписки нечем.
+    # 404 здесь — штатный ответ handler'а (strict regex), значит цепочка жива.
+    if [[ "$code" == "404" ]]; then
+      return 0
+    fi
+    _STATUS_REASON="локально HTTP ${code} (нет профилей с sub_token)"
+    return 1
+  fi
+  _STATUS_REASON="локально HTTP ${code}"
+  return 1
+}
+
+_status_repair_5_subhttp() {
+  if command -v journalctl >/dev/null 2>&1; then
+    echo -e "${CYAN}  → Последние строки лога ${STATUS_SUB_SERVICE}:${NC}"
+    journalctl -u "$STATUS_SUB_SERVICE" -n 20 --no-pager 2>/dev/null | tail -20 || true
+  else
+    echo -e "${YELLOW}  ⚠ journalctl не найден — лог сервиса недоступен${NC}"
+  fi
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ systemctl не найден — сервис не перезапустить${NC}"
+    return 1
+  fi
+  local state=""
+  state=$(systemctl is-active "$STATUS_SUB_SERVICE" 2>/dev/null || true)
+  if [[ "$state" == "active" ]]; then
+    # Сервис жив, но ответ не 2xx/3xx: переустанавливаем handler
+    # (_subscription_repair_handler = install_subscription_server + restart).
+    echo -e "${YELLOW}  ℹ Сервис активен, но handler не отдаёт подписку — переустанавливаю handler${NC}"
+    if declare -F _subscription_repair_handler >/dev/null 2>&1; then
+      _subscription_repair_handler && return 0
+    fi
+    echo -e "${YELLOW}    Починка профилей: sudo xraytailscale subscription-repair${NC}"
+    return 1
+  fi
+  echo -e "${CYAN}  → Сервис ${state:-неизвестно} — перезапуск ${STATUS_SUB_SERVICE}...${NC}"
+  systemctl reset-failed "$STATUS_SUB_SERVICE" >/dev/null 2>&1 || true
+  systemctl restart "$STATUS_SUB_SERVICE" 2>/dev/null || return 1
+  sleep 2
+  systemctl is-active --quiet "$STATUS_SUB_SERVICE" 2>/dev/null
+}
+
+# ── Проверка 6/7: сертификат ──────────────────────────────
+_status_diag_6_cert() {
+  if ! command -v openssl >/dev/null 2>&1; then
+    _STATUS_REASON="openssl не найден"
+    return 1
+  fi
+
+  _status_detect_mode
+  local subject="" days=""
+  if [[ "$_STATUS_MODE_KIND" == "selfsteal" && -n "$_STATUS_MODE_DOMAIN" ]]; then
+    subject="$_STATUS_MODE_DOMAIN"
+  elif [[ -f "$STATUS_SUB_MARKER" ]]; then
+    subject=$(cat "$STATUS_SUB_DOMAIN_FILE" 2>/dev/null || true)
+    [[ "$subject" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || subject=""
+  fi
+
+  if [[ -z "$subject" ]]; then
+    # IP-режим без файла сертификата: подписка могла не встать — это ловит
+    # проверка 3, здесь не дублируем ошибку.
+    return 0
+  fi
+  if ! days=$(_status_cert_days "$subject"); then
+    _STATUS_REASON="нет сертификата ${STATUS_LE_LIVE_DIR}/${subject}/fullchain.pem"
+    return 1
+  fi
+  if [[ "$days" -lt "$STATUS_CERT_WARN_DAYS" ]]; then
+    _STATUS_REASON="осталось ${days} дн. (< ${STATUS_CERT_WARN_DAYS})"
+    return 1
+  fi
+  return 0
+}
+
+_status_repair_6_cert() {
+  if ! command -v certbot >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ certbot не найден${NC}"
+    echo -e "${YELLOW}    apt-get install -y certbot${NC}"
+    return 1
+  fi
+  echo -e "${CYAN}  → certbot renew --dry-run (реальный renew НЕ выполняется)...${NC}"
+  local out="" rc=0
+  if command -v timeout >/dev/null 2>&1; then
+    out=$(timeout 300 certbot renew --dry-run 2>&1) || rc=$?
+  else
+    out=$(certbot renew --dry-run 2>&1) || rc=$?
+  fi
+  printf '%s\n' "$out" | tail -20
+  if [[ "$rc" -ne 0 ]]; then
+    echo -e "${RED}  ✗ dry-run завершился с кодом ${rc}${NC}"
+    echo -e "${YELLOW}    Проверьте :80 (ACME) и DNS домена.${NC}"
+    return 1
+  fi
+  echo -e "${GREEN}  ✓ dry-run прошёл: renew работоспособен${NC}"
+  # dry-run не обновляет сертификат; при <7 дней нужен реальный renew.
+  echo -e "${YELLOW}  ℹ Если сертификат истекает, выполните: certbot renew --force-renewal${NC}"
+  return 0
+}
+
+# ── Проверка 7/7: порт 80 (ACME renew) ────────────────────
+_status_diag_7_port80() {
+  if ! command -v ufw >/dev/null 2>&1; then
+    return 0
+  fi
+  local st=""
+  st=$(ufw status 2>/dev/null || true)
+  if ! grep -q "Status: active" <<< "$st"; then
+    return 0
+  fi
+  if grep -qE "^([0-9]+,)*80(,[0-9]+)*/tcp[[:space:]]+ALLOW" <<< "$st"; then
+    return 0
+  fi
+  _STATUS_REASON="ufw активен, правила для 80/tcp нет"
+  return 1
+}
+
+_status_repair_7_port80() {
+  if ! declare -F open_firewall_port >/dev/null 2>&1; then
+    echo -e "${RED}  ✗ open_firewall_port недоступна${NC}"
+    return 1
+  fi
+  open_firewall_port 80 tcp || return 1
+
+  # DNS: без A-записи на этот сервер ACME не пройдёт даже с открытым :80.
+  local domain="" server_ip="" resolved=""
+  domain=$(get_server_domain 2>/dev/null || true)
+  if [[ -n "$domain" ]]; then
+    server_ip=$(get_server_ip 2>/dev/null || true)
+    if command -v getent >/dev/null 2>&1; then
+      resolved=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' | head -1 || true)
+    fi
+    if [[ -n "$resolved" && -n "$server_ip" && "$resolved" != "$server_ip" ]]; then
+      echo -e "${YELLOW}  ⚠ DNS: ${domain} → ${resolved}, а IP сервера ${server_ip}.${NC}"
+      echo -e "${YELLOW}    Продлите/исправьте A-запись, иначе ACME renew упадёт.${NC}"
+    elif [[ -z "$resolved" ]]; then
+      echo -e "${YELLOW}  ⚠ DNS: ${domain} не резолвится — проверьте A-запись (ожидается ${server_ip:-IP сервера}).${NC}"
+    fi
+  fi
+  return 0
+}
+
+# ─── Итог диагностики ─────────────────────────────────────
+_diag_report() {
+  local remaining=$((_DIAG_PROBLEMS - _DIAG_FIXED))
+  [[ "$remaining" -lt 0 ]] && remaining=0
+  echo ""
+  if [[ "$remaining" -eq 0 ]]; then
+    echo -e "${GREEN}╔═══════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║            ✓ ВСЁ В ПОРЯДКЕ                ║${NC}"
+    echo -e "${GREEN}╚═══════════════════════════════════════════╝${NC}"
+    echo -e "${GREEN}Исправлено: ${_DIAG_FIXED}, осталось проблем: 0${NC}"
+  else
+    echo -e "${YELLOW}Исправлено: ${_DIAG_FIXED}, осталось проблем: ${remaining}${NC}"
+    echo -e "${YELLOW}  Повторите диагностику после устранения причин.${NC}"
+  fi
+  return 0
+}
+
+# ─── Главный сценарий диагностики ─────────────────────────
+diagnose_and_repair() {
+  _DIAG_PROBLEMS=0
+  _DIAG_FIXED=0
+  _DIAG_ABORT=0
+
+  echo ""
+  echo -e "${MAGENTA}═══ ДИАГНОСТИКА И ПОЧИНКА (7 проверок) ═══${NC}"
+  echo ""
+
+  _diag_step 1 "Xray запущен"                     _status_diag_1_xray    _status_repair_1_xray
+  [[ "$_DIAG_ABORT" -eq 1 ]] && { _diag_report; return 1; }
+
+  _diag_step 2 "Порт :443 слушает Xray"           _status_diag_2_port443 _status_repair_2_port443
+  [[ "$_DIAG_ABORT" -eq 1 ]] && { _diag_report; return 1; }
+
+  _diag_step 3 "Подписка установлена"             _status_diag_3_subscription _status_repair_3_subscription
+  [[ "$_DIAG_ABORT" -eq 1 ]] && { _diag_report; return 1; }
+
+  _diag_step 4 "Порт подписки слушается"          _status_diag_4_subport _status_repair_4_subport
+  [[ "$_DIAG_ABORT" -eq 1 ]] && { _diag_report; return 1; }
+
+  _diag_step 5 "Подписка отвечает локально"       _status_diag_5_subhttp _status_repair_5_subhttp
+  [[ "$_DIAG_ABORT" -eq 1 ]] && { _diag_report; return 1; }
+
+  _diag_step 6 "Сертификат действителен"          _status_diag_6_cert    _status_repair_6_cert
+  [[ "$_DIAG_ABORT" -eq 1 ]] && { _diag_report; return 1; }
+
+  _diag_step 7 "Порт 80 открыт (ACME renew)"      _status_diag_7_port80  _status_repair_7_port80
+
+  _diag_report
+  _status_pause
+  [[ "$((_DIAG_PROBLEMS - _DIAG_FIXED))" -le 0 ]] && return 0
+  return 1
+}
 create_profile_menu() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
@@ -6632,7 +8795,7 @@ create_profile_menu() {
   echo ""
   echo -e "${CYAN} 1)${NC} Multi-route профиль ${YELLOW}(ручной режим, как готовая HAPP-подписка)${NC}"
   echo -e "    ${GREEN}✓${NC} Семь маршрутов в одном профиле: xhttp-legacy, xhttp-pq, TCP, gRPC"
-  echo -e "    ${BLUE}ℹ${NC} Обычному HAPP-пользователю проще выбрать пункт 9 в главном меню"
+  echo -e "    ${BLUE}ℹ${NC} Обычному HAPP-пользователю проще выбрать «Дополнительно → Управление подпиской HAPP»"
   echo ""
   echo -e "${CYAN} 2)${NC} VLESS + TCP + Reality + Vision ${YELLOW}(legacy, отдельный профиль)${NC}"
   echo -e "    ${GREEN}✓${NC} Для sing-box, Hiddify, NekoBox, mihomo и старых клиентов без PQ"
@@ -8980,6 +11143,198 @@ bypass_routing_menu() {
 # Сохраняет UUID и port исходного инбаунда; перезаписывает streamSettings + decryption.
 # При shared inbound (>1 профиля на порту) — ВСЕ профили на этом порту переводятся.
 # Внутренне разбит на 3 фазы (1a UI / 1b MUTATION / 1c POST-MUTATION) для checkpoint-recoverability.
+# Перевод одного single-route профиля на XHTTP+PQ без интерактивного UI.
+# Используется и ручным меню, и автоматической миграцией.
+# Возврат: 0 — профиль (и все профили на его порту) обновлён, 1 — ошибка.
+_pq_upgrade_one_profile() {
+  local name="$1"
+  local pfile="$PROFILES_DIR/$name.json"
+
+  if [[ ! -f "$pfile" ]]; then
+    echo -e "${RED}✗ Профиль не найден: $name${NC}"
+    return 1
+  fi
+  if profile_has_routes "$pfile"; then
+    echo -e "${RED}✗ Multi-route профиль '$name' нельзя перевести целиком через PQ-апгрейд${NC}"
+    return 1
+  fi
+  if _profile_is_bulk_seed_file "$pfile"; then
+    echo -e "${RED}✗ Служебный bulk-seed профиль '$name' пропущен${NC}"
+    return 1
+  fi
+  if [[ "$(jq -r '.pq_enabled // false' "$pfile" 2>/dev/null)" == "true" ]]; then
+    echo -e "${CYAN}  → Профиль '$name' уже использует PQ${NC}"
+    return 0
+  fi
+
+  # Бэкап нужен до любой мутации config.json; точный путь используется для отката.
+  local rollback_config=""
+  if ! backup_config "upgrade_profile_pq_$name" rollback_config; then
+    echo -e "${RED}✗ Не удалось создать бэкап перед PQ-апгрейдом профиля '$name'${NC}"
+    return 1
+  fi
+
+  local port uuid
+  port=$(jq -r '.port // empty' "$pfile" 2>/dev/null)
+  uuid=$(jq -r '.uuid // empty' "$pfile" 2>/dev/null)
+  if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ -z "$uuid" || "$uuid" == "null" ]]; then
+    echo -e "${RED}✗ Профиль '$name' не содержит корректные port/uuid${NC}"
+    return 1
+  fi
+
+  # UUID выбранного клиента сопоставляем с текущим inbound; SNI и short_id берём
+  # только из config.json, чтобы не разойтись с фактическими Reality-настройками.
+  local current_inbound
+  current_inbound=$(jq -c --argjson p "$port" --arg uuid "$uuid" '
+    first(.inbounds[]?
+      | select(.port == $p)
+      | select(any(.settings.clients[]?; (.id // "") == $uuid)))
+  ' "$CONFIG_FILE" 2>/dev/null)
+  if [[ -z "$current_inbound" || "$current_inbound" == "null" ]]; then
+    echo -e "${RED}✗ Не найден текущий inbound профиля '$name' на порту $port${NC}"
+    return 1
+  fi
+
+  local sni short_id
+  sni=$(jq -r '.streamSettings.realitySettings.serverNames[0] // empty' <<< "$current_inbound")
+  short_id=$(jq -r '.streamSettings.realitySettings.shortIds[0] // empty' <<< "$current_inbound")
+  if [[ -z "$sni" ]]; then
+    echo -e "${RED}✗ В inbound на порту $port отсутствует Reality SNI${NC}"
+    return 1
+  fi
+  if [[ -z "$short_id" ]]; then
+    # Fallback для повреждённого legacy inbound без shortIds.
+    short_id=$(openssl rand -hex 8)
+  fi
+
+  local VLESS_DECRYPTION
+  VLESS_DECRYPTION=$(cat "$VLESS_DECRYPTION_FILE" 2>/dev/null)
+  if [[ -z "$VLESS_DECRYPTION" ]]; then
+    echo -e "${RED}✗ $VLESS_DECRYPTION_FILE пуст или отсутствует — апгрейд прерван${NC}"
+    return 1
+  fi
+
+  local xhttp_path="/$(openssl rand -hex 8)"
+  local PRIVATE_KEY
+  PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE" 2>/dev/null)
+  if [[ -z "$PRIVATE_KEY" ]]; then
+    echo -e "${RED}✗ Reality private key пуст или отсутствует: $PRIVATE_KEY_FILE${NC}"
+    return 1
+  fi
+
+  local profiles_on_port=($(get_profiles_on_port "$port"))
+  if [[ ${#profiles_on_port[@]} -eq 0 ]]; then
+    profiles_on_port=("$name")
+  fi
+
+  # REPLACE inbound с port=$port на XHTTP+PQ с сохранёнными UUID, портом и SNI.
+  local new_inbound
+  new_inbound=$(cat << UPGEOF
+{
+  "listen": "0.0.0.0",
+  "port": $port,
+  "protocol": "vless",
+  "settings": {
+    "clients": [{"id": "$uuid", "flow": ""}],
+    "decryption": "$VLESS_DECRYPTION"
+  },
+  "streamSettings": {
+    "network": "xhttp",
+    "security": "reality",
+    "xhttpSettings": {
+      "mode": "stream-one",
+      "path": "$xhttp_path",
+      "extra": {
+        "xPaddingBytes": "100-1000",
+        "xmux": {
+          "maxConcurrency": "16-32",
+          "hMaxRequestTimes": "600-900",
+          "hMaxReusableSecs": "1800-3000",
+          "hKeepAlivePeriod": 0
+        },
+        "noSSEHeader": true,
+        "scMaxEachPostBytes": "1000000-2000000",
+        "scMinPostsIntervalMs": "10-50"
+      }
+    },
+    "realitySettings": {
+      "show": false,
+      "dest": "$sni:443",
+      "xver": 0,
+      "serverNames": ["$sni"],
+      "privateKey": "$PRIVATE_KEY",
+      "shortIds": ["$short_id"]
+    }
+  },
+  "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true},
+  "tag": "inbound-$port"
+ }
+UPGEOF
+)
+
+  # На общем inbound сохраняем UUID всех профилей этого порта.
+  if [[ ${#profiles_on_port[@]} -gt 1 ]]; then
+    local clients_json="["
+    local first=1
+    local p pu
+    for p in "${profiles_on_port[@]}"; do
+      pu=$(jq -r '.uuid // empty' "$PROFILES_DIR/$p.json" 2>/dev/null)
+      if [[ -z "$pu" ]]; then
+        echo -e "${RED}✗ Не удалось прочитать UUID профиля '$p' на порту $port${NC}"
+        return 1
+      fi
+      if [[ $first -eq 1 ]]; then first=0; else clients_json+=","; fi
+      clients_json+="{\"id\":\"$pu\",\"flow\":\"\"}"
+    done
+    clients_json+="]"
+    new_inbound=$(jq --argjson c "$clients_json" '.settings.clients = $c' <<< "$new_inbound")
+    if [[ -z "$new_inbound" ]]; then
+      echo -e "${RED}✗ Не удалось собрать список клиентов для порта $port${NC}"
+      return 1
+    fi
+  fi
+
+  # Атомарная замена: удаление по порту + append нового inbound.
+  if ! safe_jq_write --argjson port "$port" --argjson new_in "$new_inbound" \
+    '(.inbounds |= map(select(.port != $port))) | .inbounds += [$new_in]' \
+    "$CONFIG_FILE"; then
+    echo -e "${RED}✗ Ошибка обновления config.json для профиля '$name'${NC}"
+    _restore_config_backup "$rollback_config" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  # Сначала применяем config.json, затем синхронизируем profile JSON.
+  fix_xray_permissions
+  if ! safe_restart_xray "$rollback_config"; then
+    echo -e "${RED}✗ safe_restart_xray failed — config откачен на бэкап upgrade_profile_pq_$name${NC}"
+    echo -e "${YELLOW}  Profile JSON не менялся — состояние профилей сохранено.${NC}"
+    _restore_config_backup "$rollback_config" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  # short_id остаётся только в config.json — единственном источнике истины.
+  local profile_failed=0
+  local p
+  for p in "${profiles_on_port[@]}"; do
+    if ! safe_jq_write --arg path "$xhttp_path" \
+      '.transport = "xhttp" | .schema_version = 2 | .pq_enabled = true | .xhttp_path = $path' \
+      "$PROFILES_DIR/$p.json"; then
+      echo -e "${RED}  ✗ Ошибка обновления profile JSON: $p${NC}"
+      ((profile_failed += 1))
+    else
+      echo -e "${CYAN}  → Обновлен: ${YELLOW}$p${NC}"
+    fi
+  done
+
+  if [[ $profile_failed -gt 0 ]]; then
+    echo -e "${RED}✗ PQ-апгрейд '$name': config.json применён, но $profile_failed profile JSON требуют повторной миграции${NC}"
+    return 1
+  fi
+
+  echo -e "${GREEN}✓ Профиль '$name' успешно переведён на XHTTP+PQ${NC}"
+  return 0
+}
+
 upgrade_profile_to_pq_menu() {
   # === Phase 1a: UI / VALIDATION ===
   # Цель: собрать и провалидировать все входные данные ДО любых мутаций.
@@ -9058,23 +11413,11 @@ upgrade_profile_to_pq_menu() {
   fi
   local port=$(jq -r '.port' "$pfile")
   local uuid=$(jq -r '.uuid' "$pfile")
-  local sni=$(jq -r '.sni // "www.ozon.ru"' "$pfile")
-  local fingerprint=$(jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.fingerprint // $default_fp' "$pfile")
-  local old_transport=$(jq -r '.transport // "tcp"' "$pfile")
-
-  # H1 fix: short_id ЧИТАЕМ ИЗ СУЩЕСТВУЮЩЕГО INBOUND (config.json), НЕ из profile JSON.
-  # create_profile() в xraytailscale НИКОГДА не сохраняет short_id в profile JSON.
-  # Если на shared inbound сгенерировать новый short_id — Reality порвёт ВСЕ остальные клиенты на порту.
-  # Зеркалим логику generate_connection() (xraytailscale:2217-2220): берём первый shortIds[0] из инбаунда.
-  local short_id
-  short_id=$(jq -r --argjson p "$port" \
-    '.inbounds[] | select(.port == $p) | .streamSettings.realitySettings.shortIds[0]' \
+  local sni
+  sni=$(jq -r --argjson p "$port" \
+    '.inbounds[] | select(.port == $p) | .streamSettings.realitySettings.serverNames[0] // "www.ozon.ru"' \
     "$CONFIG_FILE" 2>/dev/null)
-  if [[ -z "$short_id" || "$short_id" == "null" ]]; then
-    # Inbound не содержит shortIds (corrupted/legacy без Reality?) — генерируем как last resort.
-    # На shared inbound этот fallback ОБЫЧНО НЕ срабатывает: install.sh всегда пишет shortIds.
-    short_id=$(openssl rand -hex 8)
-  fi
+  local old_transport=$(jq -r '.transport // "tcp"' "$pfile")
 
   # CRITICAL: проверка shared inbound — если на порту другие профили, ВСЕ они уйдут в PQ
   local profiles_on_port=($(get_profiles_on_port "$port"))
@@ -9115,127 +11458,16 @@ upgrade_profile_to_pq_menu() {
     echo -e "${YELLOW}Апгрейд отменён.${NC}"; sleep 2; return
   fi
 
-  # === Phase 1b: MUTATION ===
-  # Цель: атомарно заменить inbound на XHTTP+PQ + рестартнуть Xray.
-  # Все мутации защищены backup + safe_jq_write + safe_restart_xray (auto-rollback).
-  # Если safe_restart_xray fails — config откачен, Xray работает на старой конфигурации,
-  # profile JSON ещё НЕ менялся (Phase 1c не достигнута) — состояние согласовано.
-  echo -e "${CYAN}→ Phase 1b: бэкап и замена inbound в config.json${NC}"
-
-  # Шаг A: бэкап (на случай ошибки)
-  local rollback_config=""
-  backup_config "upgrade_profile_pq_$selected" rollback_config || return
-
-  # Шаг B: читаем содержимое decryption ОДИН раз
-  local VLESS_DECRYPTION
-  VLESS_DECRYPTION=$(cat "$VLESS_DECRYPTION_FILE")
-  if [[ -z "$VLESS_DECRYPTION" ]]; then
-    echo -e "${RED}✗ $VLESS_DECRYPTION_FILE пуст — апгрейд прерван${NC}"; sleep 2; return
+  # === Phase 1b/1c: общая мутация config.json и profile JSON ===
+  echo -e "${CYAN}→ Перевод профиля на XHTTP+PQ${NC}"
+  if ! _pq_upgrade_one_profile "$selected"; then
+    echo -e "${RED}✗ PQ-апгрейд профиля '$selected' не завершён${NC}"
+    echo -n -e "${YELLOW}Нажмите Enter для возврата в меню...${NC}"
+    read -r _ || true
+    return
   fi
-
-  # Шаг C: сгенерировать XHTTP path (как делает add_inbound) — простой случайный
-  local xhttp_path="/$(openssl rand -hex 8)"
-  local PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
-
-  # Шаг D: REPLACE inbound с port=$port на новый XHTTP+pq shape (с СОХРАНЁННЫМ uuid)
-  # Стратегия: del-by-port + append (НЕ object merge — иначе clobber freedom outbound и т.п.)
-  local new_inbound
-  new_inbound=$(cat << UPGEOF
-{
-  "listen": "0.0.0.0",
-  "port": $port,
-  "protocol": "vless",
-  "settings": {
-    "clients": [{"id": "$uuid", "flow": ""}],
-    "decryption": "$VLESS_DECRYPTION"
-  },
-  "streamSettings": {
-    "network": "xhttp",
-    "security": "reality",
-    "xhttpSettings": {
-      "mode": "stream-one",
-      "path": "$xhttp_path",
-      "extra": {
-        "xPaddingBytes": "100-1000",
-        "xmux": {
-          "maxConcurrency": "16-32",
-          "hMaxRequestTimes": "600-900",
-          "hMaxReusableSecs": "1800-3000",
-          "hKeepAlivePeriod": 0
-        },
-        "noSSEHeader": true,
-        "scMaxEachPostBytes": "1000000-2000000",
-        "scMinPostsIntervalMs": "10-50"
-      }
-    },
-    "realitySettings": {
-      "show": false,
-      "dest": "$sni:443",
-      "xver": 0,
-      "serverNames": ["$sni"],
-      "privateKey": "$PRIVATE_KEY",
-      "shortIds": ["$short_id"]
-    }
-  },
-  "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true},
-  "tag": "inbound-$port"
- }
-UPGEOF
-)
-
-  # ВАЖНО: если на порту были другие профили, их UUID должны быть в clients[]. Собираем их.
-  if [[ ${#profiles_on_port[@]} -gt 1 ]]; then
-    # Собрать массив clients из всех profile JSON на этом порту
-    local clients_json="["
-    local first=1
-    for p in "${profiles_on_port[@]}"; do
-      local pu=$(jq -r '.uuid' "$PROFILES_DIR/$p.json")
-      if [[ $first -eq 1 ]]; then first=0; else clients_json+=","; fi
-      clients_json+="{\"id\":\"$pu\",\"flow\":\"\"}"
-    done
-    clients_json+="]"
-    # Подменить settings.clients в new_inbound через jq
-    new_inbound=$(echo "$new_inbound" | jq --argjson c "$clients_json" '.settings.clients = $c')
-  fi
-
-  # Шаг E: атомарная замена — del-by-port + append
-  if ! safe_jq_write --argjson port "$port" --argjson new_in "$new_inbound" \
-    '(.inbounds |= map(select(.port != $port))) | .inbounds += [$new_in]' \
-    "$CONFIG_FILE"; then
-    echo -e "${RED}✗ Ошибка обновления config.json${NC}"; sleep 2; return
-  fi
-
-  # Шаг F: восстановить permissions и рестарт с auto-rollback ДО profile JSON.
-  fix_xray_permissions
-  if ! safe_restart_xray "$rollback_config"; then
-    echo -e "${RED}✗ safe_restart_xray failed — config откачен на бэкап upgrade_profile_pq_$selected${NC}"
-    echo -e "${YELLOW}  Profile JSON не менялся — состояние профилей сохранено.${NC}"
-    sleep 3; return
-  fi
-
-  # === Phase 1c: POST-MUTATION ===
-  # Цель: синхронизировать profile JSON со state'ом config.json + показать новую ссылку.
-  # Достигается ТОЛЬКО если Phase 1b прошла полностью (config.json обновлён + Xray рестартнул).
-  # Если safe_jq_write на profile JSON фейлится — config.json уже на новом inbound, оператор
-  # увидит ошибку и сможет исправить profile JSON вручную (jq + safe_jq_write helper).
-  echo -e "${CYAN}→ Phase 1c: синхронизация profile JSON и вывод новой vless:// ссылки${NC}"
-
-  # Шаг F: обновить profile JSON (selected И всех на порту, если shared)
-  # H1 fix: НЕ записываем short_id в profile JSON. Schema v1 не имела этого поля,
-  # schema v2 НЕ должна вводить новое поле без явного решения. short_id живёт в
-  # config.json:.inbounds[].streamSettings.realitySettings.shortIds[0] — один источник истины.
-  for p in "${profiles_on_port[@]}"; do
-    if ! safe_jq_write --arg path "$xhttp_path" \
-      '.transport = "xhttp" | .schema_version = 2 | .pq_enabled = true | .xhttp_path = $path' \
-      "$PROFILES_DIR/$p.json"; then
-      echo -e "${RED}  ✗ Ошибка обновления profile JSON: $p${NC}"
-    else
-      echo -e "${CYAN}  → Обновлен: ${YELLOW}$p${NC}"
-    fi
-  done
 
   echo ""
-  echo -e "${GREEN}✓ Профиль '$selected' успешно переведён на XHTTP+PQ${NC}"
   echo -e "${CYAN}Новая vless:// ссылка:${NC}"
   generate_connection "$selected"
   echo ""
@@ -9665,8 +11897,10 @@ _selfsteal_pick_convert_port() {
          | .[0].port // empty' "$CONFIG_FILE" 2>/dev/null
 }
 
-# Авто-перенос HAPP-подписки nginx с :443 на :8443 (нон-интерактивно).
+# Авто-перенос HAPP-подписки nginx с :443 на свободный порт (нон-интерактивно).
 # Умеет переносить ТОЛЬКО свой сайт xraytailscale-sub; чужой listener → отказ.
+# Порт НЕ хардкод 8443: он может быть занят self-steal backend'ом — выбираем
+# первый свободный через _subscription_find_free_port (35-subscription.sh).
 SELFSTEAL_SUB_NGINX_AVAILABLE="${SELFSTEAL_SUB_NGINX_AVAILABLE:-/etc/nginx/sites-available/xraytailscale-sub}"
 SUBSCRIPTION_PORT_FILE="${SUBSCRIPTION_PORT_FILE:-/usr/local/etc/xray/.subscription_port}"
 
@@ -9677,9 +11911,14 @@ _selfsteal_free_443_from_nginx() {
     echo -e "${YELLOW}  Найдите процесс: ss -tlnp 'sport = :443' — и освободите порт вручную.${NC}"
     return 1
   fi
-  echo -e "${CYAN}  → Перенос HAPP-подписки nginx :443 → :8443...${NC}"
+  local new_port
+  if ! new_port=$(_subscription_find_free_port); then
+    echo -e "${RED}✗ Нет свободного порта для переноса подписки (8443–12443 заняты)${NC}"
+    return 1
+  fi
+  echo -e "${CYAN}  → Перенос HAPP-подписки nginx :443 → :${new_port}...${NC}"
   # -i.bak: кросс-платформенно (GNU/BSD), .bak удаляется после успешного nginx -t.
-  if ! sed -i.bak -E 's/listen 443 ssl/listen 8443 ssl/; s/listen \[::\]:443 ssl/listen \[::\]:8443 ssl/' "$sub_avail"; then
+  if ! sed -i.bak -E "s/listen 443 ssl/listen ${new_port} ssl/; s/listen \\[::\\]:443 ssl/listen \\[::\\]:${new_port} ssl/" "$sub_avail"; then
     echo -e "${RED}✗ Не удалось переписать $sub_avail${NC}"
     return 1
   fi
@@ -9693,11 +11932,11 @@ _selfsteal_free_443_from_nginx() {
     echo -e "${RED}✗ nginx не перечитал конфиг${NC}"
     return 1
   fi
-  printf '8443\n' > "$SUBSCRIPTION_PORT_FILE"
+  printf '%s\n' "$new_port" > "$SUBSCRIPTION_PORT_FILE"
   chown xray:xray "$SUBSCRIPTION_PORT_FILE" 2>/dev/null || true
-  open_firewall_port 8443 tcp || \
-    echo -e "${YELLOW}  ⚠ Не удалось открыть 8443/tcp через UFW — проверьте firewall${NC}"
-  echo -e "${GREEN}  ✓ Подписка перенесена на :8443 (URL теперь с явным портом)${NC}"
+  open_firewall_port "$new_port" tcp || \
+    echo -e "${YELLOW}  ⚠ Не удалось открыть ${new_port}/tcp через UFW — проверьте firewall${NC}"
+  echo -e "${GREEN}  ✓ Подписка перенесена на :${new_port} (URL теперь с явным портом)${NC}"
   return 0
 }
 
@@ -9970,7 +12209,8 @@ selfsteal_setup() {
   echo -e "${CYAN}Схема: VLESS + Reality + Vision (xtls-rprx-vision), RAW TCP :443,${NC}"
   echo -e "${CYAN}uTLS firefox. Reality маскируется под ВАШ сайт с LE-сертификатом.${NC}"
   echo -e "${CYAN}Главный профиль КОНВЕРТИРУЕТСЯ в self-steal: UUID сохраняются,${NC}"
-  echo -e "${CYAN}ссылки перевыпускаются. nginx-подписка на :443 уйдёт на :8443.${NC}"
+  echo -e "${CYAN}ссылки перевыпускаются. nginx-подписка на :443 уйдёт на свободный${NC}"
+  echo -e "${CYAN}порт из диапазона 8443–12443.${NC}"
   echo ""
 
   # Домен: автоподстановка сохранённого, ввод один раз.
@@ -10074,7 +12314,7 @@ selfsteal_remove() {
   rm -f "$SELFSTEAL_DOMAIN_FILE" "$SELFSTEAL_PORT_FILE"
   echo -e "${GREEN}✓ Сайт и nginx-конфиг self-steal удалены${NC}"
   echo -e "${YELLOW}⚠ Профиль и inbound :443 НЕ удалены автоматически.${NC}"
-  echo -e "${YELLOW}  Удалите профиль через меню 2 — иначе Reality dest указывает на несуществующий сайт.${NC}"
+  echo -e "${YELLOW}  Удалите пользователя через «Дополнительно → Удалить пользователя» — иначе Reality dest указывает на несуществующий сайт.${NC}"
   if [[ -n "$domain" && -d "/etc/letsencrypt/live/${domain}" ]]; then
     echo -e "${YELLOW}  Сертификат LE оставлен. Удалить вручную: certbot delete --cert-name ${domain}${NC}"
   fi
@@ -10131,6 +12371,10 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
       shift
       selfsteal_auto_command "$@"
       ;;
+    wizard)
+      shift
+      wizard_command
+      ;;
     ""|menu)
       main_menu
       ;;
@@ -10143,6 +12387,7 @@ if [[ "$XRAYTAILSCALE_SOURCED" -eq 0 ]]; then
       echo -e "  ${CYAN}sudo xraytailscale bulk-repair${NC}  — alias для subscription-repair"
       echo -e "  ${CYAN}sudo xraytailscale probe-test${NC}  — проверить доступность SNI с VPS"
       echo -e "  ${CYAN}sudo xraytailscale selfsteal-auto <domain> [email]${NC}  — self-steal без меню (автодеплой)"
+      echo -e "  ${CYAN}sudo xraytailscale wizard${NC}  — мастер первичной настройки (5 шагов)"
       exit 1
       ;;
   esac

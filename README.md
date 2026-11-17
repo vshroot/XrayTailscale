@@ -52,34 +52,48 @@ sudo XT_DOMAIN=your-domain.example bash /tmp/install.sh
 # optional: XT_LE_EMAIL=you@example.com (default: admin@<domain>)
 ```
 
-Without `XT_DOMAIN` the installer keeps the classic scheme; self-steal can be
-enabled later via menu `16` or `sudo xraytailscale selfsteal-auto <domain>`.
+Without `XT_DOMAIN` the installer starts the **setup wizard** right away when
+run interactively (a tty is attached) — domain yes/no, first user, subscription,
+outside-in check, ready link/QR. Self-steal can also be enabled later via
+«Дополнительно → Self-steal» or `sudo xraytailscale selfsteal-auto <domain>`.
 
-After installation, open the manager:
-
-```bash
-sudo xraytailscale
-```
+After installation the manager is `sudo xraytailscale`; on a clean server it
+opens the wizard itself.
 
 ## Main Menu
 
-The manager is interactive. The most important options are:
+The manager adapts to the server state — you no longer pick from a 16-item list:
 
-| Option | Purpose |
-| --- | --- |
-| `1` | Create a new VLESS profile manually. |
-| `2` | Delete an existing profile and its unused inbounds. |
-| `3` | Show raw connection data for a profile. |
-| `4` | Manage profile SNI, fingerprint, port, and advanced settings. |
-| `8` | Upgrade a legacy profile to post-quantum XHTTP. |
-| `9` | Create or manage a HAPP subscription profile. |
-| `10` | Generate and manage bulk HAPP multi-route users. |
-| `11` | Update Xray-core. |
-| `12` | Manage bypass routing rules. |
-| `13` | Install and configure Tailscale as an exit node. |
-| `14` | Configure cascade routing through an upstream node. |
-| `15` | Create an outbound-server node on a separate overseas VPS. |
-| `16` | Self-steal: VLESS+Reality+Vision on :443 behind your own website. |
+- **Clean server** (no inbounds yet, or no subscription) → the **setup wizard**
+  starts automatically: server check → domain yes/no → first user →
+  subscription → outside-in verification → ready link/QR.
+- **Configured server** → the **status screen**:
+
+```text
+  1) Добавить пользователя
+  2) Показать ссылки / QR
+  3) Диагностика и починка
+  4) Дополнительно →
+  0) Выход
+```
+
+The status header shows mode (domain/IP), Xray, port 443, subscription,
+certificate expiry, firewall and the user list — each line ✓/✗/⚠.
+
+**«Дополнительно»** keeps everything rare: bulk HAPP users, Tailscale exit
+node, cascade (bypass rules and the outbound node live inside the cascade
+menu — they only make sense with a cascade enabled), HAPP subscription
+management, self-steal status/removal, advanced profile settings
+(SNI/port/fingerprint), user deletion, Xray-core update.
+
+Re-run the wizard any time:
+
+```bash
+sudo xraytailscale wizard          # resume from the saved step
+```
+
+New users are created with **XHTTP + post-quantum** transport by default; the
+transport question is not asked.
 
 ## HAPP Subscription Setup
 
@@ -89,10 +103,10 @@ Open the manager:
 sudo xraytailscale
 ```
 
-Choose:
+Status screen → **«Дополнительно»**:
 
 ```text
-9) HAPP subscription
+4) Дополнительно → 4) Управление подпиской HAPP
 ```
 
 You can create a public subscription by VPS IP or by domain. Domain mode is better for daily use. The script creates a multi-route profile and returns a subscription URL like:
@@ -135,10 +149,10 @@ Open the manager:
 sudo xraytailscale
 ```
 
-Choose:
+Status screen → **«Дополнительно»**:
 
 ```text
-10) Bulk HAPP users
+4) Дополнительно → 1) Пакетное добавление пользователей
 ```
 
 The bulk generator creates one hidden shared multi-route seed profile named `_bulk_seed`, then creates normal user profiles such as:
@@ -182,10 +196,10 @@ Open the manager:
 sudo xraytailscale
 ```
 
-Choose:
+Status screen → **«Дополнительно»**:
 
 ```text
-13) Tailscale exit node
+4) Дополнительно → 2) Tailscale exit node
 ```
 
 The script installs Tailscale, enables IP forwarding, starts `tailscaled`, and advertises the VPS as an exit node.
@@ -214,7 +228,7 @@ client -> main VPS -> upstream VPS -> internet
 On the upstream VPS, install XrayTailscale and choose:
 
 ```text
-15) Create outbound server
+4) Дополнительно → 3) Каскад / upstream → 5) Поднять outbound-сервер
 ```
 
 This creates a TCP Reality Vision inbound and prints the values needed by the main VPS: host, port, UUID, public key, short ID, SNI, fingerprint, and flow.
@@ -222,7 +236,7 @@ This creates a TCP Reality Vision inbound and prints the values needed by the ma
 On the main VPS, choose:
 
 ```text
-14) Cascade / upstream nodes
+4) Дополнительно → 3) Каскад / upstream
 ```
 
 Enter the upstream values, then enable cascade mode. XrayTailscale stores the upstream config in `/usr/local/etc/xray/upstreams/cascade.json`, adds `cascade-upstream` and `cascade-fragment` outbounds, and switches only the default catch-all `tcp,udp` route to the cascade outbound. Existing bypass rules stay above the catch-all rule and continue to go direct.
@@ -251,13 +265,13 @@ Open the manager:
 sudo xraytailscale
 ```
 
-Choose:
+Status screen → **«Дополнительно»**:
 
 ```text
-16) Self-steal
+4) Дополнительно → 5) Self-steal (статус/удаление)
 ```
 
-The wizard asks for the domain once (a previously saved domain is offered as
+The self-steal wizard asks for the domain once (a previously saved domain is offered as
 the default and reused automatically), checks DNS strictly, then automatically:
 
 - frees port `443` if needed: an existing HAPP subscription nginx site on `:443`
@@ -285,10 +299,11 @@ sudo xraytailscale selfsteal-auto your-domain.example [email]
 # or with the saved domain: sudo xraytailscale selfsteal-auto
 ```
 
-On existing servers, after an update the manager auto-converts the main
-profile once if a server domain was previously saved and self-steal is not
-configured yet (marker `.selfsteal_autoconvert_seen`; retry manually via
-menu `16` on failure).
+The setup wizard provisions self-steal as part of its normal flow when you
+answer "yes" to the domain question, so on a clean server there is nothing to
+run by hand. On an existing server, either re-run `sudo xraytailscale wizard`
+or call `sudo xraytailscale selfsteal-auto <domain>`; the manager no longer
+converts the main inbound silently at menu start.
 
 Requirements: a public IPv4 VPS with an A-record pointing the domain to it,
 ports `80` and `443` reachable. An inbound already converted to self-steal on
@@ -322,7 +337,7 @@ sudo xraytailscale
 Then choose:
 
 ```text
-11) Update Xray-core
+4) Дополнительно → 8) Обновить Xray-core
 ```
 
 ## Uninstall
@@ -386,26 +401,12 @@ From the repository root:
 
 ```bash
 bash -n xraytailscale install.sh update.sh uninstall.sh
-bash validation/test-build-sync.sh
-bash validation/test-domain-defaults.sh
-bash validation/test-selfsteal-static.sh
-bash validation/test-client-only-fingerprint.sh
-bash validation/test-vless-url-generation.sh
-bash validation/test-bulk-happ-users.sh
-bash validation/test-cascade-routing.sh
-bash validation/test-happ-server-name.sh
-bash validation/test-happ-subscription-static.sh
-bash validation/test-host-network-cleanup.sh
-bash validation/test-multiroute-xhttp-path-generation.sh
-bash validation/test-project-update-rollback.sh
-bash validation/test-transaction-rollback-hardening.sh
-bash validation/test-xhttp-path-sync-migration.sh
-bash validation/test-xhttp-cascade-upstream-import.sh
-bash validation/test-update-xray-core-sync.sh
-bash validation/test-mutation-safety-static.sh
-bash validation/test-tailscale-exit-node-static.sh
-bash validation/test-xraytailscale-branding-static.sh
+./build.sh
+for t in validation/test-*.sh; do bash "$t" || echo "FAIL: $t"; done
 ```
+
+`validation/test-build-sync.sh` enforces that the committed `xraytailscale`
+matches `src/` exactly, so always rebuild before committing.
 
 ## License
 

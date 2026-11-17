@@ -60,14 +60,18 @@ extract_fn xraytailscale change_sni_menu > "$tmpdir/change_sni_menu"
 extract_fn xraytailscale change_fingerprint_menu > "$tmpdir/change_fingerprint_menu"
 extract_fn xraytailscale change_port_menu > "$tmpdir/change_port_menu"
 extract_fn xraytailscale upgrade_profile_to_pq_menu > "$tmpdir/upgrade_profile_to_pq_menu"
+extract_fn xraytailscale _pq_upgrade_one_profile > "$tmpdir/_pq_upgrade_one_profile"
 extract_fn xraytailscale main_menu > "$tmpdir/main_menu"
+extract_fn xraytailscale _status_extra_menu > "$tmpdir/status_extra_menu"
 
 [[ -s "$tmpdir/delete_profile_menu" ]] || fail "delete_profile_menu not found"
 [[ -s "$tmpdir/change_sni_menu" ]] || fail "change_sni_menu not found"
 [[ -s "$tmpdir/change_fingerprint_menu" ]] || fail "change_fingerprint_menu not found"
 [[ -s "$tmpdir/change_port_menu" ]] || fail "change_port_menu not found"
 [[ -s "$tmpdir/upgrade_profile_to_pq_menu" ]] || fail "upgrade_profile_to_pq_menu not found"
+[[ -s "$tmpdir/_pq_upgrade_one_profile" ]] || fail "_pq_upgrade_one_profile not found"
 [[ -s "$tmpdir/main_menu" ]] || fail "main_menu not found"
+[[ -s "$tmpdir/status_extra_menu" ]] || fail "_status_extra_menu not found"
 
 echo "Checking operator mutation safety invariants"
 
@@ -103,13 +107,16 @@ assert_order "$tmpdir/change_port_menu" 'if ! safe_restart_xray "$rollback_confi
 assert_not_contains "$tmpdir/change_port_menu" 'safe_restart_xray;'
 echo "  ok change_port_menu"
 
-assert_order "$tmpdir/upgrade_profile_to_pq_menu" 'if ! safe_restart_xray "$rollback_config"; then' "'.transport = \"xhttp\" | .schema_version = 2 | .pq_enabled = true | .xhttp_path = \$path'"
+assert_order "$tmpdir/_pq_upgrade_one_profile" 'if ! safe_restart_xray "$rollback_config"; then' "'.transport = \"xhttp\" | .schema_version = 2 | .pq_enabled = true | .xhttp_path = \$path'"
+assert_contains "$tmpdir/upgrade_profile_to_pq_menu" '_pq_upgrade_one_profile "$selected"'
+assert_not_contains "$tmpdir/upgrade_profile_to_pq_menu" 'safe_restart_xray "$rollback_config"'
+assert_not_contains "$tmpdir/upgrade_profile_to_pq_menu" 'safe_jq_write'
 assert_not_contains "$tmpdir/upgrade_profile_to_pq_menu" 'Profile JSON МОЖЕТ'
-echo "  ok upgrade_profile_to_pq_menu"
+echo "  ok _pq_upgrade_one_profile + upgrade_profile_to_pq_menu"
 
-assert_contains "$tmpdir/main_menu" 'Обновить Xray-core'
-assert_contains "$tmpdir/main_menu" '11) update_command ;;'
-echo "  ok main_menu"
+assert_contains "$tmpdir/status_extra_menu" 'Обновить Xray-core'
+assert_contains "$tmpdir/status_extra_menu" 'update_command'
+echo "  ok _status_extra_menu"
 
 assert_order install.sh 'for ufw_port in 22 80 443 8443 2053 2083 2087 8080 2096 8880 9443; do' 'ufw --force enable'
 assert_order install.sh 'if [[ $UFW_ERRORS -gt 0 ]]; then' 'ufw --force enable'

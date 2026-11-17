@@ -1,3 +1,195 @@
+# Перевод одного single-route профиля на XHTTP+PQ без интерактивного UI.
+# Используется и ручным меню, и автоматической миграцией.
+# Возврат: 0 — профиль (и все профили на его порту) обновлён, 1 — ошибка.
+_pq_upgrade_one_profile() {
+  local name="$1"
+  local pfile="$PROFILES_DIR/$name.json"
+
+  if [[ ! -f "$pfile" ]]; then
+    echo -e "${RED}✗ Профиль не найден: $name${NC}"
+    return 1
+  fi
+  if profile_has_routes "$pfile"; then
+    echo -e "${RED}✗ Multi-route профиль '$name' нельзя перевести целиком через PQ-апгрейд${NC}"
+    return 1
+  fi
+  if _profile_is_bulk_seed_file "$pfile"; then
+    echo -e "${RED}✗ Служебный bulk-seed профиль '$name' пропущен${NC}"
+    return 1
+  fi
+  if [[ "$(jq -r '.pq_enabled // false' "$pfile" 2>/dev/null)" == "true" ]]; then
+    echo -e "${CYAN}  → Профиль '$name' уже использует PQ${NC}"
+    return 0
+  fi
+
+  # Бэкап нужен до любой мутации config.json; точный путь используется для отката.
+  local rollback_config=""
+  if ! backup_config "upgrade_profile_pq_$name" rollback_config; then
+    echo -e "${RED}✗ Не удалось создать бэкап перед PQ-апгрейдом профиля '$name'${NC}"
+    return 1
+  fi
+
+  local port uuid
+  port=$(jq -r '.port // empty' "$pfile" 2>/dev/null)
+  uuid=$(jq -r '.uuid // empty' "$pfile" 2>/dev/null)
+  if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ -z "$uuid" || "$uuid" == "null" ]]; then
+    echo -e "${RED}✗ Профиль '$name' не содержит корректные port/uuid${NC}"
+    return 1
+  fi
+
+  # UUID выбранного клиента сопоставляем с текущим inbound; SNI и short_id берём
+  # только из config.json, чтобы не разойтись с фактическими Reality-настройками.
+  local current_inbound
+  current_inbound=$(jq -c --argjson p "$port" --arg uuid "$uuid" '
+    first(.inbounds[]?
+      | select(.port == $p)
+      | select(any(.settings.clients[]?; (.id // "") == $uuid)))
+  ' "$CONFIG_FILE" 2>/dev/null)
+  if [[ -z "$current_inbound" || "$current_inbound" == "null" ]]; then
+    echo -e "${RED}✗ Не найден текущий inbound профиля '$name' на порту $port${NC}"
+    return 1
+  fi
+
+  local sni short_id
+  sni=$(jq -r '.streamSettings.realitySettings.serverNames[0] // empty' <<< "$current_inbound")
+  short_id=$(jq -r '.streamSettings.realitySettings.shortIds[0] // empty' <<< "$current_inbound")
+  if [[ -z "$sni" ]]; then
+    echo -e "${RED}✗ В inbound на порту $port отсутствует Reality SNI${NC}"
+    return 1
+  fi
+  if [[ -z "$short_id" ]]; then
+    # Fallback для повреждённого legacy inbound без shortIds.
+    short_id=$(openssl rand -hex 8)
+  fi
+
+  local VLESS_DECRYPTION
+  VLESS_DECRYPTION=$(cat "$VLESS_DECRYPTION_FILE" 2>/dev/null)
+  if [[ -z "$VLESS_DECRYPTION" ]]; then
+    echo -e "${RED}✗ $VLESS_DECRYPTION_FILE пуст или отсутствует — апгрейд прерван${NC}"
+    return 1
+  fi
+
+  local xhttp_path="/$(openssl rand -hex 8)"
+  local PRIVATE_KEY
+  PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE" 2>/dev/null)
+  if [[ -z "$PRIVATE_KEY" ]]; then
+    echo -e "${RED}✗ Reality private key пуст или отсутствует: $PRIVATE_KEY_FILE${NC}"
+    return 1
+  fi
+
+  local profiles_on_port=($(get_profiles_on_port "$port"))
+  if [[ ${#profiles_on_port[@]} -eq 0 ]]; then
+    profiles_on_port=("$name")
+  fi
+
+  # REPLACE inbound с port=$port на XHTTP+PQ с сохранёнными UUID, портом и SNI.
+  local new_inbound
+  new_inbound=$(cat << UPGEOF
+{
+  "listen": "0.0.0.0",
+  "port": $port,
+  "protocol": "vless",
+  "settings": {
+    "clients": [{"id": "$uuid", "flow": ""}],
+    "decryption": "$VLESS_DECRYPTION"
+  },
+  "streamSettings": {
+    "network": "xhttp",
+    "security": "reality",
+    "xhttpSettings": {
+      "mode": "stream-one",
+      "path": "$xhttp_path",
+      "extra": {
+        "xPaddingBytes": "100-1000",
+        "xmux": {
+          "maxConcurrency": "16-32",
+          "hMaxRequestTimes": "600-900",
+          "hMaxReusableSecs": "1800-3000",
+          "hKeepAlivePeriod": 0
+        },
+        "noSSEHeader": true,
+        "scMaxEachPostBytes": "1000000-2000000",
+        "scMinPostsIntervalMs": "10-50"
+      }
+    },
+    "realitySettings": {
+      "show": false,
+      "dest": "$sni:443",
+      "xver": 0,
+      "serverNames": ["$sni"],
+      "privateKey": "$PRIVATE_KEY",
+      "shortIds": ["$short_id"]
+    }
+  },
+  "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true},
+  "tag": "inbound-$port"
+ }
+UPGEOF
+)
+
+  # На общем inbound сохраняем UUID всех профилей этого порта.
+  if [[ ${#profiles_on_port[@]} -gt 1 ]]; then
+    local clients_json="["
+    local first=1
+    local p pu
+    for p in "${profiles_on_port[@]}"; do
+      pu=$(jq -r '.uuid // empty' "$PROFILES_DIR/$p.json" 2>/dev/null)
+      if [[ -z "$pu" ]]; then
+        echo -e "${RED}✗ Не удалось прочитать UUID профиля '$p' на порту $port${NC}"
+        return 1
+      fi
+      if [[ $first -eq 1 ]]; then first=0; else clients_json+=","; fi
+      clients_json+="{\"id\":\"$pu\",\"flow\":\"\"}"
+    done
+    clients_json+="]"
+    new_inbound=$(jq --argjson c "$clients_json" '.settings.clients = $c' <<< "$new_inbound")
+    if [[ -z "$new_inbound" ]]; then
+      echo -e "${RED}✗ Не удалось собрать список клиентов для порта $port${NC}"
+      return 1
+    fi
+  fi
+
+  # Атомарная замена: удаление по порту + append нового inbound.
+  if ! safe_jq_write --argjson port "$port" --argjson new_in "$new_inbound" \
+    '(.inbounds |= map(select(.port != $port))) | .inbounds += [$new_in]' \
+    "$CONFIG_FILE"; then
+    echo -e "${RED}✗ Ошибка обновления config.json для профиля '$name'${NC}"
+    _restore_config_backup "$rollback_config" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  # Сначала применяем config.json, затем синхронизируем profile JSON.
+  fix_xray_permissions
+  if ! safe_restart_xray "$rollback_config"; then
+    echo -e "${RED}✗ safe_restart_xray failed — config откачен на бэкап upgrade_profile_pq_$name${NC}"
+    echo -e "${YELLOW}  Profile JSON не менялся — состояние профилей сохранено.${NC}"
+    _restore_config_backup "$rollback_config" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  # short_id остаётся только в config.json — единственном источнике истины.
+  local profile_failed=0
+  local p
+  for p in "${profiles_on_port[@]}"; do
+    if ! safe_jq_write --arg path "$xhttp_path" \
+      '.transport = "xhttp" | .schema_version = 2 | .pq_enabled = true | .xhttp_path = $path' \
+      "$PROFILES_DIR/$p.json"; then
+      echo -e "${RED}  ✗ Ошибка обновления profile JSON: $p${NC}"
+      ((profile_failed += 1))
+    else
+      echo -e "${CYAN}  → Обновлен: ${YELLOW}$p${NC}"
+    fi
+  done
+
+  if [[ $profile_failed -gt 0 ]]; then
+    echo -e "${RED}✗ PQ-апгрейд '$name': config.json применён, но $profile_failed profile JSON требуют повторной миграции${NC}"
+    return 1
+  fi
+
+  echo -e "${GREEN}✓ Профиль '$name' успешно переведён на XHTTP+PQ${NC}"
+  return 0
+}
+
 upgrade_profile_to_pq_menu() {
   # === Phase 1a: UI / VALIDATION ===
   # Цель: собрать и провалидировать все входные данные ДО любых мутаций.
@@ -76,23 +268,11 @@ upgrade_profile_to_pq_menu() {
   fi
   local port=$(jq -r '.port' "$pfile")
   local uuid=$(jq -r '.uuid' "$pfile")
-  local sni=$(jq -r '.sni // "www.ozon.ru"' "$pfile")
-  local fingerprint=$(jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.fingerprint // $default_fp' "$pfile")
-  local old_transport=$(jq -r '.transport // "tcp"' "$pfile")
-
-  # H1 fix: short_id ЧИТАЕМ ИЗ СУЩЕСТВУЮЩЕГО INBOUND (config.json), НЕ из profile JSON.
-  # create_profile() в xraytailscale НИКОГДА не сохраняет short_id в profile JSON.
-  # Если на shared inbound сгенерировать новый short_id — Reality порвёт ВСЕ остальные клиенты на порту.
-  # Зеркалим логику generate_connection() (xraytailscale:2217-2220): берём первый shortIds[0] из инбаунда.
-  local short_id
-  short_id=$(jq -r --argjson p "$port" \
-    '.inbounds[] | select(.port == $p) | .streamSettings.realitySettings.shortIds[0]' \
+  local sni
+  sni=$(jq -r --argjson p "$port" \
+    '.inbounds[] | select(.port == $p) | .streamSettings.realitySettings.serverNames[0] // "www.ozon.ru"' \
     "$CONFIG_FILE" 2>/dev/null)
-  if [[ -z "$short_id" || "$short_id" == "null" ]]; then
-    # Inbound не содержит shortIds (corrupted/legacy без Reality?) — генерируем как last resort.
-    # На shared inbound этот fallback ОБЫЧНО НЕ срабатывает: install.sh всегда пишет shortIds.
-    short_id=$(openssl rand -hex 8)
-  fi
+  local old_transport=$(jq -r '.transport // "tcp"' "$pfile")
 
   # CRITICAL: проверка shared inbound — если на порту другие профили, ВСЕ они уйдут в PQ
   local profiles_on_port=($(get_profiles_on_port "$port"))
@@ -133,127 +313,16 @@ upgrade_profile_to_pq_menu() {
     echo -e "${YELLOW}Апгрейд отменён.${NC}"; sleep 2; return
   fi
 
-  # === Phase 1b: MUTATION ===
-  # Цель: атомарно заменить inbound на XHTTP+PQ + рестартнуть Xray.
-  # Все мутации защищены backup + safe_jq_write + safe_restart_xray (auto-rollback).
-  # Если safe_restart_xray fails — config откачен, Xray работает на старой конфигурации,
-  # profile JSON ещё НЕ менялся (Phase 1c не достигнута) — состояние согласовано.
-  echo -e "${CYAN}→ Phase 1b: бэкап и замена inbound в config.json${NC}"
-
-  # Шаг A: бэкап (на случай ошибки)
-  local rollback_config=""
-  backup_config "upgrade_profile_pq_$selected" rollback_config || return
-
-  # Шаг B: читаем содержимое decryption ОДИН раз
-  local VLESS_DECRYPTION
-  VLESS_DECRYPTION=$(cat "$VLESS_DECRYPTION_FILE")
-  if [[ -z "$VLESS_DECRYPTION" ]]; then
-    echo -e "${RED}✗ $VLESS_DECRYPTION_FILE пуст — апгрейд прерван${NC}"; sleep 2; return
+  # === Phase 1b/1c: общая мутация config.json и profile JSON ===
+  echo -e "${CYAN}→ Перевод профиля на XHTTP+PQ${NC}"
+  if ! _pq_upgrade_one_profile "$selected"; then
+    echo -e "${RED}✗ PQ-апгрейд профиля '$selected' не завершён${NC}"
+    echo -n -e "${YELLOW}Нажмите Enter для возврата в меню...${NC}"
+    read -r _ || true
+    return
   fi
-
-  # Шаг C: сгенерировать XHTTP path (как делает add_inbound) — простой случайный
-  local xhttp_path="/$(openssl rand -hex 8)"
-  local PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
-
-  # Шаг D: REPLACE inbound с port=$port на новый XHTTP+pq shape (с СОХРАНЁННЫМ uuid)
-  # Стратегия: del-by-port + append (НЕ object merge — иначе clobber freedom outbound и т.п.)
-  local new_inbound
-  new_inbound=$(cat << UPGEOF
-{
-  "listen": "0.0.0.0",
-  "port": $port,
-  "protocol": "vless",
-  "settings": {
-    "clients": [{"id": "$uuid", "flow": ""}],
-    "decryption": "$VLESS_DECRYPTION"
-  },
-  "streamSettings": {
-    "network": "xhttp",
-    "security": "reality",
-    "xhttpSettings": {
-      "mode": "stream-one",
-      "path": "$xhttp_path",
-      "extra": {
-        "xPaddingBytes": "100-1000",
-        "xmux": {
-          "maxConcurrency": "16-32",
-          "hMaxRequestTimes": "600-900",
-          "hMaxReusableSecs": "1800-3000",
-          "hKeepAlivePeriod": 0
-        },
-        "noSSEHeader": true,
-        "scMaxEachPostBytes": "1000000-2000000",
-        "scMinPostsIntervalMs": "10-50"
-      }
-    },
-    "realitySettings": {
-      "show": false,
-      "dest": "$sni:443",
-      "xver": 0,
-      "serverNames": ["$sni"],
-      "privateKey": "$PRIVATE_KEY",
-      "shortIds": ["$short_id"]
-    }
-  },
-  "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true},
-  "tag": "inbound-$port"
- }
-UPGEOF
-)
-
-  # ВАЖНО: если на порту были другие профили, их UUID должны быть в clients[]. Собираем их.
-  if [[ ${#profiles_on_port[@]} -gt 1 ]]; then
-    # Собрать массив clients из всех profile JSON на этом порту
-    local clients_json="["
-    local first=1
-    for p in "${profiles_on_port[@]}"; do
-      local pu=$(jq -r '.uuid' "$PROFILES_DIR/$p.json")
-      if [[ $first -eq 1 ]]; then first=0; else clients_json+=","; fi
-      clients_json+="{\"id\":\"$pu\",\"flow\":\"\"}"
-    done
-    clients_json+="]"
-    # Подменить settings.clients в new_inbound через jq
-    new_inbound=$(echo "$new_inbound" | jq --argjson c "$clients_json" '.settings.clients = $c')
-  fi
-
-  # Шаг E: атомарная замена — del-by-port + append
-  if ! safe_jq_write --argjson port "$port" --argjson new_in "$new_inbound" \
-    '(.inbounds |= map(select(.port != $port))) | .inbounds += [$new_in]' \
-    "$CONFIG_FILE"; then
-    echo -e "${RED}✗ Ошибка обновления config.json${NC}"; sleep 2; return
-  fi
-
-  # Шаг F: восстановить permissions и рестарт с auto-rollback ДО profile JSON.
-  fix_xray_permissions
-  if ! safe_restart_xray "$rollback_config"; then
-    echo -e "${RED}✗ safe_restart_xray failed — config откачен на бэкап upgrade_profile_pq_$selected${NC}"
-    echo -e "${YELLOW}  Profile JSON не менялся — состояние профилей сохранено.${NC}"
-    sleep 3; return
-  fi
-
-  # === Phase 1c: POST-MUTATION ===
-  # Цель: синхронизировать profile JSON со state'ом config.json + показать новую ссылку.
-  # Достигается ТОЛЬКО если Phase 1b прошла полностью (config.json обновлён + Xray рестартнул).
-  # Если safe_jq_write на profile JSON фейлится — config.json уже на новом inbound, оператор
-  # увидит ошибку и сможет исправить profile JSON вручную (jq + safe_jq_write helper).
-  echo -e "${CYAN}→ Phase 1c: синхронизация profile JSON и вывод новой vless:// ссылки${NC}"
-
-  # Шаг F: обновить profile JSON (selected И всех на порту, если shared)
-  # H1 fix: НЕ записываем short_id в profile JSON. Schema v1 не имела этого поля,
-  # schema v2 НЕ должна вводить новое поле без явного решения. short_id живёт в
-  # config.json:.inbounds[].streamSettings.realitySettings.shortIds[0] — один источник истины.
-  for p in "${profiles_on_port[@]}"; do
-    if ! safe_jq_write --arg path "$xhttp_path" \
-      '.transport = "xhttp" | .schema_version = 2 | .pq_enabled = true | .xhttp_path = $path' \
-      "$PROFILES_DIR/$p.json"; then
-      echo -e "${RED}  ✗ Ошибка обновления profile JSON: $p${NC}"
-    else
-      echo -e "${CYAN}  → Обновлен: ${YELLOW}$p${NC}"
-    fi
-  done
 
   echo ""
-  echo -e "${GREEN}✓ Профиль '$selected' успешно переведён на XHTTP+PQ${NC}"
   echo -e "${CYAN}Новая vless:// ссылка:${NC}"
   generate_connection "$selected"
   echo ""
