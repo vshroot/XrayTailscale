@@ -405,8 +405,36 @@ SUBUNIT_EOF
 # ═══════════════════════════════════════════════════════════
 # Phase 7 Plan 7.3 — public TLS / local-only / port preflight
 # ═══════════════════════════════════════════════════════════
-# Public HTTPS port preflight. Эхает 443 если порт свободен, иначе 8443.
-# Если порт занят Xray inbound — предупреждение и fallback на 8443.
+# Свободный внешний порт для HAPP-подписки, когда :443 занят.
+# Кандидаты совпадают с _selfsteal_pick_backend_port (85-selfsteal.sh).
+# Порт занят, если ss -tln показывает listener (любой адрес) ИЛИ порт
+# совпадает с self-steal backend (файл SELFSTEAL_PORT_FILE): backend
+# слушает 127.0.0.1:<port>, но коллизия с nginx listen <port> ssl на
+# 0.0.0.0 всё равно фатальна для nginx -t/reload (реальный инцидент).
+# stdout: первый свободный порт. return 1 + stderr, если все заняты.
+_subscription_find_free_port() {
+  local p
+  local selfsteal_port_file="${SELFSTEAL_PORT_FILE:-/usr/local/etc/xray/.selfsteal_backend_port}"
+  local selfsteal_backend=""
+  selfsteal_backend=$(cat "$selfsteal_port_file" 2>/dev/null || true)
+  for p in 8443 9443 10443 11443 12443; do
+    if ss -tlnH "sport = :$p" 2>/dev/null | grep -q .; then
+      continue
+    fi
+    if [[ -n "$selfsteal_backend" && "$p" == "$selfsteal_backend" ]]; then
+      continue
+    fi
+    echo "$p"
+    return 0
+  done
+  echo -e "${RED}✗ Нет свободного порта для подписки из диапазона 8443–12443${NC}" >&2
+  return 1
+}
+
+# Public HTTPS port preflight. Эхает 443 если порт свободен, иначе первый
+# свободный из _subscription_find_free_port (НЕ хардкод 8443 — он может
+# быть занят self-steal backend'ом или чужим сервисом).
+# Если порт занят Xray inbound — предупреждение и fallback.
 # Если занят системным сервисом (nginx/apache/др.) — fallback + warning.
 # Выбранный порт пишется в /usr/local/etc/xray/.subscription_port (читается
 # _subscription_base_url).
@@ -417,12 +445,48 @@ _select_subscription_port() {
     echo 443
     return 0
   fi
-  if echo "$listener" | grep -q "xray"; then
-    echo -e "${YELLOW}  ⚠ Порт 443 занят Xray inbound — fallback на 8443${NC}" >&2
-  else
-    echo -e "${YELLOW}  ⚠ Порт 443 занят сторонним процессом — fallback на 8443${NC}" >&2
+  local fallback
+  if ! fallback=$(_subscription_find_free_port); then
+    echo -e "${RED}✗ Порт 443 занят и свободного fallback-порта нет${NC}" >&2
+    return 1
   fi
-  echo 8443
+  if echo "$listener" | grep -q "xray"; then
+    echo -e "${YELLOW}  ⚠ Порт 443 занят Xray inbound — fallback на ${fallback}${NC}" >&2
+  else
+    echo -e "${YELLOW}  ⚠ Порт 443 занят сторонним процессом — fallback на ${fallback}${NC}" >&2
+  fi
+  echo "$fallback"
+  return 0
+}
+
+# Внешний self-check подписки после установки (best-effort).
+# curl на публичный URL (токен профиля, иначе базовый /sub/). При не-2xx/3xx —
+# красная диагностика, но установка НЕ считается проваленной: return 0 всегда.
+# $1 — имя HAPP-профиля (для sub_token), $2 — публичный порт.
+_subscription_external_selfcheck() {
+  local profile_name="$1" port="$2"
+  local base token url code
+  base=$(_subscription_base_url)
+  token=$(jq -r '.sub_token // ""' "$PROFILES_DIR/$profile_name.json" 2>/dev/null)
+  if [[ "$token" =~ ^[a-f0-9]{32}$ ]]; then
+    url="${base}/sub/${token}"
+  else
+    url="${base}/sub/"
+  fi
+  echo -e "${CYAN}  → Проверяю подписку извне: ${url}${NC}"
+  code=$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+  if [[ "$code" =~ ^[23] ]]; then
+    echo -e "${GREEN}  ✓ Подписка проверена извне: HTTP ${code}${NC}"
+    return 0
+  fi
+  echo -e "${RED}╔═══════════════════════════════════════════════${NC}"
+  echo -e "${RED}  ✗ ПОДПИСКА НЕ ОТВЕЧАЕТ ИЗВНЕ (HTTP ${code})${NC}"
+  echo -e "${RED}╚═══════════════════════════════════════════════${NC}"
+  echo -e "${YELLOW}  Что проверить на сервере:${NC}"
+  echo -e "${YELLOW}    ss -tlnp | grep ${port}   — слушает ли nginx порт${NC}"
+  echo -e "${YELLOW}    ufw status | grep ${port} — открыт ли порт в firewall${NC}"
+  echo -e "${YELLOW}    nginx -t                  — валиден ли конфиг nginx${NC}"
+  echo -e "${YELLOW}  Запустите диагностику из меню подписки.${NC}"
   return 0
 }
 
@@ -804,6 +868,8 @@ NGINX_TLS_EOF
   echo ""
   echo -e "${BLUE}Base URL:${NC} ${GREEN}${_summary_base}${NC}"
   _happ_print_subscription_url_for_profile "$_happ_profile"
+  # Best-effort внешний self-check (не валит установку при неудаче).
+  _subscription_external_selfcheck "$_happ_profile" "$pub_port"
   echo -e "${CYAN}Для ручного контроля маршрутов используйте главное меню → 'Создать новый профиль'.${NC}"
   echo ""
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
@@ -1044,6 +1110,8 @@ NGINX_TLS_EOF
   _summary_base=$(_subscription_base_url)
   echo -e "${BLUE}URL:${NC} ${GREEN}${_summary_base}${NC} (порт ${pub_port})"
   _happ_print_subscription_url_for_profile "$_happ_profile"
+  # Best-effort внешний self-check (не валит установку при неудаче).
+  _subscription_external_selfcheck "$_happ_profile" "$pub_port"
   echo -e "${CYAN}Для ручного контроля маршрутов используйте главное меню → 'Создать новый профиль'.${NC}"
   echo ""
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
