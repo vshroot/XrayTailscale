@@ -63,7 +63,7 @@ update_xray_core() {
     armv7l)        MACHINE="arm32-v7a" ;;
     armv6l)        MACHINE="arm32-v6" ;;
     *)
-      echo -e "${RED}✗ Архитектура $(uname -m) не поддерживается${NC}"
+      echo -e "${RED}✗ Architecture $(uname -m) is not supported${NC}"
       return 2
       ;;
   esac
@@ -76,7 +76,7 @@ update_xray_core() {
 
   # ── Step 3: Получить latest tag (API → fallback redirect) ──────
   TARGET_TAG=$(_fetch_latest_tag) || {
-    echo -e "${RED}✗ GitHub недоступен (API + redirect провалились)${NC}"
+    echo -e "${RED}✗ GitHub unreachable (API + redirect failed)${NC}"
     _print_manual_install_hint "$MACHINE"
     return 2
   }
@@ -84,7 +84,7 @@ update_xray_core() {
 
   # ── Step 4: Compare versions ────────────────────────────────────
   if [[ "$CURRENT_VERSION" == "$TARGET_VERSION" ]]; then
-    echo -e "${GREEN}✓ Xray $CURRENT_VERSION — уже на latest${NC}"
+    echo -e "${GREEN}✓ Xray $CURRENT_VERSION — already on latest${NC}"
     return 0
   fi
 
@@ -100,23 +100,23 @@ update_xray_core() {
     if [[ $cv_major -gt $tv_major ]] || \
        [[ $cv_major -eq $tv_major && $cv_minor -gt $tv_minor ]] || \
        [[ $cv_major -eq $tv_major && $cv_minor -eq $tv_minor && $cv_patch -gt $tv_patch ]]; then
-      echo -e "${GREEN}✓ Xray $CURRENT_VERSION новее доступной $TARGET_VERSION — пропускаем${NC}"
+      echo -e "${GREEN}✓ Xray $CURRENT_VERSION is newer than the available $TARGET_VERSION — skipping${NC}"
       return 0
     fi
   fi
 
   # ── Step 5: Confirmation prompt (CONTEXT.md decision 2) ────────
-  echo -e "${CYAN}Доступно обновление Xray-core:${NC}"
-  echo -e "  ${YELLOW}Текущая:${NC} $CURRENT_VERSION"
-  echo -e "  ${GREEN}Новая:${NC}    $TARGET_VERSION"
-  echo -e "  ${CYAN}Размер:${NC}   ~6.5MB (zip)"
-  echo -e "  ${CYAN}Downtime:${NC} ~5 секунд"
+  echo -e "${CYAN}Xray-core update available:${NC}"
+  echo -e "  ${YELLOW}Current:${NC} $CURRENT_VERSION"
+  echo -e "  ${GREEN}New:${NC}    $TARGET_VERSION"
+  echo -e "  ${CYAN}Size:${NC}   ~6.5MB (zip)"
+  echo -e "  ${CYAN}Downtime:${NC} ~5 seconds"
   echo ""
   if [[ "${INSTALL_MODE:-0}" != "1" ]]; then
     echo -n -e "${YELLOW}Continue? [y/N]: ${NC}"
     read confirm
     [[ ! "$confirm" =~ ^[yYдД]$ ]] && {
-      echo -e "${CYAN}Отменено пользователем${NC}"
+      echo -e "${CYAN}Cancelled by the user${NC}"
       return 1
     }
   fi
@@ -130,16 +130,16 @@ update_xray_core() {
   ZIP_PATH="${TMPDIR}/xray.zip"
   DGST_PATH="${ZIP_PATH}.dgst"
 
-  echo -e "${CYAN}Скачивание $TARGET_TAG...${NC}"
+  echo -e "${CYAN}Downloading $TARGET_TAG...${NC}"
   if ! curl -fL --progress-bar --connect-timeout 30 --max-time 300 \
        -o "$ZIP_PATH" "$ZIP_URL"; then
-    echo -e "${RED}✗ Не удалось скачать $ZIP_URL${NC}"
+    echo -e "${RED}✗ Could not download $ZIP_URL${NC}"
     return 2
   fi
 
   if ! curl -fsSL --connect-timeout 10 --max-time 30 \
        -o "$DGST_PATH" "$DGST_URL"; then
-    echo -e "${RED}✗ Не удалось скачать .dgst (SHA-256 manifest обязателен)${NC}"
+    echo -e "${RED}✗ Could not download .dgst (SHA-256 manifest is required)${NC}"
     return 2
   fi
 
@@ -150,30 +150,30 @@ update_xray_core() {
   actual=$(sha256sum "$ZIP_PATH" | awk '{print $1}')
 
   if [[ -z "$expected" ]]; then
-    echo -e "${RED}✗ .dgst файл не содержит SHA256 (формат изменился?)${NC}"
+    echo -e "${RED}✗ The .dgst file has no SHA256 (format changed?)${NC}"
     return 2
   fi
   if [[ "$expected" != "$actual" ]]; then
-    echo -e "${RED}✗ SHA256 mismatch — отмена${NC}"
-    echo -e "${YELLOW}  Ожидалось: $expected${NC}"
-    echo -e "${YELLOW}  Получено:  $actual${NC}"
+    echo -e "${RED}✗ SHA256 mismatch — aborting${NC}"
+    echo -e "${YELLOW}  Expected: $expected${NC}"
+    echo -e "${YELLOW}  Got:      $actual${NC}"
     return 2
   fi
   echo -e "${GREEN}  ✓ SHA256 ok${NC}"
 
   # ── Step 8: Unzip ──────────────────────────────────────────────
   if ! unzip -q "$ZIP_PATH" -d "${TMPDIR}/extract"; then
-    echo -e "${RED}✗ Ошибка распаковки${NC}"
+    echo -e "${RED}✗ Extraction error${NC}"
     return 2
   fi
   if [[ ! -x "${TMPDIR}/extract/xray" ]]; then
-    echo -e "${RED}✗ Бинарник xray отсутствует в zip-архиве${NC}"
+    echo -e "${RED}✗ The xray binary is missing from the zip archive${NC}"
     return 2
   fi
 
   # ── Step 9: Self-test нового бинарника ─────────────────────────
   if ! "${TMPDIR}/extract/xray" version >/dev/null 2>&1; then
-    echo -e "${RED}✗ Новый бинарник не запускается (binary corrupt / arch mismatch)${NC}"
+    echo -e "${RED}✗ The new binary does not run (binary corrupt / arch mismatch)${NC}"
     return 2
   fi
 
@@ -184,14 +184,14 @@ update_xray_core() {
     local test_output
     test_output=$("${TMPDIR}/extract/xray" run -test -config "$CONFIG_FILE" 2>&1)
     if ! grep -qx "Configuration OK." <<< "$test_output"; then
-      echo -e "${RED}✗ config.json не валиден против $TARGET_VERSION${NC}"
-      echo -e "${YELLOW}Подробности:${NC}"
+      echo -e "${RED}✗ config.json is invalid against $TARGET_VERSION${NC}"
+      echo -e "${YELLOW}Details:${NC}"
       echo "$test_output" | head -10
-      echo -e "${YELLOW}Update прерван — Xray продолжает работать на $CURRENT_VERSION${NC}"
+      echo -e "${YELLOW}Update aborted — Xray keeps running on $CURRENT_VERSION${NC}"
       return 3
     fi
   else
-    echo -e "${CYAN}  → config.json отсутствует (install mode), pre-validate пропущен${NC}"
+    echo -e "${CYAN}  → config.json missing (install mode), pre-validate skipped${NC}"
   fi
 
   # ── Step 11: Backup старого binary ─────────────────────────────
@@ -199,16 +199,16 @@ update_xray_core() {
   if [[ -x /usr/local/bin/xray ]]; then
     cp /usr/local/bin/xray "$backup_path"
     chmod 755 "$backup_path"
-    echo -e "${CYAN}  → Бекап: $(basename "$backup_path")${NC}"
+    echo -e "${CYAN}  → Backup: $(basename "$backup_path")${NC}"
   fi
 
   # ── Step 12: Atomic install ────────────────────────────────────
   if ! install -m 755 -o root -g root \
        "${TMPDIR}/extract/xray" /usr/local/bin/xray; then
-    echo -e "${RED}✗ Ошибка install -m 755${NC}"
+    echo -e "${RED}✗ install -m 755 error${NC}"
     [[ -f "$backup_path" ]] && {
       mv "$backup_path" /usr/local/bin/xray
-      echo -e "${YELLOW}  → Откат к $CURRENT_VERSION${NC}"
+      echo -e "${YELLOW}  → Rolling back to $CURRENT_VERSION${NC}"
     }
     return 2
   fi
@@ -220,26 +220,26 @@ update_xray_core() {
     systemctl restart xray
     sleep 2
     if systemctl is-active --quiet xray; then
-      echo -e "${GREEN}✓ Xray-core обновлен: $CURRENT_VERSION → $TARGET_VERSION${NC}"
+      echo -e "${GREEN}✓ Xray-core updated: $CURRENT_VERSION → $TARGET_VERSION${NC}"
       _cleanup_xray_backups
       return 0
     else
-      echo -e "${RED}✗ Xray не запустился после установки $TARGET_VERSION${NC}"
+      echo -e "${RED}✗ Xray did not start after installing $TARGET_VERSION${NC}"
       if [[ -f "$backup_path" ]]; then
         mv "$backup_path" /usr/local/bin/xray
         systemctl restart xray
         sleep 2
         if systemctl is-active --quiet xray; then
-          echo -e "${YELLOW}  → Откат binary к $CURRENT_VERSION выполнен${NC}"
+          echo -e "${YELLOW}  → Binary rollback to $CURRENT_VERSION done${NC}"
         else
-          echo -e "${RED}  ✗ Откат не помог — ручное вмешательство${NC}"
+          echo -e "${RED}  ✗ Rollback did not help — manual intervention${NC}"
         fi
       fi
       return 3
     fi
   else
     # Install mode: systemd unit будет создан позже в [3/10].
-    echo -e "${CYAN}  → Xray-core установлен. Сервис настроен в [3/10].${NC}"
+    echo -e "${CYAN}  → Xray-core installed. The service is configured in [3/10].${NC}"
     _cleanup_xray_backups
     return 0
   fi
@@ -274,10 +274,10 @@ _fetch_latest_tag() {
 
 _print_manual_install_hint() {
   local arch="$1"
-  echo -e "${YELLOW}  Ручная установка:${NC}"
+  echo -e "${YELLOW}  Manual install:${NC}"
   echo -e "${CYAN}    1. https://github.com/XTLS/Xray-core/releases/latest${NC}"
-  echo -e "${CYAN}    2. Скачайте Xray-linux-${arch}.zip + .dgst${NC}"
-  echo -e "${CYAN}    3. unzip xray.zip && проверьте sha256sum${NC}"
+  echo -e "${CYAN}    2. Download Xray-linux-${arch}.zip + .dgst${NC}"
+  echo -e "${CYAN}    3. unzip xray.zip && check sha256sum${NC}"
   echo -e "${CYAN}    4. install -m 755 ./xray /usr/local/bin/xray${NC}"
   echo -e "${CYAN}    5. systemctl restart xray${NC}"
 }
@@ -292,7 +292,7 @@ _cleanup_xray_backups() {
     for f in "${to_remove[@]}"; do
       rm -f "$f"
     done
-    echo -e "${CYAN}  → Старые бекапы удалены (оставлено 3)${NC}"
+    echo -e "${CYAN}  → Old backups removed (3 kept)${NC}"
   fi
 }
 
@@ -303,7 +303,7 @@ _cleanup_xray_backups() {
 # и так отдаёт код возврата как статус процесса.
 update_command() {
   echo -e "${BLUE}╔════════════════════════════════════════════════════╗${NC}"
-  echo -e "${BLUE}║  XrayTailscale: обновление Xray-core               ║${NC}"
+  echo -e "${BLUE}║  XrayTailscale: Xray-core update               ║${NC}"
   echo -e "${BLUE}╚════════════════════════════════════════════════════╝${NC}"
   echo ""
 
@@ -311,9 +311,9 @@ update_command() {
   local rc=$?
   case $rc in
     0) ;;
-    1) echo -e "${CYAN}  → Обновление пропущено пользователем${NC}" ;;
-    2) echo -e "${RED}✗ Критическая ошибка обновления${NC}" ;;
-    3) echo -e "${YELLOW}⚠ Откат на старую версию${NC}" ;;
+    1) echo -e "${CYAN}  → Update skipped by the user${NC}" ;;
+    2) echo -e "${RED}✗ Critical update error${NC}" ;;
+    3) echo -e "${YELLOW}⚠ Rolled back to the old version${NC}" ;;
   esac
   return $rc
 }
@@ -368,8 +368,8 @@ _emit_nag_if_outdated() {
 
   if $should_nag; then
     echo -e "${YELLOW}╔════════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║ Установлен Xray $current, доступен $target_v${NC}"
-    echo -e "${YELLOW}║ Выполни: ${GREEN}sudo xraytailscale update${NC}"
+    echo -e "${YELLOW}║ Xray $current installed, $target_v available${NC}"
+    echo -e "${YELLOW}║ Run: ${GREEN}sudo xraytailscale update${NC}"
     echo -e "${YELLOW}╚════════════════════════════════════════════════════╝${NC}"
     echo ""
   fi
@@ -388,43 +388,43 @@ show_pq_banner_once() {
 
   echo ""
   echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${MAGENTA}║       🔐 POST-QUANTUM ENCRYPTION (ML-KEM-768) ВКЛЮЧЕНА            ║${NC}"
+  echo -e "${MAGENTA}║       🔐 POST-QUANTUM ENCRYPTION (ML-KEM-768) ENABLED            ║${NC}"
   echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "${CYAN}Что это:${NC}"
-  echo -e "  Все НОВЫЕ XHTTP-профили теперь защищены от 'Harvest Now, Decrypt Later' —"
-  echo -e "  атак, где трафик записывают сегодня, чтобы расшифровать на квантовом"
-  echo -e "  компьютере через 5-10 лет. Используется ML-KEM-768 поверх Reality."
+  echo -e "${CYAN}What it is:${NC}"
+  echo -e "  All NEW XHTTP profiles are now protected against 'Harvest Now, Decrypt Later' —"
+  echo -e "  attacks where traffic is recorded today to be decrypted on a quantum"
+  echo -e "  computer in 5-10 years. ML-KEM-768 is used on top of Reality."
   echo ""
-  echo -e "${YELLOW}Совместимость клиентов на 2026-05-10:${NC}"
+  echo -e "${YELLOW}Client compatibility as of 2026-05-10:${NC}"
   echo ""
-  echo -e "  ${GREEN}✓ Поддерживают:${NC}"
+  echo -e "  ${GREEN}✓ Supported:${NC}"
   echo -e "    ${GREEN}•${NC} HAPP 2.10+ (Android/iOS)"
   echo -e "    ${GREEN}•${NC} v2rayNG 1.10+ (Android)"
   echo -e "    ${GREEN}•${NC} v2rayN (Windows/macOS, PR #7782 merged)"
-  echo -e "    ${GREEN}•${NC} Shadowrocket (iOS, App Store с 2026-05-10)"
+  echo -e "    ${GREEN}•${NC} Shadowrocket (iOS, App Store since 2026-05-10)"
   echo ""
-  echo -e "  ${RED}✗ НЕ поддерживают (используйте legacy TCP+Vision):${NC}"
-  echo -e "    ${RED}•${NC} sing-box (все форки)"
+  echo -e "  ${RED}✗ NOT supported (use legacy TCP+Vision):${NC}"
+  echo -e "    ${RED}•${NC} sing-box (all forks)"
   echo -e "    ${RED}•${NC} Hiddify"
   echo -e "    ${RED}•${NC} mihomo (Clash Meta)"
   echo -e "    ${RED}•${NC} NekoBox / NekoRay"
   echo ""
-  echo -e "  ${YELLOW}? Статус неизвестен:${NC}"
-  echo -e "    ${YELLOW}•${NC} Streisand (iOS) — проверьте журнал релизов"
+  echo -e "  ${YELLOW}? Status unknown:${NC}"
+  echo -e "    ${YELLOW}•${NC} Streisand (iOS) — check the release notes"
   echo ""
   echo -e "${BLUE}╔════════════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${BLUE}║ РЕКОМЕНДАЦИЯ:                                                      ║${NC}"
-  echo -e "${BLUE}║ Если ваш клиент в строке ✗ — создайте отдельный legacy профиль:    ║${NC}"
-  echo -e "${BLUE}║   меню → 1 (Создать профиль) → выберите 'TCP+Vision (legacy)'      ║${NC}"
-  echo -e "${BLUE}║ для совместимых клиентов используйте новый PQ XHTTP-профиль        ║${NC}"
-  echo -e "${BLUE}║ (создаётся по умолчанию).                                          ║${NC}"
+  echo -e "${BLUE}║ RECOMMENDATION:                                                      ║${NC}"
+  echo -e "${BLUE}║ If your client is in the ✗ line — create a separate legacy profile:    ║${NC}"
+  echo -e "${BLUE}║   menu → 1 (Create profile) → choose 'TCP+Vision (legacy)'      ║${NC}"
+  echo -e "${BLUE}║ for compatible clients use the new PQ XHTTP profile        ║${NC}"
+  echo -e "${BLUE}║ (created by default).                                          ║${NC}"
   echo -e "${BLUE}║                                                                    ║${NC}"
-  echo -e "${BLUE}║ Существующие profile-файлы можно перевести на PQ через пункт       ║${NC}"
-  echo -e "${BLUE}║   меню → 8 (Обновить профиль до post-quantum)                      ║${NC}"
+  echo -e "${BLUE}║ Existing profile files can be switched to PQ via       ║${NC}"
+  echo -e "${BLUE}║   menu → 8 (Upgrade profile to post-quantum)                      ║${NC}"
   echo -e "${BLUE}╚════════════════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -n -e "${YELLOW}Этот баннер больше не появится. Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}This banner will not appear again. Press Enter to continue...${NC}"
   read
 
   # Mark as shown — touch + chown как в run_migration helper.

@@ -55,7 +55,7 @@ sudo XT_DOMAIN=your-domain.example bash /tmp/install.sh
 Without `XT_DOMAIN` the installer starts the **setup wizard** right away when
 run interactively (a tty is attached) — domain yes/no, first user, subscription,
 outside-in check, ready link/QR. Self-steal can also be enabled later via
-«Дополнительно → Self-steal» or `sudo xraytailscale selfsteal-auto <domain>`.
+«More → Self-steal» or `sudo xraytailscale selfsteal-auto <domain>`.
 
 After installation the manager is `sudo xraytailscale`; on a clean server it
 opens the wizard itself.
@@ -73,14 +73,14 @@ The manager adapts to the server state — you no longer pick from a 16-item lis
   1) Добавить пользователя
   2) Показать ссылки / QR
   3) Диагностика и починка
-  4) Дополнительно →
+  4) More →
   0) Выход
 ```
 
 The status header shows mode (domain/IP), Xray, port 443, subscription,
 certificate expiry, firewall and the user list — each line ✓/✗/⚠.
 
-**«Дополнительно»** keeps everything rare: bulk HAPP users, Tailscale exit
+**More** keeps everything rare: bulk HAPP users, Tailscale exit
 node, cascade (bypass rules and the outbound node live inside the cascade
 menu — they only make sense with a cascade enabled), HAPP subscription
 management, self-steal status/removal, advanced profile settings
@@ -103,10 +103,10 @@ Open the manager:
 sudo xraytailscale
 ```
 
-Status screen → **«Дополнительно»**:
+Status screen → **More**:
 
 ```text
-4) Дополнительно → 4) Управление подпиской HAPP
+4) More → 4) Управление подпиской HAPP
 ```
 
 You can create a public subscription by VPS IP or by domain. Domain mode is better for daily use. The script creates a multi-route profile and returns a subscription URL like:
@@ -149,10 +149,10 @@ Open the manager:
 sudo xraytailscale
 ```
 
-Status screen → **«Дополнительно»**:
+Status screen → **More**:
 
 ```text
-4) Дополнительно → 1) Пакетное добавление пользователей
+4) More → 1) Пакетное добавление пользователей
 ```
 
 The bulk generator creates one hidden shared multi-route seed profile named `_bulk_seed`, then creates normal user profiles such as:
@@ -196,10 +196,10 @@ Open the manager:
 sudo xraytailscale
 ```
 
-Status screen → **«Дополнительно»**:
+Status screen → **More**:
 
 ```text
-4) Дополнительно → 2) Tailscale exit node
+4) More → 2) Tailscale exit node
 ```
 
 The script installs Tailscale, enables IP forwarding, starts `tailscaled`, and advertises the VPS as an exit node.
@@ -228,7 +228,7 @@ client -> main VPS -> upstream VPS -> internet
 On the upstream VPS, install XrayTailscale and choose:
 
 ```text
-4) Дополнительно → 3) Каскад / upstream → 5) Поднять outbound-сервер
+4) More → 3) Cascade / upstream → 5) Поднять outbound-сервер
 ```
 
 This creates a TCP Reality Vision inbound and prints the values needed by the main VPS: host, port, UUID, public key, short ID, SNI, fingerprint, and flow.
@@ -236,7 +236,7 @@ This creates a TCP Reality Vision inbound and prints the values needed by the ma
 On the main VPS, choose:
 
 ```text
-4) Дополнительно → 3) Каскад / upstream
+4) More → 3) Cascade / upstream
 ```
 
 Enter the upstream values, then enable cascade mode. XrayTailscale stores the upstream config in `/usr/local/etc/xray/upstreams/cascade.json`, adds `cascade-upstream` and `cascade-fragment` outbounds, and switches only the default catch-all `tcp,udp` route to the cascade outbound. Existing bypass rules stay above the catch-all rule and continue to go direct.
@@ -265,10 +265,10 @@ Open the manager:
 sudo xraytailscale
 ```
 
-Status screen → **«Дополнительно»**:
+Status screen → **More**:
 
 ```text
-4) Дополнительно → 5) Self-steal (статус/удаление)
+4) More → 5) Self-steal (статус/удаление)
 ```
 
 The self-steal wizard asks for the domain once (a previously saved domain is offered as
@@ -337,7 +337,7 @@ sudo xraytailscale
 Then choose:
 
 ```text
-4) Дополнительно → 8) Обновить Xray-core
+4) More → 8) Обновить Xray-core
 ```
 
 ## Uninstall

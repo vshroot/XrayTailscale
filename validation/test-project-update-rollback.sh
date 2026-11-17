@@ -31,7 +31,7 @@ restore_calls=$(grep -Fc '_restore_update_config_backup' update.sh)
 
 grep -Fq 'if ! _adguard_force_uninstall_if_present; then' update.sh ||
   fail "AdGuard cleanup failure is ignored"
-grep -A18 '✗ Ошибка перезапуска Xray' update.sh | grep -Fq 'exit 1' ||
+grep -A18 '✗ Error restarting Xray' update.sh | grep -Fq 'exit 1' ||
   fail "failed Xray restart can still report a successful project update"
 
 echo "PASS: project update restores its own session backup"

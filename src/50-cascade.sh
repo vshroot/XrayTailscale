@@ -16,16 +16,16 @@ _cascade_print_status() {
   local upstream_file transport
   upstream_file=$(_cascade_config_file)
   if _cascade_enabled; then
-    echo -e "${GREEN}Каскад: включен${NC}"
+    echo -e "${GREEN}Cascade: enabled${NC}"
   else
-    echo -e "${YELLOW}Каскад: выключен${NC}"
+    echo -e "${YELLOW}Cascade: disabled${NC}"
   fi
 
   if [[ -f "$upstream_file" ]]; then
     transport=$(jq -r '.transport // "tcp"' "$upstream_file" 2>/dev/null)
     echo -e "${CYAN}Upstream:${NC} $(jq -r '.address' "$upstream_file"):$(jq -r '.port' "$upstream_file") transport=${transport} sni=$(jq -r '.sni' "$upstream_file")"
   else
-    echo -e "${YELLOW}Upstream не настроен${NC}"
+    echo -e "${YELLOW}Upstream not configured${NC}"
   fi
 }
 
@@ -61,7 +61,7 @@ _cascade_query_param() {
 _cascade_parse_vless_uri() {
   local uri=$1
   if [[ "$uri" != vless://* ]]; then
-    echo -e "${RED}✗ Ожидается ссылка vless://${NC}" >&2
+    echo -e "${RED}✗ Expected a vless:// link${NC}" >&2
     return 1
   fi
 
@@ -77,7 +77,7 @@ _cascade_parse_vless_uri() {
   fi
 
   if [[ "$authority" != *@* ]]; then
-    echo -e "${RED}✗ В VLESS-ссылке отсутствует UUID или адрес${NC}" >&2
+    echo -e "${RED}✗ The VLESS link has no UUID or address${NC}" >&2
     return 1
   fi
   uuid="${authority%%@*}"
@@ -90,7 +90,7 @@ _cascade_parse_vless_uri() {
     address="${BASH_REMATCH[1]}"
     port="${BASH_REMATCH[2]}"
   else
-    echo -e "${RED}✗ Не удалось разобрать host:port из VLESS-ссылки${NC}" >&2
+    echo -e "${RED}✗ Could not parse host:port from the VLESS link${NC}" >&2
     return 1
   fi
 
@@ -116,15 +116,15 @@ _cascade_parse_vless_uri() {
   xhttp_mode="${xhttp_mode:-auto}"
 
   if [[ "$security" != "reality" ]]; then
-    echo -e "${RED}✗ Каскад поддерживает только security=reality${NC}" >&2
+    echo -e "${RED}✗ The cascade supports only security=reality${NC}" >&2
     return 1
   fi
   if [[ "$encryption" != "none" ]]; then
-    echo -e "${RED}✗ Каскад поддерживает только encryption=none${NC}" >&2
+    echo -e "${RED}✗ The cascade supports only encryption=none${NC}" >&2
     return 1
   fi
   if [[ "$transport" != "tcp" && "$transport" != "xhttp" ]]; then
-    echo -e "${RED}✗ Поддерживаются upstream type=tcp и type=xhttp${NC}" >&2
+    echo -e "${RED}✗ Only upstream type=tcp and type=xhttp are supported${NC}" >&2
     return 1
   fi
 
@@ -170,7 +170,7 @@ _cascade_parse_vless_uri() {
 _cascade_validate_upstream_file() {
   local upstream_file=$1
   if ! jq -e . "$upstream_file" >/dev/null 2>&1; then
-    echo -e "${RED}✗ Upstream JSON повреждён${NC}"
+    echo -e "${RED}✗ Upstream JSON is corrupt${NC}"
     return 1
   fi
 
@@ -191,57 +191,57 @@ _cascade_validate_upstream_file() {
   xhttp_mode=$(jq -r '.xhttp_mode // "auto"' "$upstream_file")
 
   if [[ -z "$address" || "$address" =~ ^(localhost$|0\.0\.0\.0$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|::1$) ]]; then
-    echo -e "${RED}✗ Upstream address не должен быть локальным/private${NC}"
+    echo -e "${RED}✗ The upstream address must not be local/private${NC}"
     return 1
   fi
   if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ $port -lt 1 ]] || [[ $port -gt 65535 ]]; then
-    echo -e "${RED}✗ Некорректный порт${NC}"
+    echo -e "${RED}✗ Invalid port${NC}"
     return 1
   fi
   if [[ ! "$uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
-    echo -e "${RED}✗ Некорректный UUID${NC}"
+    echo -e "${RED}✗ Invalid UUID${NC}"
     return 1
   fi
   if [[ ! "$public_key" =~ ^[A-Za-z0-9_-]{40,}$ ]]; then
-    echo -e "${RED}✗ Некорректный Reality publicKey${NC}"
+    echo -e "${RED}✗ Invalid Reality publicKey${NC}"
     return 1
   fi
   if [[ ! "$short_id" =~ ^[0-9a-fA-F]{0,16}$ ]] || (( ${#short_id} % 2 != 0 )); then
-    echo -e "${RED}✗ Некорректный shortId${NC}"
+    echo -e "${RED}✗ Invalid shortId${NC}"
     return 1
   fi
   if [[ -z "$sni" || ! "$sni" =~ ^[a-zA-Z0-9.-]+$ ]]; then
-    echo -e "${RED}✗ Некорректный SNI${NC}"
+    echo -e "${RED}✗ Invalid SNI${NC}"
     return 1
   fi
   if [[ ! "$fingerprint" =~ ^(chrome|firefox|safari|ios|android|edge|qq|random|randomized)$ ]]; then
-    echo -e "${RED}✗ Некорректный fingerprint${NC}"
+    echo -e "${RED}✗ Invalid fingerprint${NC}"
     return 1
   fi
   if [[ "$transport" != "tcp" && "$transport" != "xhttp" ]]; then
-    echo -e "${RED}✗ transport поддерживает только tcp или xhttp${NC}"
+    echo -e "${RED}✗ transport supports only tcp or xhttp${NC}"
     return 1
   fi
   if [[ "$transport" == "tcp" ]]; then
     if [[ -n "$flow" && "$flow" != "xtls-rprx-vision" ]]; then
-      echo -e "${RED}✗ Для TCP поддерживается только flow=xtls-rprx-vision или пустое значение${NC}"
+      echo -e "${RED}✗ For TCP only flow=xtls-rprx-vision or an empty value is supported${NC}"
       return 1
     fi
     if [[ -n "$packet_encoding" && "$packet_encoding" != "xudp" ]]; then
-      echo -e "${RED}✗ packetEncoding поддерживает только xudp или пустое значение${NC}"
+      echo -e "${RED}✗ packetEncoding supports only xudp or an empty value${NC}"
       return 1
     fi
   else
     if [[ "$xhttp_path" != /* ]]; then
-      echo -e "${RED}✗ XHTTP path должен начинаться с /${NC}"
+      echo -e "${RED}✗ The XHTTP path must start with /${NC}"
       return 1
     fi
     if [[ -z "$xhttp_host" || ! "$xhttp_host" =~ ^[a-zA-Z0-9.-]+$ ]]; then
-      echo -e "${RED}✗ Некорректный XHTTP host${NC}"
+      echo -e "${RED}✗ Invalid XHTTP host${NC}"
       return 1
     fi
     if [[ ! "$xhttp_mode" =~ ^(auto|packet-up|stream-up|stream-one)$ ]]; then
-      echo -e "${RED}✗ Некорректный XHTTP mode${NC}"
+      echo -e "${RED}✗ Invalid XHTTP mode${NC}"
       return 1
     fi
   fi
@@ -319,7 +319,7 @@ _cascade_apply_current_upstream() {
   local rollback_config=""
   upstream_file=$(_cascade_config_file)
   [[ -f "$upstream_file" ]] || {
-    echo -e "${RED}✗ Сначала настройте upstream-ноду${NC}"
+    echo -e "${RED}✗ Configure the upstream node first${NC}"
     return 1
   }
   _cascade_validate_upstream_file "$upstream_file" || return 1
@@ -363,7 +363,7 @@ _cascade_apply_current_upstream() {
         {"type":"field","network":"tcp,udp","outboundTag":"cascade-upstream"}
       ]
     ' "$CONFIG_FILE"; then
-    echo -e "${RED}✗ Не удалось применить cascade config${NC}"
+    echo -e "${RED}✗ Could not apply the cascade config${NC}"
     return 1
   fi
 
@@ -371,7 +371,7 @@ _cascade_apply_current_upstream() {
   if safe_restart_xray "$rollback_config"; then
     touch "$CASCADE_ACTIVE_FILE"
     chown xray:xray "$CASCADE_ACTIVE_FILE" 2>/dev/null || true
-    echo -e "${GREEN}✓ Активный каскад синхронизирован с upstream${NC}"
+    echo -e "${GREEN}✓ The active cascade is synced with upstream${NC}"
     return 0
   fi
 
@@ -382,35 +382,35 @@ _cascade_apply_current_upstream() {
 _cascade_validate_upstream_fields() {
   local address=$1 port=$2 uuid=$3 public_key=$4 short_id=$5 sni=$6 fingerprint=${7:-$DEFAULT_CLIENT_FINGERPRINT} packet_encoding=${8:-}
   if [[ -z "$address" || "$address" =~ ^(localhost$|0\.0\.0\.0$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[0-1])\.) ]]; then
-    echo -e "${RED}✗ Upstream address не должен быть локальным/private${NC}"
+    echo -e "${RED}✗ The upstream address must not be local/private${NC}"
     return 1
   fi
   if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ $port -lt 1 ]] || [[ $port -gt 65535 ]]; then
-    echo -e "${RED}✗ Некорректный порт${NC}"
+    echo -e "${RED}✗ Invalid port${NC}"
     return 1
   fi
   if [[ ! "$uuid" =~ ^[0-9a-fA-F-]{36}$ ]]; then
-    echo -e "${RED}✗ Некорректный UUID${NC}"
+    echo -e "${RED}✗ Invalid UUID${NC}"
     return 1
   fi
   if [[ ! "$public_key" =~ ^[A-Za-z0-9_-]{40,}$ ]]; then
-    echo -e "${RED}✗ Некорректный Reality publicKey${NC}"
+    echo -e "${RED}✗ Invalid Reality publicKey${NC}"
     return 1
   fi
   if [[ ! "$short_id" =~ ^[0-9a-fA-F]{0,16}$ ]]; then
-    echo -e "${RED}✗ Некорректный shortId${NC}"
+    echo -e "${RED}✗ Invalid shortId${NC}"
     return 1
   fi
   if [[ -z "$sni" || ! "$sni" =~ ^[a-zA-Z0-9.-]+$ ]]; then
-    echo -e "${RED}✗ Некорректный SNI${NC}"
+    echo -e "${RED}✗ Invalid SNI${NC}"
     return 1
   fi
   if [[ ! "$fingerprint" =~ ^(chrome|firefox|safari|ios|android|edge|qq|random|randomized)$ ]]; then
-    echo -e "${RED}✗ Некорректный fingerprint${NC}"
+    echo -e "${RED}✗ Invalid fingerprint${NC}"
     return 1
   fi
   if [[ -n "$packet_encoding" && "$packet_encoding" != "xudp" ]]; then
-    echo -e "${RED}✗ packetEncoding поддерживает только xudp или пустое значение${NC}"
+    echo -e "${RED}✗ packetEncoding supports only xudp or an empty value${NC}"
     return 1
   fi
 }
@@ -418,7 +418,7 @@ _cascade_validate_upstream_fields() {
 configure_cascade_upstream() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}    НАСТРОЙКА ЗАРУБЕЖНОЙ UPSTREAM-НОДЫ        ${NC}"
+  echo -e "${BLUE}    FOREIGN UPSTREAM NODE SETUP        ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
 
   _cascade_ensure_dir
@@ -433,7 +433,7 @@ configure_cascade_upstream() {
   fi
   _cascade_enabled && cascade_was_enabled=true
 
-  echo -n -e "${YELLOW}Готовая VLESS URL зарубежной ноды [Enter=ручной ввод]: ${NC}"
+  echo -n -e "${YELLOW}Ready-made VLESS URL of the foreign node [Enter=manual input]: ${NC}"
   local import_uri
   read -r import_uri
   if [[ -n "$import_uri" ]]; then
@@ -456,7 +456,7 @@ configure_cascade_upstream() {
     chmod 600 "$upstream_file" 2>/dev/null
     chown xray:xray "$upstream_file" 2>/dev/null || true
     if [[ "$cascade_was_enabled" == "true" ]]; then
-      echo -e "${CYAN}  → Каскад активен: применяю новую ноду...${NC}"
+      echo -e "${CYAN}  → Cascade active: applying the new node...${NC}"
       if ! _cascade_apply_current_upstream "cascade_reconfigure"; then
         if [[ -s "$previous" ]]; then
           cp "$previous" "$upstream_file"
@@ -464,35 +464,35 @@ configure_cascade_upstream() {
           rm -f "$upstream_file"
         fi
         rm -f "$previous"
-        echo -e "${RED}✗ Новая нода не применена; upstream-файл восстановлен${NC}"
+        echo -e "${RED}✗ The new node was not applied; the upstream file was restored${NC}"
         return 1
       fi
     fi
     rm -f "$previous"
-    echo -e "${GREEN}✓ Upstream сохранен: $upstream_file${NC}"
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -e "${GREEN}✓ Upstream saved: $upstream_file${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read -r _
     return 0
   fi
 
   local address port uuid public_key short_id sni fingerprint packet_encoding
-  echo -n -e "${YELLOW}Host/IP зарубежной ноды: ${NC}"
+  echo -n -e "${YELLOW}Foreign node host/IP: ${NC}"
   read -r address
   echo -n -e "${YELLOW}Port [443]: ${NC}"
   read -r port
   port=${port:-443}
-  echo -n -e "${YELLOW}UUID клиента на зарубежной ноде: ${NC}"
+  echo -n -e "${YELLOW}Client UUID on the foreign node: ${NC}"
   read -r uuid
-  echo -n -e "${YELLOW}Reality publicKey зарубежной ноды: ${NC}"
+  echo -n -e "${YELLOW}Foreign node Reality publicKey: ${NC}"
   read -r public_key
-  echo -n -e "${YELLOW}Reality shortId зарубежной ноды: ${NC}"
+  echo -n -e "${YELLOW}Foreign node Reality shortId: ${NC}"
   read -r short_id
-  echo -n -e "${YELLOW}SNI зарубежной ноды: ${NC}"
+  echo -n -e "${YELLOW}Foreign node SNI: ${NC}"
   read -r sni
   echo -n -e "${YELLOW}Fingerprint [$DEFAULT_CLIENT_FINGERPRINT]: ${NC}"
   read -r fingerprint
   fingerprint=${fingerprint:-$DEFAULT_CLIENT_FINGERPRINT}
-  echo -n -e "${YELLOW}packetEncoding [пусто для обычного tcp]: ${NC}"
+  echo -n -e "${YELLOW}packetEncoding [empty for plain tcp]: ${NC}"
   read -r packet_encoding
 
   _cascade_validate_upstream_fields "$address" "$port" "$uuid" "$public_key" "$short_id" "$sni" "$fingerprint" "$packet_encoding" || {
@@ -514,7 +514,7 @@ configure_cascade_upstream() {
       '{version:1,tag:"cascade-upstream",address:$address,port:$port,uuid:$uuid,transport:"tcp",sni:$sni,fingerprint:$fingerprint,public_key:$public_key,short_id:$short_id,flow:"xtls-rprx-vision"} + (if $packet_encoding == "" then {} else {packet_encoding:$packet_encoding} end)' \
       > "$tmp"; then
     rm -f "$tmp"
-    echo -e "${RED}✗ Не удалось собрать upstream JSON${NC}"
+    echo -e "${RED}✗ Could not build the upstream JSON${NC}"
     return 1
   fi
   mv "$tmp" "$upstream_file"
@@ -522,7 +522,7 @@ configure_cascade_upstream() {
   chown xray:xray "$upstream_file" 2>/dev/null || true
 
   if [[ "$cascade_was_enabled" == "true" ]]; then
-    echo -e "${CYAN}  → Каскад активен: применяю новую ноду...${NC}"
+    echo -e "${CYAN}  → Cascade active: applying the new node...${NC}"
     if ! _cascade_apply_current_upstream "cascade_reconfigure"; then
       if [[ -s "$previous" ]]; then
         cp "$previous" "$upstream_file"
@@ -530,14 +530,14 @@ configure_cascade_upstream() {
         rm -f "$upstream_file"
       fi
       rm -f "$previous"
-      echo -e "${RED}✗ Новая нода не применена; upstream-файл восстановлен${NC}"
+      echo -e "${RED}✗ The new node was not applied; the upstream file was restored${NC}"
       return 1
     fi
   fi
   rm -f "$previous"
 
-  echo -e "${GREEN}✓ Upstream сохранен: $upstream_file${NC}"
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -e "${GREEN}✓ Upstream saved: $upstream_file${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
@@ -545,24 +545,24 @@ enable_cascade_mode() {
   local upstream_file
   upstream_file=$(_cascade_config_file)
   if [[ ! -f "$upstream_file" ]]; then
-    echo -e "${RED}✗ Сначала настройте upstream-ноду${NC}"
+    echo -e "${RED}✗ Configure the upstream node first${NC}"
     sleep 2
     return 1
   fi
 
-  echo -e "${YELLOW}Включить каскад: весь default tcp/udp трафик пойдет через cascade-upstream? (y/N): ${NC}"
+  echo -e "${YELLOW}Enable the cascade: route all default tcp/udp traffic through cascade-upstream? (y/N): ${NC}"
   local confirm
   read -r confirm
   [[ "$confirm" =~ ^[yYдД]$ ]] || return 1
 
   _cascade_apply_current_upstream "cascade_enable" || return 1
-  echo -e "${GREEN}✓ Каскад включен${NC}"
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -e "${GREEN}✓ Cascade enabled${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
 disable_cascade_mode() {
-  echo -e "${YELLOW}Отключить каскад и вернуть default route в direct? (y/N): ${NC}"
+  echo -e "${YELLOW}Disable the cascade and return the default route to direct? (y/N): ${NC}"
   local confirm
   read -r confirm
   [[ "$confirm" =~ ^[yYдД]$ ]] || return 1
@@ -593,17 +593,17 @@ disable_cascade_mode() {
         .routing.rules += [{"type":"field","network":"tcp,udp","outboundTag":"direct"}]
       end
     ' "$CONFIG_FILE"; then
-    echo -e "${RED}✗ Не удалось отключить каскад${NC}"
+    echo -e "${RED}✗ Could not disable the cascade${NC}"
     return 1
   fi
   fix_xray_permissions
   if safe_restart_xray "$rollback_config"; then
     rm -f "$CASCADE_ACTIVE_FILE"
-    echo -e "${GREEN}✓ Каскад отключен${NC}"
+    echo -e "${GREEN}✓ Cascade disabled${NC}"
   else
     return 1
   fi
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
@@ -611,19 +611,19 @@ cascade_mode_menu() {
   while true; do
     show_ascii
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}    КАСКАД / UPSTREAM-НОДЫ                    ${NC}"
+    echo -e "${BLUE}    CASCADE / UPSTREAM NODES                    ${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW} Обход VPN имеет смысл только при включённом каскаде${NC}\n"
+    echo -e "${YELLOW} VPN bypass makes sense only when the cascade is enabled${NC}\n"
     _cascade_print_status
     echo ""
-    echo -e "${CYAN} 1)${NC} Настроить зарубежную upstream-ноду"
-    echo -e "${CYAN} 2)${NC} Включить каскад"
-    echo -e "${CYAN} 3)${NC} Отключить каскад"
-    echo -e "${CYAN} 4)${NC} Обход VPN (банки/госуслуги напрямую)"
-    echo -e "${CYAN} 5)${NC} Поднять outbound-сервер (зарубежная нода)"
-    echo -e "${CYAN} 0)${NC} Назад"
+    echo -e "${CYAN} 1)${NC} Configure the foreign upstream node"
+    echo -e "${CYAN} 2)${NC} Enable the cascade"
+    echo -e "${CYAN} 3)${NC} Disable the cascade"
+    echo -e "${CYAN} 4)${NC} VPN bypass (banks/gov services direct)"
+    echo -e "${CYAN} 5)${NC} Deploy the outbound server (foreign node)"
+    echo -e "${CYAN} 0)${NC} Back"
     echo ""
-    echo -n -e "${YELLOW}Выбор: ${NC}"
+    echo -n -e "${YELLOW}Choice: ${NC}"
     local c
     if ! read -r c; then
       echo ""
@@ -636,7 +636,7 @@ cascade_mode_menu() {
       4) bypass_routing_menu ;;
       5) setup_outbound_server_menu ;;
       0) return ;;
-      *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
+      *) echo -e "${RED}Invalid choice${NC}"; sleep 1 ;;
     esac
   done
 }
@@ -644,17 +644,17 @@ cascade_mode_menu() {
 setup_outbound_server_menu() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}    ПОДНЯТЬ OUTBOUND-СЕРВЕР (ЗАРУБЕЖНАЯ НОДА) ${NC}"
+  echo -e "${BLUE}    DEPLOY OUTBOUND SERVER (FOREIGN NODE) ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
-  echo -e "${CYAN}Запускайте этот пункт на ЗАРУБЕЖНОМ VPS.${NC}"
-  echo -e "${CYAN}Он поднимает TCP Reality Vision inbound — выход каскада.${NC}"
-  echo -e "${CYAN}Параметры вставьте на основном сервере: Каскад → Настроить upstream.${NC}\n"
+  echo -e "${CYAN}Run this option on the FOREIGN VPS.${NC}"
+  echo -e "${CYAN}It deploys a TCP Reality Vision inbound — the cascade exit.${NC}"
+  echo -e "${CYAN}Paste the parameters on the main server: Cascade → Configure upstream.${NC}\n"
 
   if [[ -z "${PRIVATE_KEY:-}" && -f "$PRIVATE_KEY_FILE" ]]; then
     PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
   fi
   if [[ -z "${PRIVATE_KEY:-}" || ! -f "$CONFIG_FILE" ]]; then
-    echo -e "${RED}✗ Reality-ключи или config не найдены. Установите XrayTailscale на этой ноде.${NC}"
+    echo -e "${RED}✗ Reality keys or config not found. Install XrayTailscale on this node.${NC}"
     sleep 2
     return 1
   fi
@@ -663,20 +663,20 @@ setup_outbound_server_menu() {
   default_sni=$(grep -v '^#' "$SNI_LIST" 2>/dev/null | grep -v '^[[:space:]]*$' | head -n 1 | cut -d'|' -f1)
   [[ -z "$default_sni" ]] && default_sni="www.ozon.ru"
 
-  echo -n -e "${YELLOW}Порт inbound [443]: ${NC}"
+  echo -n -e "${YELLOW}Inbound port [443]: ${NC}"
   read -r port
   port=${port:-443}
   if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ $port -lt 1 ]] || [[ $port -gt 65535 ]]; then
-    echo -e "${RED}✗ Некорректный порт${NC}"
+    echo -e "${RED}✗ Invalid port${NC}"
     sleep 2
     return 1
   fi
 
-  echo -n -e "${YELLOW}SNI (маскировочный TLS-домен) [${default_sni}]: ${NC}"
+  echo -n -e "${YELLOW}SNI (camouflage TLS domain) [${default_sni}]: ${NC}"
   read -r sni
   sni=${sni:-$default_sni}
   if [[ -z "$sni" ]] || [[ ! "$sni" =~ ^[a-zA-Z0-9.-]+$ ]]; then
-    echo -e "${RED}✗ Некорректный SNI${NC}"
+    echo -e "${RED}✗ Invalid SNI${NC}"
     sleep 2
     return 1
   fi
@@ -685,7 +685,7 @@ setup_outbound_server_menu() {
   read -r fingerprint
   fingerprint=${fingerprint:-$DEFAULT_CLIENT_FINGERPRINT}
   if [[ ! "$fingerprint" =~ ^(chrome|firefox|safari|ios|android|edge|qq|random|randomized)$ ]]; then
-    echo -e "${RED}✗ Некорректный fingerprint${NC}"
+    echo -e "${RED}✗ Invalid fingerprint${NC}"
     sleep 2
     return 1
   fi
@@ -694,7 +694,7 @@ setup_outbound_server_menu() {
   uuid=$(uuidgen)
 
   echo ""
-  echo -n -e "${YELLOW}Поднять TCP Reality Vision inbound на порту $port (SNI $sni)? (y/N): ${NC}"
+  echo -n -e "${YELLOW}Deploy a TCP Reality Vision inbound on port $port (SNI $sni)? (y/N): ${NC}"
   local confirm
   read -r confirm
   [[ "$confirm" =~ ^[yYдД]$ ]] || return 1
@@ -702,13 +702,13 @@ setup_outbound_server_menu() {
   local rollback_config=""
   backup_config "outbound_server" rollback_config || return 1
   if ! add_inbound "$uuid" "tcp" "$port" "$sni" "$fingerprint" "" ""; then
-    echo -e "${RED}✗ Не удалось создать inbound зарубежной ноды${NC}"
+    echo -e "${RED}✗ Could not create the foreign node inbound${NC}"
     return 1
   fi
 
   fix_xray_permissions
   if ! safe_restart_xray "$rollback_config"; then
-    echo -e "${RED}✗ Xray не принял конфиг — выполнен авто-откат. Inbound не поднят.${NC}"
+    echo -e "${RED}✗ Xray rejected the config — auto-rollback done. The inbound was not deployed.${NC}"
     return 1
   fi
 
@@ -722,26 +722,26 @@ setup_outbound_server_menu() {
   address=$(get_server_ip)
 
   echo ""
-  echo -e "${GREEN}✓ Зарубежный outbound-сервер поднят (inbound-$port, TCP Reality Vision).${NC}"
+  echo -e "${GREEN}✓ Foreign outbound server deployed (inbound-$port, TCP Reality Vision).${NC}"
   echo ""
   echo -e "${MAGENTA}═══════════════════════════════════════════════${NC}"
-  echo -e "${MAGENTA} ПАРАМЕТРЫ ДЛЯ ОСНОВНОГО СЕРВЕРА (Каскад → Настроить upstream)${NC}"
+  echo -e "${MAGENTA} PARAMETERS FOR THE MAIN SERVER (Cascade → Configure upstream)${NC}"
   echo -e "${MAGENTA}═══════════════════════════════════════════════${NC}"
-  echo -e "${CYAN}Host/IP:       ${NC}${address:-<впишите IP этой ноды вручную>}"
+  echo -e "${CYAN}Host/IP:       ${NC}${address:-<enter this node IP manually>}"
   echo -e "${CYAN}Port:          ${NC}$port"
   echo -e "${CYAN}UUID:          ${NC}$uuid"
-  echo -e "${CYAN}publicKey:     ${NC}${public_key:-<ключ не определён>}"
+  echo -e "${CYAN}publicKey:     ${NC}${public_key:-<key not defined>}"
   echo -e "${CYAN}shortId:       ${NC}$actual_short_id"
   echo -e "${CYAN}SNI:           ${NC}$actual_sni"
   echo -e "${CYAN}Fingerprint:   ${NC}$actual_fp"
   echo -e "${CYAN}flow:          ${NC}xtls-rprx-vision"
-  echo -e "${CYAN}packetEncoding:${NC} (оставьте пустым)"
+  echo -e "${CYAN}packetEncoding:${NC} (leave empty)"
   echo -e "${MAGENTA}═══════════════════════════════════════════════${NC}"
   if [[ -z "$address" ]]; then
-    echo -e "${YELLOW}⚠ Внешний IP не определён автоматически — впишите Host/IP вручную.${NC}"
+    echo -e "${YELLOW}⚠ The external IP was not detected automatically — enter Host/IP manually.${NC}"
   fi
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
