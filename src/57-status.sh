@@ -151,7 +151,10 @@ _status_ufw_state() {
   for p in 80 443 ${sub_port:+"$sub_port"}; do
     [[ -n "$p" ]] || continue
     # ufw печатает как «8443/tcp», так и мульти-порты «80,443/tcp».
-    grep -qE "^([0-9]+,)*${p}(,[0-9]+)*/tcp[[:space:]]+ALLOW" <<< "$st" || \
+    # ALLOW и LIMIT оба пропускают трафик: LIMIT лишь ограничивает частоту
+    # новых соединений (антискан на порту подписки и :80). Считать LIMIT
+    # «правила нет» — ложная тревога, ведущая к лишней автопочинке.
+    grep -qE "^([0-9]+,)*${p}(,[0-9]+)*/tcp[[:space:]]+(ALLOW|LIMIT)" <<< "$st" || \
       missing="${missing}${missing:+, }${p}"
   done
   if [[ -z "$missing" ]]; then
@@ -1194,7 +1197,7 @@ _status_diag_7_port80() {
   if ! grep -q "Status: active" <<< "$st"; then
     return 0
   fi
-  if grep -qE "^([0-9]+,)*80(,[0-9]+)*/tcp[[:space:]]+ALLOW" <<< "$st"; then
+  if grep -qE "^([0-9]+,)*80(,[0-9]+)*/tcp[[:space:]]+(ALLOW|LIMIT)" <<< "$st"; then
     return 0
   fi
   _STATUS_REASON="ufw активен, правила для 80/tcp нет"

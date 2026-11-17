@@ -377,8 +377,16 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 LockPersonality=yes
 
-Restart=on-failure
+# Restart=always, а не on-failure: socat получает SIGTERM при обрыве управляющего
+# процесса (например, внешний timeout поверх меню), и «чистое» завершение по
+# сигналу не должно оставлять подписку мёртвой.
+# StartLimitIntervalSec=0 отключает отказ после серии быстрых рестартов:
+# иначе 5 SIGTERM подряд за 2 секунды уводили сервис в StartLimit, и подписка
+# молча отдавал 502 до ручного reset-failed. Реальную порочность бинарника
+# всё равно разрежает RestartSec=5.
+Restart=always
 RestartSec=5
+StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target
