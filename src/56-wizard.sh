@@ -6,9 +6,15 @@
 #
 # Порядок в шаге 4 КРИТИЧЕН: сначала _selfsteal_provision (занимает :443 и
 # берёт localhost-backend из диапазона 8443–12443), и только после успеха —
-# подписка. Подписка ВСЕГДА ставится в IP-режиме (install_subscription_ip_tls):
-# при self-steal домен уже занят decoy-сайтом, доменный режим подписки даёт
-# конфликт server_name во втором nginx-vhost (инвариант проекта).
+# подписка.
+# При self-steal подписка ставится в ДОМЕННОМ режиме на том же :443
+# (install_subscription_selfsteal_domain): https://<domain>/sub/<token> —
+# без отдельного порта и без нового сертификата (LE уже выпущен self-steal).
+# Это НЕ старый доменный режим с отдельным vhost на :80: тот дублировал
+# server_name <domain> и затенял ACME webroot, ломая продление сертификатов.
+# Здесь /sub/ добавляется в backend-блок self-steal (127.0.0.1:<backend_port>),
+# а ACME по-прежнему обслуживает только вебрут self-steal.
+# Без домена подписка ставится в IP-режиме (install_subscription_ip_tls).
 #
 # State: /usr/local/etc/xray/.wizard_state — KEY=VALUE, STEP = шаг, который
 # нужно выполнить (он же — точка resume).  Маркер завершения: .wizard_done.
@@ -255,7 +261,7 @@ _wizard_final_report() {
   echo ""
 
   if command -v qrencode >/dev/null 2>&1; then
-    if ! qrencode -t ANSIUTF8 "$url" 2>/dev/null; then
+    if ! _print_qr_block "$url"; then
       echo -e "${YELLOW}⚠ qrencode не построил QR — скопируйте ссылку выше${NC}"
     fi
   else
@@ -661,19 +667,28 @@ run_first_run_wizard() {
           echo -e "${GREEN}✓ Подписка уже установлена на :$(cat "$WIZARD_SUB_PORT_FILE" 2>/dev/null) — пропускаю установку${NC}"
         else
           echo ""
-          echo -e "${CYAN}  → Подписка HAPP: IP-режим (HTTPS по IP сервера).${NC}"
-          echo -e "${CYAN}    Доменный режим здесь нельзя: домен уже занят self-steal.${NC}"
-          # Email override: мастер уже спросил email на шаге 2 —
-          # installer не должен спрашивать его повторно. Сохраняем прежнее
-          # значение (если было), чтобы не затирать его у вызывающей стороны.
+          # При self-steal подписку отдаём ТЕМ ЖЕ доменом на том же :443:
+          # https://<domain>/sub/<token> — без отдельного порта и без нового
+          # сертификата (LE уже выпущен self-steal). НЕ через отдельный
+          # доменный vhost на :80 — тот дублировал бы server_name и ломал renew.
           local _prev_le_email="${SUBSCRIPTION_LE_EMAIL-}"
           local _had_le_email=0
           [[ -n "${SUBSCRIPTION_LE_EMAIL+x}" ]] && _had_le_email=1
           SUBSCRIPTION_LE_EMAIL="$email"
-          if install_subscription_ip_tls; then
-            sub_rc=0
+          if [[ "$mode" == "domain" ]]; then
+            echo -e "${CYAN}  → Subscription HAPP: https://${domain}/sub/<token> (same domain, :443)${NC}"
+            if install_subscription_selfsteal_domain "$domain"; then
+              sub_rc=0
+            else
+              sub_rc=1
+            fi
           else
-            sub_rc=1
+            echo -e "${CYAN}  → Subscription HAPP: IP mode (HTTPS on the server IP).${NC}"
+            if install_subscription_ip_tls; then
+              sub_rc=0
+            else
+              sub_rc=1
+            fi
           fi
           if [[ $_had_le_email -eq 1 ]]; then
             SUBSCRIPTION_LE_EMAIL="$_prev_le_email"

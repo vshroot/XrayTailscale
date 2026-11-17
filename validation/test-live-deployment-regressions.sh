@@ -21,21 +21,21 @@ ufw() { cat /tmp/xt_ufw_sample.txt; }
 
 printf 'Status: active\n\n22/tcp ALLOW Anywhere\n80/tcp LIMIT Anywhere\n443/tcp ALLOW Anywhere\n9443/tcp LIMIT Anywhere\n' > /tmp/xt_ufw_sample.txt
 state=$(_status_ufw_state 9443)
-[[ "$state" == "активен, порты открыты"* ]] \
+[[ "$state" == "active, ports open"* ]] \
   || fail "LIMIT ports reported as: $state"
 echo "  ok LIMIT 80/9443 → «порты открыты»"
 
 # Обратная ветка обязана продолжать работать: реальное отсутствие правил ловится.
 printf 'Status: active\n\n22/tcp ALLOW Anywhere\n443/tcp ALLOW Anywhere\n' > /tmp/xt_ufw_sample.txt
 state=$(_status_ufw_state 9443)
-[[ "$state" == *"НЕТ правил"* && "$state" == *"80"* && "$state" == *"9443"* ]] \
+[[ "$state" == *"NO rules"* && "$state" == *"80"* && "$state" == *"9443"* ]] \
   || fail "missing rules not detected: $state"
 echo "  ok реально отсутствующие правила всё ещё ловятся"
 
 # Мульти-порт и ALLOW не сломались.
 printf 'Status: active\n\n80,443/tcp ALLOW Anywhere\n9443/tcp LIMIT Anywhere\n' > /tmp/xt_ufw_sample.txt
 state=$(_status_ufw_state 9443)
-[[ "$state" == "активен, порты открыты"* ]] \
+[[ "$state" == "active, ports open"* ]] \
   || fail "multi-port ALLOW broke: $state"
 echo "  ok мульти-порт 80,443/tcp ALLOW"
 

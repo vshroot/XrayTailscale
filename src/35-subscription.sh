@@ -163,7 +163,17 @@ vless_urls=$(_generate_vless_urls_for_profile "$profile_file" 2>/dev/null) || em
 query_lc=$(printf '%s' "$query" | tr '[:upper:]' '[:lower:]')
 ua_lc=$(printf '%s' "$user_agent" | tr '[:upper:]' '[:lower:]')
 universal_sub=false
-if [[ "$query_lc" == *"format=v2ray"* || "$query_lc" == *"format=base64"* || "$query_lc" == *"client=v2rayng"* || "$ua_lc" == *"v2rayng"* || "$ua_lc" == *"v2rayn"* ]]; then
+# base64-список (v2ray-sub) — для клиентов, которые ждут именно base64-список
+# и НЕ парсят сырой vless://-текст с HAPP-заголовками:
+#   - v2rayNG / v2rayN (классика), Karing (sing-box), sing-box, Streisand, FoXray.
+# HAPP (happ://...) читает text-ветку ниже — туда Karing НЕ входит.
+if [[ "$query_lc" == *"format=v2ray"* || "$query_lc" == *"format=base64"* \
+   || "$query_lc" == *"client=v2rayng"* || "$query_lc" == *"client=karing"* \
+   || "$query_lc" == *"client=sing-box"* \
+   || "$ua_lc" == *"v2rayng"* || "$ua_lc" == *"v2rayn"* \
+   || "$ua_lc" == *"karing"* || "$ua_lc" == *"sing-box"* \
+   || "$ua_lc" == *"singbox"* || "$ua_lc" == *"streisand"* \
+   || "$ua_lc" == *"foxray"* || "$ua_lc" == *"clash"* ]]; then
   universal_sub=true
 fi
 
@@ -666,10 +676,10 @@ _happ_print_subscription_url_for_profile() {
 
   if _subscription_is_local_only; then
     echo -e "${YELLOW}Local-only debug URL:${NC} ${url}"
-    echo -e "${RED}QR не показываю: 127.0.0.1 доступен только с VPS/SSH tunnel, не с телефона.${NC}"
+    echo -e "${RED}QR is not shown: 127.0.0.1 is reachable from the VPS/SSH tunnel only, not from a phone.${NC}"
   else
     echo -e "${BLUE}URL:${NC} ${GREEN}${url}${NC}"
-    qrencode -t ANSIUTF8 "$url"
+    _print_qr_block "$url"
   fi
   echo ""
   return 0
@@ -1149,6 +1159,182 @@ NGINX_TLS_EOF
 # Local-only fallback installer (REQ-C03).
 # Без nginx, без certbot, БЕЗ открытия UFW (loopback bypasses firewall).
 # Доступ — только через ssh-tunnel: ssh -L 8080:127.0.0.1:8080 user@vps.
+# ═══════════════════════════════════════════════════════════
+# Подписка по ДОМЕНУ self-steal (на том же :443, без порта)
+# ═══════════════════════════════════════════════════════════
+# Self-steal уже обслуживает домен на :443 с валидным LE-сертификатом:
+# Xray (Reality) → dest → 127.0.0.1:<backend> → nginx с decoy-сайтом.
+# Поэтому подписку можно отдавать ТЕМ ЖЕ доменом на том же :443, без
+# отдельного порта и без нового сертификата:
+#
+#   https://<domain>/sub/<token>
+#
+# Реализация — location ^~ /sub/ в backend-виртуальном сервере self-steal.
+# НИКАКОГО второго server_name <domain> на :80: именно это раньше ломало
+# продление сертификатов (дублирующий server_name затенял ACME webroot).
+# ACME продолжает обслуживать только self-steal вебрут.
+#
+# $1 — домен (опционально; по умолчанию читается из .selfsteal_domain).
+install_subscription_selfsteal_domain() {
+  local domain="${1:-}"
+  if [[ -z "$domain" ]]; then
+    domain=$(cat "${SELFSTEAL_DOMAIN_FILE:-/usr/local/etc/xray/.selfsteal_domain}" 2>/dev/null || true)
+  fi
+  if [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    echo -e "${RED}✗ Self-steal domain not found — cannot enable domain subscription${NC}"
+    echo -e "${YELLOW}  Run the self-steal setup first (wizard), or use IP mode.${NC}"
+    return 1
+  fi
+
+  local backend_port
+  backend_port=$(cat "${SELFSTEAL_PORT_FILE:-/usr/local/etc/xray/.selfsteal_backend_port}" 2>/dev/null || true)
+  if [[ ! "$backend_port" =~ ^[0-9]+$ ]]; then
+    echo -e "${RED}✗ Self-steal backend port is unknown — is self-steal configured?${NC}"
+    return 1
+  fi
+
+  local vhost="${SELFSTEAL_NGINX_AVAILABLE:-/etc/nginx/sites-available/xraytailscale-selfsteal.conf}"
+  if [[ ! -f "$vhost" ]]; then
+    echo -e "${RED}✗ nginx self-steal config not found: $vhost${NC}"
+    return 1
+  fi
+
+  echo -e "${CYAN}  → Enabling domain subscription: https://${domain}/sub/<token>${NC}"
+  echo -e "${CYAN}    (same :443 and the same LE certificate as the decoy site)${NC}"
+
+  # 1) Гарантируем, что handler и unit на месте.
+  if ! install_subscription_server >/dev/null 2>&1; then
+    echo -e "${RED}✗ Could not prepare the subscription handler${NC}"
+    return 1
+  fi
+
+  # 2) Вставляем location /sub/ в backend-блок, если его ещё нет.
+  #    Идемпотентно: повторный запуск не дублирует блок.
+  if grep -q 'location \^~ /sub/' "$vhost"; then
+    echo -e "${CYAN}  → /sub/ location already present — keeping the existing config${NC}"
+  else
+    local backup="/tmp/xraytailscale-sub-vhost.$(date +%Y%m%d_%H%M%S).bak"
+    cp "$vhost" "$backup" || { echo -e "${RED}✗ Could not back up $vhost${NC}"; return 1; }
+    # Безопасная вставка через Python: правим ТОЛЬКО backend-блок
+    # (listen 127.0.0.1:<backend_port> ssl), не трогая HTTP-блок на :80.
+    if ! python3 - "$vhost" "$backend_port" <<'PYEOF'
+import sys, re
+path, port = sys.argv[1], sys.argv[2]
+src = open(path).read()
+marker = "location ^~ /sub/"
+if marker in src:
+    sys.exit(0)
+# Ищем именно TLS-backend-блок: listen 127.0.0.1:<port> ssl.
+pattern = re.compile(r'(listen 127\.0\.0\.1:' + re.escape(port) + r' ssl;.*?)(\n\}\n)', re.S)
+m = pattern.search(src)
+if not m:
+    sys.stderr.write("backend TLS block not found for port %s\n" % port)
+    sys.exit(1)
+sub_block = '''
+    # HAPP subscription: same domain, same LE certificate, no extra port.
+    location ^~ /sub/ {
+        access_log off;
+        limit_req zone=xraytailscale_sub burst=10 nodelay;
+        add_header Cache-Control "no-store" always;
+        add_header X-Robots-Tag "noindex, nofollow, nosnippet" always;
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+'''
+src = src[:m.end(1)] + sub_block + src[m.end(1):]
+open(path, "w").write(src)
+PYEOF
+    then
+      cp "$backup" "$vhost"
+      echo -e "${RED}✗ Could not inject the /sub/ location — config rolled back${NC}"
+      return 1
+    fi
+    if ! grep -q 'location \^~ /sub/' "$vhost"; then
+      cp "$backup" "$vhost"
+      echo -e "${RED}✗ /sub/ location was not added — config rolled back${NC}"
+      return 1
+    fi
+    if ! nginx -t >/tmp/nginx-xraytailscale-sub.log 2>&1; then
+      cp "$backup" "$vhost"
+      nginx -t >/dev/null 2>&1 || true
+      echo -e "${RED}✗ nginx -t failed after injection — config rolled back${NC}"
+      cat /tmp/nginx-xraytailscale-sub.log
+      return 1
+    fi
+    if ! systemctl reload nginx >/dev/null 2>&1; then
+      cp "$backup" "$vhost"
+      systemctl reload nginx >/dev/null 2>&1 || true
+      echo -e "${RED}✗ nginx could not reload — config rolled back${NC}"
+      return 1
+    fi
+    rm -f "$backup"
+    echo -e "${GREEN}  ✓ /sub/ is served on the self-steal backend (:443)${NC}"
+  fi
+
+  # 3) Отключаем внешний TLS-виртуалхост IP-режима, если он был: он больше
+  #    не нужен (и его короткоживущий IP-сертификат не нужно продлевать).
+  if [[ -f /etc/nginx/sites-enabled/xraytailscale-sub ]]; then
+    rm -f /etc/nginx/sites-enabled/xraytailscale-sub
+    if ! nginx -t >/dev/null 2>&1; then
+      echo -e "${RED}✗ nginx -t failed after disabling the IP vhost${NC}"
+      return 1
+    fi
+    systemctl reload nginx >/dev/null 2>&1 || true
+    echo -e "${CYAN}  → IP-mode vhost disabled (domain mode replaces it)${NC}"
+  fi
+
+  # 4) Маркеры: домен, порт 443 (→ URL без порта), режим domain_tls.
+  #    Пишем ТОЛЬКО после успешного nginx -t + reload.
+  echo "$domain" > /usr/local/etc/xray/.subscription_domain
+  echo "443" > /usr/local/etc/xray/.subscription_port
+  get_server_ip > /usr/local/etc/xray/.subscription_server_addr 2>/dev/null || true
+  echo "domain_tls" > /usr/local/etc/xray/.subscription_mode
+  chown xray:xray /usr/local/etc/xray/.subscription_port /usr/local/etc/xray/.subscription_domain \
+    /usr/local/etc/xray/.subscription_server_addr /usr/local/etc/xray/.subscription_mode 2>/dev/null || true
+
+  # 5) Запускаем handler (loopback :8080) и проверяем его.
+  if ! _subscription_restart_service; then
+    echo -e "${RED}✗ xraytailscale-sub.service failed to start — check journalctl -u xraytailscale-sub${NC}"
+    return 1
+  fi
+
+  local _happ_profile
+  if ! _happ_ensure_default_multiroute_profile; then
+    return 1
+  fi
+  _happ_profile="$HAPP_DEFAULT_PROFILE"
+
+  echo ""
+  echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
+  echo -e "${GREEN}    ✓ DOMAIN SUBSCRIPTION IS ACTIVE           ${NC}"
+  echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
+  echo -e "${BLUE}Base URL:${NC} ${GREEN}https://${domain}${NC}"
+  _happ_print_subscription_url_for_profile "$_happ_profile"
+
+  # Внешняя проверка ТЕМ ЖЕ доменом — это доказательство, что URL рабочий.
+  local token url code
+  token=$(jq -r '.sub_token // ""' "$PROFILES_DIR/$_happ_profile.json" 2>/dev/null || true)
+  if [[ "$token" =~ ^[a-f0-9]{32}$ ]]; then
+    url="https://${domain}/sub/${token}"
+    code=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)
+    [[ -z "$code" ]] && code="000"
+    if [[ "$code" == "200" ]]; then
+      echo -e "${GREEN}  ✓ External check: ${url} → HTTP 200 (valid certificate)${NC}"
+    else
+      echo -e "${YELLOW}  ⚠ External check: ${url} → HTTP ${code}${NC}"
+      echo -e "${YELLOW}    Check: nginx -t && systemctl reload nginx; ss -tlnp | grep :443${NC}"
+    fi
+  fi
+  echo ""
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
+  read -r _ || true
+  return 0
+}
+
 install_subscription_local_only() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
@@ -1321,8 +1507,7 @@ manage_subscription_menu() {
         else
           echo ""
           if _subscription_ensure_profile_ready "$token"; then
-            qrencode -t ANSIUTF8 "$url"
-            echo ""
+            _print_qr_block "$url"
           else
             echo -e "${RED}✗ HAPP subscription handler не отвечает локально.${NC}"
             echo -e "${YELLOW}  Внешний клиент сейчас получит 502 Bad Gateway.${NC}"
@@ -1330,10 +1515,10 @@ manage_subscription_menu() {
             echo -e "${YELLOW}  Проверьте: systemctl status xraytailscale-sub --no-pager -l${NC}"
             echo -e "${YELLOW}  Логи: journalctl -u xraytailscale-sub -n 80 --no-pager${NC}"
             echo ""
+            echo -n -e "${YELLOW}Enter для продолжения...${NC}"
+            read -r _
           fi
         fi
-        echo -n -e "${YELLOW}Enter для продолжения...${NC}"
-        read -r _
         ;;
       2)
         # Revoke — генерируем новый 32-hex sub_token, пишем через safe_jq_write.
@@ -1381,13 +1566,13 @@ manage_subscription_menu() {
           echo -e "${RED}  ✗ QR не генерируется: PQ-профиль (encryption=mlkem... ~2KB).${NC}"
           echo -e "${YELLOW}  PQ vless:// строки нечитаемы как QR-код.${NC}"
           echo -e "${YELLOW}  Используйте subscription URL/QR (пункт 1 — короткий HTTPS-link).${NC}"
+          echo ""
+          echo -n -e "${YELLOW}Enter для продолжения...${NC}"
+          read -r _
         else
           echo -e "${GREEN}  → legacy профиль (без PQ) — QR допустим${NC}"
-          qrencode -t ANSIUTF8 "$raw"
+          _print_qr_block "$raw"
         fi
-        echo ""
-        echo -n -e "${YELLOW}Enter для продолжения...${NC}"
-        read -r _
         ;;
       0) return ;;
     esac

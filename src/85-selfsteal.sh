@@ -45,10 +45,32 @@ EOF
 
 # Полный конфиг: стадия 2 (после выпуска LE-сертификата).
 # TLS-сайт ТОЛЬКО на 127.0.0.1:<backend_port> — наружу смотрит Xray :443.
+# Если подписка уже переведена на домен (.subscription_mode == domain_tls),
+# /sub/ сохраняем в этом конфиге: иначе переустановка self-steal молча
+# убивала бы рабочую доменную подписку.
 _selfsteal_nginx_config() {
   local domain="$1"
   local backend_port="$2"
   _selfsteal_nginx_http_config "$domain"
+  local sub_location=""
+  if [[ -f /usr/local/etc/xray/.subscription_mode ]] && \
+     [[ "$(cat /usr/local/etc/xray/.subscription_mode 2>/dev/null)" == "domain_tls" ]]; then
+    sub_location='
+    # HAPP subscription: same domain, same LE certificate, no extra port.
+    location ^~ /sub/ {
+        access_log off;
+        limit_req zone=xraytailscale_sub burst=10 nodelay;
+        add_header Cache-Control "no-store" always;
+        add_header X-Robots-Tag "noindex, nofollow, nosnippet" always;
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+'
+  fi
   cat <<EOF
 
 # Self-steal backend: реальный сайт с валидным сертификатом ${domain}.
@@ -62,7 +84,7 @@ server {
 
     root ${SELFSTEAL_WEB_ROOT};
     index index.html;
-
+${sub_location}
     location / {
         try_files \$uri \$uri/ =404;
     }
@@ -608,14 +630,12 @@ _selfsteal_print_link() {
   echo -e "${BLUE}Ссылка для подключения:${NC}"
   echo -e "${YELLOW}${vless_link}${NC}"
   echo ""
-  qrencode -t ANSIUTF8 "$vless_link" 2>/dev/null || true
+  _print_qr_block "$vless_link"
   return 0
 }
 
 selfsteal_show_link() {
   _selfsteal_print_link || { sleep 3; return 1; }
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
-  read -r _
 }
 
 selfsteal_status() {

@@ -593,6 +593,35 @@ confirm_vision_443_risk() {
   [[ "$confirm" =~ ^[yYдД]$ ]]
 }
 
+# ─── Печать QR-кода ────────────────────────────────────────────
+# QR ОБЯЗАН печататься через этот хелпер, иначе он исчезает: следующий
+# экран вызывает show_ascii → clear, и QR-код стирается раньше, чем
+# пользователь успевает его отсканировать. Хелпер печатает QR и ждёт
+# Enter — экран остаётся с QR до явного действия пользователя.
+#
+# $1 — данные для кодирования (обычно subscription URL).
+_print_qr_block() {
+  local data="${1:-}"
+  if [[ -z "$data" ]]; then
+    echo -e "${YELLOW}⚠ Nothing to encode — QR skipped${NC}"
+    return 1
+  fi
+  if ! command -v qrencode >/dev/null 2>&1; then
+    echo -e "${YELLOW}⚠ qrencode is not installed — QR not shown${NC}"
+    echo -e "${YELLOW}  Install it: apt-get install -y qrencode${NC}"
+    return 1
+  fi
+  if ! qrencode -t ANSIUTF8 "$data" 2>/dev/null; then
+    echo -e "${YELLOW}⚠ qrencode could not build the QR — copy the link above${NC}"
+    return 1
+  fi
+  echo ""
+  echo -e "${CYAN}Scan the QR with your VPN app, or copy the link above.${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
+  read -r _ || true
+  return 0
+}
+
 # Безопасная запись через jq — проверяет результат перед перезаписью
 # Использование: safe_jq_write "выражение_jq" [аргументы_jq...] "$входной_файл" "$выходной_файл"
 # Или для записи в тот же файл: safe_jq_write "выражение_jq" [аргументы_jq...] "$файл"

@@ -153,7 +153,8 @@ grep -q 'touch "\$WIZARD_DONE_FILE"' <<< "$final_body" || fail "шаг 5 не с
 grep -q 'WIZARD_URL_FILE' <<< "$final_body" || fail "шаг 5 не пишет .wizard_subscription_url"
 grep -q 'chmod 600 "\$WIZARD_URL_FILE"' <<< "$final_body" || fail ".wizard_subscription_url не получает chmod 600"
 grep -q '_wizard_state_clear' <<< "$final_body" || fail "шаг 5 не очищает .wizard_state"
-grep -q 'qrencode -t ANSIUTF8' <<< "$final_body" || fail "шаг 5 не показывает QR"
+# QR на шаге 5 — через общий хелпер _print_qr_block (он печатает И ждёт Enter).
+grep -qE '_print_qr_block|qrencode -t ANSIUTF8' <<< "$final_body" || fail "шаг 5 не показывает QR"
 echo "  ✓ завершение: .wizard_done + .wizard_subscription_url (chmod 600) + state_clear + QR"
 
 # ── 7. Нет хардкодов портов подписки ──────────────────────

@@ -87,8 +87,15 @@ echo "  ✓ контракт: status_render_summary (только сводка) 
 # ── 3. URL подписки: только через _subscription_base_url ───
 # Каждая строка с «/sub/» обязана либо идти через _subscription_base_url,
 # либо быть локальным зондом на 127.0.0.1 (не публичный URL).
+# URL подписки строится ТОЛЬКО через _subscription_base_url.
+# Строки с «/sub/» в коде допустимы лишь в трёх местах:
+#   1) вызовы _subscription_base_url (отфильтрованы ниже);
+#   2) локальные зонды на 127.0.0.1 (не публичный URL);
+#   3) путь зонда _status_sub_http_code (local path="/sub/..." + host/resolve) —
+#      это не сборка URL, а path для curl, схема/хост задаются отдельно.
 bad_url_lines=$(grep -n '/sub/' "$STATUS" | grep -v '^[0-9]*:[[:space:]]*#' | \
-  grep -v '_subscription_base_url' | grep -v '127\.0\.0\.1' || true)
+  grep -v '_subscription_base_url' | grep -v '127\.0\.0\.1' | \
+  grep -v 'local path=' | grep -v 'path="/sub/' | grep -v '_status_sub_http_code' || true)
 if [[ -n "$bad_url_lines" ]]; then
   fail "ручная склейка URL подписки (нужен _subscription_base_url):${bad_url_lines}"
 fi
@@ -146,8 +153,8 @@ for n in 1 2 3 4 5 6 7; do
 done
 [[ "$(grep -cE '_diag_step [0-9]+ ' <<< "$diag_body")" -eq 7 ]] || \
   fail "diagnose_and_repair должен содержать ровно 7 шагов"
-grep -q 'Исправлено: ' "$STATUS" || fail "нет итоговой сводки «Исправлено: N, осталось проблем: M»"
-grep -q 'Починить' "$STATUS" || fail "нет предложения автопочинки"
+grep -q 'Fixed: ' "$STATUS" || fail "нет итоговой сводки «Fixed: N, remaining problems: M»"
+grep -q 'Fix' "$STATUS" || fail "нет предложения автопочинки"
 grep -q '_status_manual_hints' "$STATUS" || fail "нет точных команд для ручной проверки"
 echo "  ✓ 7 проверок: check + repair + ручные подсказки для каждой"
 
@@ -178,9 +185,9 @@ if grep -qE 'unbound variable|command not found|syntax error' <<< "$err"; then
   fail "status_render_summary падает на пустом окружении: ${err}"
 fi
 [[ "$rc" -eq 0 || "$rc" -eq 1 ]] || fail "status_render_summary вернула rc=${rc}"
-grep -q 'Режим:' <<< "$out" || fail "сводка без строки «Режим»"
-grep -q 'Reality по IP' <<< "$out" || fail "пустое окружение должно давать режим «Reality по IP»"
-grep -q 'не установлена' <<< "$out" || fail "сводка не сообщает об отсутствии подписки"
+grep -q 'Mode:' <<< "$out" || fail "сводка без строки «Mode»"
+grep -q 'Reality over IP' <<< "$out" || fail "пустое окружение должно давать режим «Reality over IP»"
+grep -q 'not installed' <<< "$out" || fail "сводка не сообщает об отсутствии подписки"
 [[ "$rc" -eq 1 ]] || fail "сводка с проблемами должна возвращать 1"
 echo "  ✓ сводка на пустом окружении не падает (rc=1, без unbound/command not found)"
 
@@ -228,24 +235,24 @@ _step_probe() {
   _diag_step "$num" "$title" _check "$repair_fn"
   echo "COUNTERS problems=${_DIAG_PROBLEMS} fixed=${_DIAG_FIXED}"
 }
-out=$( _step_probe 1 "тестовая проверка" _repair <<< "1" )
-grep -q '✓ Исправлено' <<< "$out" || fail "_diag_step не подтвердил починку: ${out}"
+out=$( _step_probe 1 "test check" _repair <<< "1" )
+grep -q '✓ Fixed' <<< "$out" || fail "_diag_step не подтвердил починку: ${out}"
 grep -q 'COUNTERS problems=1 fixed=1' <<< "$out" || fail "_diag_step не увеличил счётчик исправлений: ${out}"
 
 # Отказ от починки → ручные подсказки, проблемы остаются.
 _state=0
-out=$( _step_probe 2 "тестовая проверка" _repair <<< "2" )
-grep -q 'Что проверить вручную' <<< "$out" || fail "_diag_step не показал ручные команды при пропуске"
+out=$( _step_probe 2 "test check" _repair <<< "2" )
+grep -q 'Manual checks' <<< "$out" || fail "_diag_step не показал ручные команды при пропуске"
 grep -q 'fixed=0' <<< "$out" || fail "пропуск починки не должен увеличивать счётчик исправлений: ${out}"
 
-# Неудачная починка → «не удалась» + ручные команды.
+# Неудачная починка → «failed» + ручные команды.
 _state=0
 _repair_fail() { return 1; }
-out=$( _step_probe 3 "тестовая проверка" _repair_fail <<< "1" )
-grep -q 'Автопочинка не удалась' <<< "$out" || fail "_diag_step не сообщил о неудачной починке"
+out=$( _step_probe 3 "test check" _repair_fail <<< "1" )
+grep -q 'Auto-repair failed' <<< "$out" || fail "_diag_step не сообщил о неудачной починке"
 echo "  ✓ _diag_step: починка → перепроверка → «Исправлено» / ручные команды"
 
-# ── 8b. diagnose_and_repair: всё зелёное → «Всё в порядке» ─
+# ── 8b. diagnose_and_repair: всё зелёное → «ALL GOOD» ─
 _all_ok_probe() {
   _status_diag_1_xray()       { return 0; }
   _status_diag_2_port443()    { return 0; }
@@ -258,12 +265,12 @@ _all_ok_probe() {
   diagnose_and_repair
 }
 out=$(_all_ok_probe < /dev/null)
-grep -q 'ВСЁ В ПОРЯДКЕ' <<< "$out" || fail "diagnose_and_repair не показал «Всё в порядке» при 7/7"
-grep -q 'Исправлено: 0, осталось проблем: 0' <<< "$out" || fail "итоговая сводка неверна: ${out}"
-echo "  ✓ diagnose_and_repair: 7/7 → «Всё в порядке», итог 0/0"
+grep -q 'ALL GOOD' <<< "$out" || fail "diagnose_and_repair не показал «ALL GOOD» при 7/7"
+grep -q 'Fixed: 0, remaining problems: 0' <<< "$out" || fail "итоговая сводка неверна: ${out}"
+echo "  ✓ diagnose_and_repair: 7/7 → «ALL GOOD», итог 0/0"
 
 # ── 8b2. Смешанный прогон: 1 починено, 1 пропущено ────────
-# Проверяем сквозной контракт счётчиков: «Исправлено: 1, осталось проблем: 1».
+# Проверяем сквозной контракт счётчиков: «Fixed: 1, remaining problems: 1».
 _mixed_probe() {
   local fixed=0
   _status_diag_1_xray()       { return 0; }
@@ -283,13 +290,13 @@ set +e
 out=$(_mixed_probe 2>&1)
 rc=$?
 set -e
-grep -q 'Исправлено: 1, осталось проблем: 1' <<< "$out" || \
+grep -q 'Fixed: 1, remaining problems: 1' <<< "$out" || \
   fail "счётчики сквозного прогона неверны: $(grep 'Исправлено' <<< "$out")"
-if grep -q 'ВСЁ В ПОРЯДКЕ' <<< "$out"; then
-  fail "«Всё в порядке» при остаточной проблеме"
+if grep -q 'ALL GOOD' <<< "$out"; then
+  fail "«ALL GOOD» при остаточной проблеме"
 fi
 [[ "$rc" -eq 1 ]] || fail "diagnose_and_repair с остатком должна возвращать 1 (получено $rc)"
-echo "  ✓ сквозной прогон: 1 починка + 1 остаток → «Исправлено: 1, осталось проблем: 1», rc=1"
+echo "  ✓ сквозной прогон: 1 починка + 1 остаток → «Fixed: 1, remaining problems: 1», rc=1"
 
 # ── 8c. Автоперенос порта подписки ────────────────────────
 MOVE="$WORKDIR/move"
@@ -326,7 +333,7 @@ if grep -q '8443' "$MOVE/nginx-sub"; then
   fail "старый порт остался в nginx-конфиге"
 fi
 [[ "$(cat "$MOVE/.subscription_port")" == "9443" ]] || fail "маркер .subscription_port не обновлён"
-grep -q 'ССЫЛКА ПОДПИСКИ ИЗМЕНИЛАСЬ\|ссылка подписки ИЗМЕНИЛАСЬ' <<< "$out" || \
+grep -q 'subscription URL CHANGED' <<< "$out" || \
   fail "не сообщено об изменении ссылки"
 grep -q 'https://203.0.113.10:9443' <<< "$out" || fail "новая URL не перевыпущена через _subscription_base_url"
 echo "  ✓ автоперенос подписки: listen main+[::] переписан, маркер обновлён, новая URL показана"
@@ -348,7 +355,7 @@ _loc_probe() {
 }
 # status_render_summary возвращает 1 (есть ⚠) — под set -e это не ошибка теста.
 out=$(_loc_probe 2>&1) || true
-sub_line=$(grep 'Подписка:' <<< "$out" | head -1)
+sub_line=$(grep 'Subscription:' <<< "$out" | head -1)
 grep -q 'local-only' <<< "$sub_line" || fail "local-only подписка не помечена в сводке: ${sub_line}"
 if grep -q '0;32m✓' <<< "$sub_line"; then
   fail "local-only подписка не должна быть зелёной ✓: ${sub_line}"

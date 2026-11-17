@@ -114,8 +114,9 @@ assert_not_contains "$tmpdir/upgrade_profile_to_pq_menu" 'safe_jq_write'
 assert_not_contains "$tmpdir/upgrade_profile_to_pq_menu" 'Profile JSON МОЖЕТ'
 echo "  ok _pq_upgrade_one_profile + upgrade_profile_to_pq_menu"
 
-assert_contains "$tmpdir/status_extra_menu" 'Обновить Xray-core'
 assert_contains "$tmpdir/status_extra_menu" 'update_command'
+# Пункт обновления ядра: подпись может быть на EN или RU (интерфейс переводится).
+grep -qE 'Update Xray-core|Обновить Xray-core' "$tmpdir/status_extra_menu" || fail "no update-xray menu item"
 echo "  ok _status_extra_menu"
 
 assert_order install.sh 'for ufw_port in 22 80 443 8443 2053 2083 2087 8080 2096 8880 9443; do' 'ufw --force enable'

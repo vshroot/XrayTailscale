@@ -276,7 +276,7 @@ generate_connection() {
       else
         echo -e "${BLUE}Subscription URL:${NC} ${GREEN}${url}${NC}"
         echo ""
-        qrencode -t ANSIUTF8 "$url"
+        _print_qr_block "$url"
       fi
     fi
 
@@ -334,7 +334,7 @@ generate_connection() {
   echo -e "${BLUE}Ссылка для подключения:${NC}"
   echo -e "${YELLOW}${vless_link}${NC}\n"
   echo -e "${BLUE}QR-код:${NC}\n"
-  qrencode -t ANSIUTF8 "$vless_link"
+  _print_qr_block "$vless_link"
   echo ""
   echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
   echo -e "${CYAN}Параметры для ручной настройки:${NC}"
