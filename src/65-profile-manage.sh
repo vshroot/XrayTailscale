@@ -377,15 +377,15 @@ generate_connection() {
     if [[ "${pq_enabled:-false}" == "true" ]]; then
       echo ""
       echo -e "${MAGENTA}ℹ XHTTP + Post-Quantum (mlkem768x25519plus.native):${NC}"
-      echo -e "${YELLOW}⚠ Клиенты должны поддерживать VLESS PQ encryption:${NC}"
+      echo -e "${YELLOW}⚠ Clients must support VLESS PQ encryption:${NC}"
       echo -e "  ${GREEN}✓${NC} HAPP 2.10+, v2rayNG 1.10+, v2rayN PR#7782+, Shadowrocket (новые версии)"
-      echo -e "  ${RED}✗${NC} sing-box, NekoBox, Hiddify, mihomo (создайте отдельный legacy TCP+Vision профиль)"
+      echo -e "  ${RED}✗${NC} sing-box, NekoBox, Hiddify, mihomo (create a separate legacy TCP+Vision profile)"
     else
       echo ""
-      echo -e "${YELLOW}ℹ XHTTP:${NC} текущий рекомендуемый вариант под ТСПУ-2026"
-      echo -e "${YELLOW}⚠ XHTTP требует современные клиенты:${NC}"
+      echo -e "${YELLOW}ℹ XHTTP:${NC} currently the recommended option for TSPU-2026"
+      echo -e "${YELLOW}⚠ XHTTP requires modern clients:${NC}"
       echo -e "  ${GREEN}✓${NC} sing-box 1.8+, v2rayN 6.x+, v2rayNG 1.8.x+"
-      echo -e "  ${RED}✗${NC} Clash Meta, старые версии клиентов"
+      echo -e "  ${RED}✗${NC} Clash Meta, older client versions"
     fi
   fi
   echo -e "${GREEN}═══════════════════════════════════════════════${NC}\n"
@@ -397,7 +397,7 @@ generate_connection() {
 change_sni_menu() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}    ПОДМЕНА SNI ПРОФИЛЯ (МАСКИРОВКА)         ${NC}"
+  echo -e "${BLUE}    CHANGE PROFILE SNI (CAMOUFLAGE)         ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
 
   local profiles=($(_list_visible_profile_names))
@@ -409,12 +409,12 @@ change_sni_menu() {
     return
   fi
 
-  echo -e "${YELLOW}Выберите профиль для смены SNI:${NC}\n"
+  echo -e "${YELLOW}Choose a profile to change SNI:${NC}\n"
   local i=1
   for profile in "${profiles[@]}"; do
     local sni=$(jq -r '.sni // "не задан"' "$PROFILES_DIR/$profile.json" 2>/dev/null)
     local port=$(jq -r '.port' "$PROFILES_DIR/$profile.json" 2>/dev/null)
-    echo -e "${CYAN} $i)${NC} $profile ${BLUE}[порт:$port]${NC} ${YELLOW}[SNI:$sni]${NC}"
+    echo -e "${CYAN} $i)${NC} $profile ${BLUE}[port:$port]${NC} ${YELLOW}[SNI:$sni]${NC}"
     ((i++))
   done
   echo -e "${CYAN} 0)${NC} Back to main menu\n"
@@ -456,25 +456,25 @@ change_sni_menu() {
   fi
 
   echo ""
-  echo -e "${CYAN}Текущий SNI '${target_label}':${NC} ${GREEN}$current_sni${NC}"
-  echo -e "${CYAN}Транспорт:${NC} ${YELLOW}$transport${NC}\n"
+  echo -e "${CYAN}Current SNI '${target_label}':${NC} ${GREEN}$current_sni${NC}"
+  echo -e "${CYAN}Transport:${NC} ${YELLOW}$transport${NC}\n"
 
   # gRPC требует HTTP/2, российские сайты не поддерживают
   if [[ "$transport" == "grpc" ]]; then
     echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║     ⚠ gRPC ТРЕБУЕТ ЗАРУБЕЖНЫЕ SNI (HTTP/2)              ║${NC}"
+    echo -e "${RED}║     ⚠ gRPC REQUIRES FOREIGN SNI (HTTP/2)              ║${NC}"
     echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${YELLOW}gRPC работает только с сайтами поддерживающими HTTP/2.${NC}"
-    echo -e "${YELLOW}Российские сайты (Ozon, WB, Sber и др.) НЕ поддерживают HTTP/2.${NC}"
+    echo -e "${YELLOW}gRPC only works with sites that support HTTP/2.${NC}"
+    echo -e "${YELLOW}Russian sites (Ozon, WB, Sber etc.) do NOT support HTTP/2.${NC}"
     echo ""
-    echo -e "${GREEN}Рекомендуемые SNI для gRPC:${NC}"
-    echo -e "  ${CYAN}1)${NC} www.cloudflare.com ${BLUE}(рекомендуется)${NC}"
+    echo -e "${GREEN}Recommended SNI for gRPC:${NC}"
+    echo -e "  ${CYAN}1)${NC} www.cloudflare.com ${BLUE}(recommended)${NC}"
     echo -e "  ${CYAN}2)${NC} github.com"
     echo -e "  ${CYAN}3)${NC} aws.amazon.com"
     echo -e "  ${CYAN}4)${NC} cdn.cloudflare.net"
-    echo -e "  ${CYAN}0)${NC} Назад\n"
-    echo -n -e "${YELLOW}Выберите SNI для gRPC: ${NC}"
+    echo -e "  ${CYAN}0)${NC} Back\n"
+    echo -n -e "${YELLOW}Choose SNI for gRPC: ${NC}"
     read grpc_choice
 
     case $grpc_choice in
@@ -486,7 +486,7 @@ change_sni_menu() {
     esac
 
     if [[ "$new_sni" == "$current_sni" ]]; then
-      echo -e "${YELLOW}⚠ Этот SNI уже используется${NC}"
+      echo -e "${YELLOW}⚠ This SNI is already in use${NC}"
       sleep 2
       return
     fi
@@ -496,47 +496,47 @@ change_sni_menu() {
 
     if [[ ${#profiles_on_port[@]} -gt 1 ]]; then
       echo ""
-      echo -e "${RED}⚠ На порту $port есть другие профили:${NC}"
+      echo -e "${RED}⚠ Other profiles on port $port:${NC}"
       for p in "${profiles_on_port[@]}"; do
         echo -e "  ${CYAN}•${NC} $p"
       done
-      echo -e "${YELLOW}Все они будут обновлены на SNI: ${MAGENTA}$new_sni${NC}"
+      echo -e "${YELLOW}They will all be updated to SNI: ${MAGENTA}$new_sni${NC}"
     fi
 
     echo ""
-    echo -n -e "${YELLOW}Применить SNI '$new_sni'? (y/N): ${NC}"
+    echo -n -e "${YELLOW}Apply SNI '$new_sni'? (y/N): ${NC}"
     read confirm
     if [[ "$confirm" =~ ^[yYдД]$ ]]; then
       local rollback_config=""
       if ! backup_config "change_sni_$selected" rollback_config; then
-        echo -e "${RED}✗ Не удалось создать бэкап config.json${NC}"
+        echo -e "${RED}✗ Could not back up config.json${NC}"
         sleep 2
         return
       fi
 
       # Update config
       if ! update_transport_settings_for_sni "$port" "$new_sni" "$CONFIG_FILE"; then
-        echo -e "${RED}✗ Ошибка обновления config.json${NC}"
+        echo -e "${RED}✗ Error updating config.json${NC}"
         sleep 2
         return
       fi
 
       fix_xray_permissions
       if ! safe_restart_xray "$rollback_config"; then
-        echo -e "${RED}✗ Xray не перезапустился — config.json откачен, профили НЕ изменены${NC}"
+        echo -e "${RED}✗ Xray did not restart — config.json rolled back, profiles NOT changed${NC}"
         sleep 2
         return
       fi
 
       # Update all profile/route JSON entries tied to this inbound port
       if ! update_all_profiles_on_port "$port" "sni" "$new_sni"; then
-        echo -e "${RED}✗ Ошибка обновления профиля${NC}"
+        echo -e "${RED}✗ Error updating the profile${NC}"
         sleep 2
         return
       fi
 
       echo ""
-      echo -e "${GREEN}✓ SNI '${target_label}' изменен на: ${YELLOW}$new_sni${NC}"
+      echo -e "${GREEN}✓ SNI '${target_label}' changed to: ${YELLOW}$new_sni${NC}"
       echo ""
       echo -n -e "${YELLOW}Press Enter to continue...${NC}"
       read
@@ -545,7 +545,7 @@ change_sni_menu() {
   fi
 
   if [[ ! -f "$SNI_LIST" ]]; then
-    echo -e "${RED}✗ Файл списка SNI не найден${NC}"
+    echo -e "${RED}✗ SNI list file not found${NC}"
     echo ""
     echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read
@@ -577,7 +577,7 @@ change_sni_menu() {
   sni_desc["www.cloudflare.com"]="Для корпоративных каналов"
   sni_desc["aws.amazon.com"]="AWS CDN, запасной вариант для gRPC"
 
-  echo -e "${YELLOW}ТОП-20 доменов для маскировки:${NC}\n"
+  echo -e "${YELLOW}TOP-20 camouflage domains:${NC}\n"
   local idx=1
   local sni_array=()
   while IFS='|' read -r domain category priority || [[ -n "$domain" ]]; do
@@ -590,7 +590,7 @@ change_sni_menu() {
     local desc="${sni_desc[$domain]}"
     [[ -z "$desc" ]] && desc="Дополнительный вариант"
     if [[ "$domain" == "$current_sni" ]]; then
-      printf "${CYAN}%2d)${NC} %-40s ${GREEN}[текущий]${NC}\n" $idx "$domain"
+      printf "${CYAN}%2d)${NC} %-40s ${GREEN}[current]${NC}\n" $idx "$domain"
     else
       printf "${CYAN}%2d)${NC} %-40s ${BLUE}%s${NC}\n" $idx "$domain" "$desc"
     fi
@@ -599,10 +599,10 @@ change_sni_menu() {
   done < "$SNI_LIST"
 
   echo ""
-  echo -e "${MAGENTA}Полный актуальный список:${NC} ${GREEN}$SNI_LIST${NC}"
-  echo -e "${YELLOW}Обновляйте минимум раз в месяц!${NC}\n"
-  echo -e "${CYAN} 0)${NC} Назад\n"
-  echo -n -e "${YELLOW}Выберите новый SNI: ${NC}"
+  echo -e "${MAGENTA}Full up-to-date list:${NC} ${GREEN}$SNI_LIST${NC}"
+  echo -e "${YELLOW}Update at least once a month!${NC}\n"
+  echo -e "${CYAN} 0)${NC} Back\n"
+  echo -n -e "${YELLOW}Choose a new SNI: ${NC}"
   read sni_choice
 
   if [[ "$sni_choice" == "0" ]]; then
@@ -617,7 +617,7 @@ change_sni_menu() {
   fi
 
   if [[ "$new_sni" == "$current_sni" ]]; then
-    echo -e "${YELLOW}⚠ Этот SNI уже используется${NC}"
+    echo -e "${YELLOW}⚠ This SNI is already in use${NC}"
     sleep 2
     return
   fi
@@ -631,83 +631,83 @@ change_sni_menu() {
 
     echo ""
     echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║         ⚠ ВНИМАНИЕ: ОБЩИЙ INBOUND НА ПОРТУ $port        ║${NC}"
+    echo -e "${RED}║         ⚠ WARNING: SHARED INBOUND ON PORT $port        ║${NC}"
     echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${YELLOW}Следующие профили используют порт $port:${NC}"
+    echo -e "${YELLOW}These profiles use port $port:${NC}"
     echo ""
 
     for p in "${profiles_on_port[@]}"; do
       local psni=$(jq -r '.sni' "$PROFILES_DIR/$p.json")
-      echo -e "  ${CYAN}•${NC} ${YELLOW}$p${NC} (текущий SNI: $psni)"
+      echo -e "  ${CYAN}•${NC} ${YELLOW}$p${NC} (current SNI: $psni)"
     done
 
     echo ""
-    echo -e "${MAGENTA}Смена SNI обновит ВСЕ эти профили!${NC}"
-    echo -e "${YELLOW}Все профили на порту $port будут использовать SNI: ${MAGENTA}$new_sni${NC}"
+    echo -e "${MAGENTA}Changing SNI will update ALL these profiles!${NC}"
+    echo -e "${YELLOW}All profiles on port $port will use SNI: ${MAGENTA}$new_sni${NC}"
     echo ""
-    echo -e "${CYAN}Xray Reality: SNI привязан к порту, а не к профилю.${NC}"
-    echo -e "${CYAN}Для разных SNI используйте разные порты.${NC}"
+    echo -e "${CYAN}Xray Reality: SNI is bound to the port, not the profile.${NC}"
+    echo -e "${CYAN}Use different ports for different SNI.${NC}"
     echo ""
   fi
 
   echo ""
   echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║            ⚠ КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ ⚠               ║${NC}"
+  echo -e "${RED}║            ⚠ CRITICAL WARNING ⚠               ║${NC}"
   echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "${YELLOW}Смена SNI обновит конфигурацию '${target_label}'.${NC}"
+  echo -e "${YELLOW}Changing SNI will update the '${target_label}' config.${NC}"
   echo ""
-  echo -e "${RED}Активные подключения этого профиля будут разорваны!${NC}"
+  echo -e "${RED}Active connections on this profile will be dropped!${NC}"
   echo ""
-  echo -e "${CYAN}После смены необходимо:${NC}"
-  echo -e "  ${BLUE}1.${NC} Получить НОВУЮ ссылку для профиля '$selected'"
-  echo -e "  ${BLUE}2.${NC} Обновить конфигурацию в клиентах"
+  echo -e "${CYAN}After the change you must:${NC}"
+  echo -e "  ${BLUE}1.${NC} Get a NEW link for profile '$selected'"
+  echo -e "  ${BLUE}2.${NC} Update the config in clients"
   echo ""
-  echo -e "${MAGENTA}Новый SNI: ${YELLOW}$new_sni${NC}"
+  echo -e "${MAGENTA}New SNI: ${YELLOW}$new_sni${NC}"
   echo ""
-  echo -n -e "${YELLOW}Продолжить? (y/N): ${NC}"
+  echo -n -e "${YELLOW}Continue? (y/N): ${NC}"
   read confirm
 
   if [[ ! "$confirm" =~ ^[yYдД]$ ]]; then
-    echo -e "${CYAN}✓ Отменено${NC}"
+    echo -e "${CYAN}✓ Cancelled${NC}"
     sleep 1
     return
   fi
 
   local rollback_config=""
   if ! backup_config "change_sni_$selected" rollback_config; then
-    echo -e "${RED}✗ Не удалось создать бэкап config.json${NC}"
+    echo -e "${RED}✗ Could not back up config.json${NC}"
     sleep 2
     return
   fi
 
   # Update config (transport-aware)
   if ! update_transport_settings_for_sni "$port" "$new_sni" "$CONFIG_FILE"; then
-    echo -e "${RED}✗ Ошибка обновления config.json${NC}"
+    echo -e "${RED}✗ Error updating config.json${NC}"
     sleep 2
     return
   fi
 
   fix_xray_permissions
   if ! safe_restart_xray "$rollback_config"; then
-    echo -e "${RED}✗ Xray не перезапустился — config.json откачен, профили НЕ изменены${NC}"
+    echo -e "${RED}✗ Xray did not restart — config.json rolled back, profiles NOT changed${NC}"
     sleep 2
     return
   fi
 
   # Update all profile/route JSON entries tied to this inbound port
   if ! update_all_profiles_on_port "$port" "sni" "$new_sni"; then
-    echo -e "${RED}✗ Ошибка обновления профиля${NC}"
+    echo -e "${RED}✗ Error updating the profile${NC}"
     sleep 2
     return
   fi
 
   echo ""
-  echo -e "${GREEN}✓ SNI '${target_label}' изменен на: ${YELLOW}$new_sni${NC}"
+  echo -e "${GREEN}✓ SNI '${target_label}' changed to: ${YELLOW}$new_sni${NC}"
   echo ""
   echo -e "${MAGENTA}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${MAGENTA}║     Теперь получите новую ссылку для этого профиля!     ║${NC}"
+  echo -e "${MAGENTA}║     Now get a new link for this profile!     ║${NC}"
   echo -e "${MAGENTA}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
   echo -n -e "${YELLOW}Press Enter to continue...${NC}"
@@ -718,7 +718,7 @@ change_sni_menu() {
 change_fingerprint_menu() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}   ПОДМЕНА FINGERPRINT (TLS БРАУЗЕР)         ${NC}"
+  echo -e "${BLUE}   CHANGE FINGERPRINT (TLS BROWSER)         ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
 
   local profiles=($(_list_visible_profile_names))
@@ -730,12 +730,12 @@ change_fingerprint_menu() {
     return
   fi
 
-  echo -e "${YELLOW}Выберите профиль для смены fingerprint:${NC}\n"
+  echo -e "${YELLOW}Choose a profile to change fingerprint:${NC}\n"
   local i=1
   for profile in "${profiles[@]}"; do
     local fp=$(jq -r --arg default_fp "$DEFAULT_CLIENT_FINGERPRINT" '.fingerprint // $default_fp' "$PROFILES_DIR/$profile.json" 2>/dev/null)
     local port=$(jq -r '.port' "$PROFILES_DIR/$profile.json" 2>/dev/null)
-    echo -e "${CYAN} $i)${NC} $profile ${BLUE}[порт:$port]${NC} ${YELLOW}[fp:$fp]${NC}"
+    echo -e "${CYAN} $i)${NC} $profile ${BLUE}[port:$port]${NC} ${YELLOW}[fp:$fp]${NC}"
     ((i++))
   done
   echo -e "${CYAN} 0)${NC} Back to main menu\n"
@@ -774,17 +774,17 @@ change_fingerprint_menu() {
   fi
 
   echo ""
-  echo -e "${CYAN}Текущий fingerprint '${target_label}':${NC} ${GREEN}$current_fp${NC}\n"
-  echo -e "${YELLOW}Доступные fingerprint (эмуляция браузера):${NC}\n"
-  echo -e "${CYAN} 1)${NC} chrome    ${YELLOW}(legacy, может блокироваться)${NC}"
-  echo -e "${CYAN} 2)${NC} firefox   ${GREEN}(default, рекомендуется)${NC}"
-  echo -e "${CYAN} 3)${NC} safari    ${BLUE}(для iOS/macOS клиентов)${NC}"
-  echo -e "${CYAN} 4)${NC} edge      ${BLUE}(альтернатива chrome)${NC}"
-  echo -e "${CYAN} 5)${NC} ios       ${BLUE}(для старых iOS устройств)${NC}"
-  echo -e "${CYAN} 6)${NC} random    ${YELLOW}(случайный, экспериментально)${NC}"
-  echo -e "${CYAN} 0)${NC} Назад\n"
+  echo -e "${CYAN}Current fingerprint '${target_label}':${NC} ${GREEN}$current_fp${NC}\n"
+  echo -e "${YELLOW}Available fingerprints (browser emulation):${NC}\n"
+  echo -e "${CYAN} 1)${NC} chrome    ${YELLOW}(legacy, may be blocked)${NC}"
+  echo -e "${CYAN} 2)${NC} firefox   ${GREEN}(default, recommended)${NC}"
+  echo -e "${CYAN} 3)${NC} safari    ${BLUE}(for iOS/macOS clients)${NC}"
+  echo -e "${CYAN} 4)${NC} edge      ${BLUE}(chrome alternative)${NC}"
+  echo -e "${CYAN} 5)${NC} ios       ${BLUE}(for older iOS devices)${NC}"
+  echo -e "${CYAN} 6)${NC} random    ${YELLOW}(random, experimental)${NC}"
+  echo -e "${CYAN} 0)${NC} Back\n"
 
-  echo -n -e "${YELLOW}Выберите новый fingerprint: ${NC}"
+  echo -n -e "${YELLOW}Choose a new fingerprint: ${NC}"
   read fp_choice
 
   local new_fp=""
@@ -800,24 +800,24 @@ change_fingerprint_menu() {
   esac
 
   if [[ "$new_fp" == "$current_fp" ]]; then
-    echo -e "${YELLOW}⚠ Этот fingerprint уже используется${NC}"
+    echo -e "${YELLOW}⚠ This fingerprint is already in use${NC}"
     sleep 2
     return
   fi
 
   echo ""
-  echo -e "${YELLOW}Смена fingerprint изменит TLS имитацию браузера.${NC}"
+  echo -e "${YELLOW}Changing fingerprint changes the TLS browser emulation.${NC}"
   echo ""
-  echo -e "${CYAN}Xray перезапускаться не будет; другие маршруты и профили не изменятся.${NC}"
-  echo -e "${CYAN}После смены принудительно обновите подписку в HAPP или переимпортируйте ссылку.${NC}"
+  echo -e "${CYAN}Xray will not restart; other routes and profiles are unchanged.${NC}"
+  echo -e "${CYAN}After the change, force-refresh the subscription in HAPP or re-import the link.${NC}"
   echo ""
-  echo -e "${MAGENTA}Новый fingerprint: ${YELLOW}$new_fp${NC}"
+  echo -e "${MAGENTA}New fingerprint: ${YELLOW}$new_fp${NC}"
   echo ""
-  echo -n -e "${YELLOW}Продолжить? (y/N): ${NC}"
+  echo -n -e "${YELLOW}Continue? (y/N): ${NC}"
   read confirm
 
   if [[ ! "$confirm" =~ ^[yYдД]$ ]]; then
-    echo -e "${CYAN}✓ Отменено${NC}"
+    echo -e "${CYAN}✓ Cancelled${NC}"
     sleep 1
     return
   fi
@@ -825,15 +825,15 @@ change_fingerprint_menu() {
   # Fingerprint is client-only state. The atomic profile write immediately
   # changes the dynamically generated subscription without restarting Xray.
   if ! update_profile_fingerprint "$profile_file" "$route_index" "$new_fp"; then
-    echo -e "${RED}✗ Ошибка обновления профиля${NC}"
+    echo -e "${RED}✗ Error updating the profile${NC}"
     sleep 2
     return
   fi
 
   echo ""
-  echo -e "${GREEN}✓ Fingerprint '${target_label}' изменен на: ${YELLOW}$new_fp${NC}"
+  echo -e "${GREEN}✓ Fingerprint '${target_label}' changed to: ${YELLOW}$new_fp${NC}"
   echo ""
-  echo -e "${GREEN}✓ Подписка на сервере уже содержит новый fp=${new_fp}.${NC}"
+  echo -e "${GREEN}✓ The server subscription already contains the new fp=${new_fp}.${NC}"
   echo ""
   echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read
@@ -843,7 +843,7 @@ change_fingerprint_menu() {
 change_port_menu() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}         ИЗМЕНЕНИЕ ПОРТА ПРОФИЛЯ              ${NC}"
+  echo -e "${BLUE}         CHANGE PROFILE PORT              ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
   local profiles=($(_list_visible_profile_names))
   if [[ ${#profiles[@]} -eq 0 ]]; then
@@ -853,7 +853,7 @@ change_port_menu() {
     read
     return
   fi
-  echo -e "${YELLOW}Выберите профиль для изменения порта:${NC}\n"
+  echo -e "${YELLOW}Choose a profile to change the port:${NC}\n"
   local i=1
   for profile in "${profiles[@]}"; do
     local transport=$(jq -r '.transport' "$PROFILES_DIR/$profile.json" 2>/dev/null)
@@ -888,25 +888,25 @@ change_port_menu() {
     old_port=$(jq -r '.port' "$profile_file")
   fi
   echo ""
-  echo -e "${CYAN}Текущий порт '${target_label}':${NC} ${GREEN}$old_port${NC}\n"
-  echo -e "${YELLOW}Рекомендуемый сценарий для 2026:${NC}\n"
-  echo -e "  ${GREEN}1)${NC} Случайный высокий порт 30000-60000 ${MAGENTA}- рекомендуется${NC}"
-  echo -e "  ${CYAN}2)${NC} 443   ${YELLOW}- вручную / рискованно для Vision${NC}"
-  echo -e "  ${CYAN}3)${NC} 8443  ${BLUE}- явный альтернативный HTTPS-порт${NC}"
-  echo -e "  ${CYAN}4)${NC} 2053  ${BLUE}- ручной вариант, иногда удобен для gRPC${NC}"
-  echo -e "  ${CYAN}5)${NC} 2083  ${BLUE}- Cloudflare альтернативный SSL${NC}"
-  echo -e "  ${CYAN}6)${NC} 2087  ${BLUE}- Cloudflare альтернативный SSL${NC}"
-  echo -e "  ${CYAN}7)${NC} 2096  ${BLUE}- Cloudflare альтернативный SSL${NC}"
-  echo -e "  ${CYAN}8)${NC} 9443  ${BLUE}- ручной XHTTP-style вариант, не дефолт${NC}"
-  echo -e "  ${CYAN}9)${NC} 8080  ${BLUE}- HTTP альтернативный прокси${NC}"
-  echo -e "  ${CYAN}10)${NC} Свой порт (введу вручную)\n"
-  echo -n -e "${YELLOW}Выберите порт: ${NC}"
+  echo -e "${CYAN}Current port '${target_label}':${NC} ${GREEN}$old_port${NC}\n"
+  echo -e "${YELLOW}Recommended for 2026:${NC}\n"
+  echo -e "  ${GREEN}1)${NC} Random high port 30000-60000 ${MAGENTA}- recommended${NC}"
+  echo -e "  ${CYAN}2)${NC} 443   ${YELLOW}- manual / risky for Vision${NC}"
+  echo -e "  ${CYAN}3)${NC} 8443  ${BLUE}- explicit alternative HTTPS port${NC}"
+  echo -e "  ${CYAN}4)${NC} 2053  ${BLUE}- manual option, sometimes handy for gRPC${NC}"
+  echo -e "  ${CYAN}5)${NC} 2083  ${BLUE}- Cloudflare alternative SSL${NC}"
+  echo -e "  ${CYAN}6)${NC} 2087  ${BLUE}- Cloudflare alternative SSL${NC}"
+  echo -e "  ${CYAN}7)${NC} 2096  ${BLUE}- Cloudflare alternative SSL${NC}"
+  echo -e "  ${CYAN}8)${NC} 9443  ${BLUE}- manual XHTTP-style option, not default${NC}"
+  echo -e "  ${CYAN}9)${NC} 8080  ${BLUE}- HTTP alternative proxy${NC}"
+  echo -e "  ${CYAN}10)${NC} Custom port (enter manually)\n"
+  echo -n -e "${YELLOW}Choose a port: ${NC}"
   read port_choice
   local new_port=""
   case $port_choice in
     1)
       if ! new_port=$(find_available_random_port); then
-        echo -n -e "${YELLOW}Нажмите Enter...${NC}"
+        echo -n -e "${YELLOW}Press Enter...${NC}"
         read
         return
       fi
@@ -920,26 +920,26 @@ change_port_menu() {
     8) new_port="9443" ;;
     9) new_port="8080" ;;
     10)
-      echo -n -e "${YELLOW}Введите номер порта (1-65535): ${NC}"
+      echo -n -e "${YELLOW}Enter a port number (1-65535): ${NC}"
       read new_port
       ;;
     0) return ;;
     *) echo -e "${RED}✗ Invalid choice${NC}"; sleep 2; return ;;
   esac
   if [[ ! "$new_port" =~ ^[0-9]+$ ]] || [[ $new_port -lt 1 ]] || [[ $new_port -gt 65535 ]]; then
-    echo -e "${RED}✗ Неверный порт. Используйте число от 1 до 65535${NC}"
+    echo -e "${RED}✗ Invalid port. Use a number from 1 to 65535${NC}"
     sleep 2
     return
   fi
   if [[ "$new_port" == "$old_port" ]]; then
-    echo -e "${YELLOW}⚠ Профиль уже использует этот порт${NC}"
+    echo -e "${YELLOW}⚠ The profile already uses this port${NC}"
     sleep 2
     return
   fi
   if [[ -n "$route_index" ]] && jq -e --argjson i "$route_index" --argjson port "$new_port" '
     any((.routes // []) | to_entries[]; (.key != $i) and (.value.port == $port))
   ' "$profile_file" >/dev/null 2>&1; then
-    echo -e "${RED}✗ Этот порт уже используется другим маршрутом этого же профиля${NC}"
+    echo -e "${RED}✗ This port is already used by another route of the same profile${NC}"
     sleep 2
     return
   fi
@@ -964,7 +964,7 @@ change_port_menu() {
 
   if [[ "$new_port" == "443" ]] && [[ "$profile_transport" == "tcp" || "$profile_transport" == "tcp-utls" || "$profile_transport" == "tcp-xudp" ]]; then
     if ! confirm_vision_443_risk; then
-      echo -e "${CYAN}✓ Смена порта отменена${NC}"
+      echo -e "${CYAN}✓ Port change cancelled${NC}"
       sleep 1
       return
     fi
@@ -994,13 +994,13 @@ change_port_menu() {
 
     if [[ "$profile_network" != "$target_inbound_transport" ]]; then
       echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-      echo -e "${RED}║            ✗ НЕСОВМЕСТИМЫЙ ТРАНСПОРТ                     ║${NC}"
+      echo -e "${RED}║            ✗ INCOMPATIBLE TRANSPORT                     ║${NC}"
       echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
       echo ""
-      echo -e "${YELLOW}Порт $new_port уже занят профилем с транспортом: ${MAGENTA}$target_inbound_transport${NC}"
-      echo -e "${YELLOW}Ваш профиль использует транспорт: ${MAGENTA}$profile_transport${NC}"
+      echo -e "${YELLOW}Port $new_port is already taken by a profile with transport: ${MAGENTA}$target_inbound_transport${NC}"
+      echo -e "${YELLOW}Your profile uses transport: ${MAGENTA}$profile_transport${NC}"
       echo ""
-      echo -e "${CYAN}Нельзя объединить разные транспорты на одном порту.${NC}"
+      echo -e "${CYAN}Cannot combine different transports on one port.${NC}"
       echo ""
       echo -n -e "${YELLOW}Press Enter to continue...${NC}"
       read
@@ -1009,44 +1009,44 @@ change_port_menu() {
 
     move_to_existing=true
     echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║           ПОРТ УЖЕ ИСПОЛЬЗУЕТСЯ                          ║${NC}"
+    echo -e "${YELLOW}║           PORT ALREADY IN USE                          ║${NC}"
     echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${CYAN}Порт $new_port уже занят профилем с транспортом: ${GREEN}$target_inbound_transport${NC}"
-    echo -e "${CYAN}SNI на этом порту: ${GREEN}$target_inbound_sni${NC}"
+    echo -e "${CYAN}Port $new_port is already taken by a profile with transport: ${GREEN}$target_inbound_transport${NC}"
+    echo -e "${CYAN}SNI on this port: ${GREEN}$target_inbound_sni${NC}"
     echo ""
-    echo -e "${MAGENTA}Профиль '$profile_name' будет перемещен на этот порт.${NC}"
-    echo -e "${MAGENTA}SNI профиля изменится на: ${YELLOW}$target_inbound_sni${NC}"
+    echo -e "${MAGENTA}Profile '$profile_name' will be moved to this port.${NC}"
+    echo -e "${MAGENTA}The profile SNI will change to: ${YELLOW}$target_inbound_sni${NC}"
     echo ""
   fi
 
   echo ""
   echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║            ⚠ КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ ⚠               ║${NC}"
+  echo -e "${RED}║            ⚠ CRITICAL WARNING ⚠               ║${NC}"
   echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "${YELLOW}Смена порта изменит настройки подключения.${NC}"
+  echo -e "${YELLOW}Changing the port changes the connection settings.${NC}"
   echo ""
-  echo -e "${RED}ВСЕ активные подключения '${target_label}' будут разорваны!${NC}"
+  echo -e "${RED}ALL active '${target_label}' connections will be dropped!${NC}"
   echo ""
-  echo -e "${CYAN}После смены необходимо:${NC}"
-  echo -e "  ${BLUE}1.${NC} Получить НОВУЮ ссылку/QR-код для этого профиля"
-  echo -e "  ${BLUE}2.${NC} Обновить конфигурацию в клиентах"
-  echo -e "  ${BLUE}3.${NC} Убедиться, что порт открыт в firewall"
+  echo -e "${CYAN}After the change you must:${NC}"
+  echo -e "  ${BLUE}1.${NC} Get a NEW link/QR code for this profile"
+  echo -e "  ${BLUE}2.${NC} Update the config in clients"
+  echo -e "  ${BLUE}3.${NC} Make sure the port is open in the firewall"
   echo ""
-  echo -e "${MAGENTA}Порт изменится: ${YELLOW}$old_port → $new_port${NC}"
+  echo -e "${MAGENTA}Port will change: ${YELLOW}$old_port → $new_port${NC}"
   echo ""
-  echo -n -e "${YELLOW}Продолжить смену порта? (y/N): ${NC}"
+  echo -n -e "${YELLOW}Continue changing the port? (y/N): ${NC}"
   read confirm
   if [[ ! "$confirm" =~ ^[yYдД]$ ]]; then
-    echo -e "${CYAN}✓ Отменено${NC}"
+    echo -e "${CYAN}✓ Cancelled${NC}"
     sleep 1
     return
   fi
 
   local rollback_config=""
   if ! backup_config "change_port_$profile_name" rollback_config; then
-    echo -e "${RED}✗ Не удалось создать бэкап config.json${NC}"
+    echo -e "${RED}✗ Could not back up config.json${NC}"
     sleep 2
     return
   fi
@@ -1055,7 +1055,7 @@ change_port_menu() {
 
   if [[ "$move_to_existing" == "true" ]]; then
     # Move client to existing inbound on target port
-    echo -e "${CYAN}  → Перемещение клиента на порт $new_port...${NC}"
+    echo -e "${CYAN}  → Moving the client to port $new_port...${NC}"
 
     # Определяем flow по типу транспорта профиля
     local target_flow=""
@@ -1068,8 +1068,8 @@ change_port_menu() {
     if ! safe_jq_write --arg uuid "$profile_uuid" --argjson port "$new_port" --arg flow "$target_flow" '
       (.inbounds[] | select(.port == $port) | .settings.clients) += [{"id": $uuid, "flow": $flow}]
     ' "$CONFIG_FILE"; then
-      echo -e "${RED}  ✗ Ошибка добавления клиента на порт $new_port — операция отменена${NC}"
-      echo -n -e "${YELLOW}Нажмите Enter...${NC}"; read
+      echo -e "${RED}  ✗ Error adding the client to port $new_port — operation cancelled${NC}"
+      echo -n -e "${YELLOW}Press Enter...${NC}"; read
       return
     fi
 
@@ -1077,22 +1077,22 @@ change_port_menu() {
     if ! safe_jq_write --arg uuid "$profile_uuid" --argjson port "$old_port" '
       (.inbounds[] | select(.port == $port) | .settings.clients) |= map(select(.id != $uuid))
     ' "$CONFIG_FILE"; then
-      echo -e "${RED}  ✗ Ошибка удаления клиента с порта $old_port${NC}"
-      echo -e "${YELLOW}  → Откат: удаление клиента с нового порта $new_port...${NC}"
+      echo -e "${RED}  ✗ Error removing the client from port $old_port${NC}"
+      echo -e "${YELLOW}  → Rollback: removing the client from the new port $new_port...${NC}"
       safe_jq_write --arg uuid "$profile_uuid" --argjson port "$new_port" '
         (.inbounds[] | select(.port == $port) | .settings.clients) |= map(select(.id != $uuid))
       ' "$CONFIG_FILE"
-      echo -n -e "${YELLOW}Нажмите Enter...${NC}"; read
+      echo -n -e "${YELLOW}Press Enter...${NC}"; read
       return
     fi
 
     # Шаг 3: Если старый inbound пуст — удалить его
     local old_clients_count=$(jq -r --argjson port "$old_port" '.inbounds[] | select(.port == $port) | .settings.clients | length' "$CONFIG_FILE")
     if [[ "$old_clients_count" == "0" ]]; then
-      echo -e "${CYAN}  → Удаление пустого inbound на порту $old_port...${NC}"
+      echo -e "${CYAN}  → Removing the empty inbound on port $old_port...${NC}"
       if ! safe_jq_write --argjson port "$old_port" 'del(.inbounds[] | select(.port == $port))' "$CONFIG_FILE"; then
-        echo -e "${RED}  ✗ Ошибка удаления пустого inbound на порту $old_port${NC}"
-        echo -n -e "${YELLOW}Нажмите Enter...${NC}"; read
+        echo -e "${RED}  ✗ Error removing the empty inbound on port $old_port${NC}"
+        echo -n -e "${YELLOW}Press Enter...${NC}"; read
         return
       fi
       old_inbound_removed=true
@@ -1104,16 +1104,16 @@ change_port_menu() {
       (.inbounds[] | select(.tag == $old_tag) | .port) |= $new_port |
       (.inbounds[] | select(.tag == $old_tag) | .tag) |= ("inbound-" + ($new_port | tostring))
     ' "$CONFIG_FILE"; then
-      echo -e "${RED}  ✗ Ошибка смены порта в конфиге — операция отменена${NC}"
-      echo -n -e "${YELLOW}Нажмите Enter...${NC}"; read
+      echo -e "${RED}  ✗ Error changing the port in the config — operation cancelled${NC}"
+      echo -n -e "${YELLOW}Press Enter...${NC}"; read
       return
     fi
   fi
 
   fix_xray_permissions
   if ! safe_restart_xray "$rollback_config"; then
-    echo -e "${RED}✗ Xray не перезапустился — config.json откачен, профили и firewall НЕ изменены${NC}"
-    echo -n -e "${YELLOW}Нажмите Enter...${NC}"; read
+    echo -e "${RED}✗ Xray did not restart — config.json rolled back, profiles and firewall NOT changed${NC}"
+    echo -n -e "${YELLOW}Press Enter...${NC}"; read
     return
   fi
 
@@ -1153,8 +1153,8 @@ change_port_menu() {
     fi
 
     if [[ "$profile_update_ok" != "true" ]]; then
-      echo -e "${RED}✗ Xray уже перезапущен, но profile JSON не удалось синхронизировать${NC}"
-      echo -n -e "${YELLOW}Нажмите Enter...${NC}"; read
+      echo -e "${RED}✗ Xray already restarted, but the profile JSON could not be synced${NC}"
+      echo -n -e "${YELLOW}Press Enter...${NC}"; read
       return
     fi
 
@@ -1164,22 +1164,22 @@ change_port_menu() {
   else
     # Обновить ВСЕ профили/маршруты на старом порту (inbound перенесён целиком)
     if ! update_all_profiles_port_reference "$old_port" "$new_port"; then
-      echo -e "${RED}✗ Xray уже перезапущен, но profile JSON не удалось синхронизировать${NC}"
-      echo -n -e "${YELLOW}Нажмите Enter...${NC}"; read
+      echo -e "${RED}✗ Xray already restarted, but the profile JSON could not be synced${NC}"
+      echo -n -e "${YELLOW}Press Enter...${NC}"; read
       return
     fi
 
     # Update firewall after the new config is live.
     open_firewall_port "$new_port" || \
-      echo -e "${YELLOW}  ⚠ Порт $new_port не был открыт через UFW — проверьте firewall вручную${NC}"
+      echo -e "${YELLOW}  ⚠ Port $new_port was not opened via UFW — check the firewall manually${NC}"
     close_firewall_port "$old_port"
   fi
 
   echo ""
-  echo -e "${GREEN}✓ Порт '${target_label}' изменен: ${YELLOW}$old_port → $new_port${NC}"
+  echo -e "${GREEN}✓ Port '${target_label}' changed: ${YELLOW}$old_port → $new_port${NC}"
   echo ""
   echo -e "${MAGENTA}╔═══════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${MAGENTA}║        Теперь ОБЯЗАТЕЛЬНО получите новую ссылку!        ║${NC}"
+  echo -e "${MAGENTA}║        Now you MUST get a new link!        ║${NC}"
   echo -e "${MAGENTA}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
   echo -n -e "${YELLOW}Press Enter to continue...${NC}"
@@ -1191,33 +1191,33 @@ manage_profile_advanced_menu() {
   local profile_file="$PROFILES_DIR/$profile_name.json"
 
   if [[ ! -f "$profile_file" ]]; then
-    echo -e "${RED}Профиль не найден: $profile_name${NC}"
+    echo -e "${RED}Profile not found: $profile_name${NC}"
     sleep 2
     return
   fi
 
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}    АДВАНС НАСТРОЙКИ ПРОФИЛЯ (EXPERIMENTAL)   ${NC}"
-  echo -e "${BLUE}    Профиль: $profile_name${NC}"
+  echo -e "${BLUE}    ADVANCED PROFILE SETTINGS (EXPERIMENTAL)   ${NC}"
+  echo -e "${BLUE}    Profile: $profile_name${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
   echo ""
   echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
   echo -e "${RED}║  EXPERIMENTAL — VISION SEED                              ║${NC}"
   echo -e "${RED}╠═══════════════════════════════════════════════════════════╣${NC}"
-  echo -e "${RED}║  Эти поля (testpre/testseed) появились в Xray-core       ║${NC}"
-  echo -e "${RED}║  v1.251201.0 (декабрь 2025). Могут сломать подключения  ║${NC}"
-  echo -e "${RED}║  клиентов на старых версиях Xray. Не тестировалось на   ║${NC}"
-  echo -e "${RED}║  реальных конфигах.                                     ║${NC}"
+  echo -e "${RED}║  These fields (testpre/testseed) appeared in Xray-core       ║${NC}"
+  echo -e "${RED}║  v1.251201.0 (December 2025). May break connections  ║${NC}"
+  echo -e "${RED}║  on clients with older Xray versions. Not tested on   ║${NC}"
+  echo -e "${RED}║  real configs.                                     ║${NC}"
   echo -e "${RED}║                                                           ║${NC}"
-  echo -e "${RED}║  testpre на серверной стороне parsed-but-not-used:       ║${NC}"
-  echo -e "${RED}║  pre-connect логика работает только в outbound клиента.  ║${NC}"
-  echo -e "${RED}║  Чтобы testpre дал эффект, клиенту нужно установить      ║${NC}"
-  echo -e "${RED}║  то же значение в своем VLESS outbound.                  ║${NC}"
-  echo -e "${RED}║  testseed работает на обеих сторонах.                    ║${NC}"
+  echo -e "${RED}║  testpre on the server side is parsed-but-not-used:       ║${NC}"
+  echo -e "${RED}║  pre-connect logic only works in the client outbound.  ║${NC}"
+  echo -e "${RED}║  For testpre to take effect, the client must set      ║${NC}"
+  echo -e "${RED}║  the same value in its VLESS outbound.                  ║${NC}"
+  echo -e "${RED}║  testseed works on both sides.                    ║${NC}"
   echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -n -e "${YELLOW}Продолжить? [y/N]: ${NC}"
+  echo -n -e "${YELLOW}Continue? [y/N]: ${NC}"
   local ans
   read -r ans
   [[ "$ans" =~ ^[yYдД]$ ]] || return
@@ -1229,9 +1229,9 @@ manage_profile_advanced_menu() {
     major=$(echo "$xray_ver" | cut -d'.' -f1)
     minor=$(echo "$xray_ver" | cut -d'.' -f2)
     if [[ "$major" == "1" && "$minor" =~ ^[0-9]+$ && "$minor" -lt 251201 ]]; then
-      echo -e "${YELLOW}Xray-core версия $xray_ver — testpre/testseed появились в v1.251201.0+${NC}"
-      echo -e "${YELLOW}  Поля будут добавлены в config, но эффекта не дадут. Рекомендуется sudo xraytailscale update.${NC}"
-      echo -n -e "${YELLOW}Продолжить все равно? [y/N]: ${NC}"
+      echo -e "${YELLOW}Xray-core version $xray_ver — testpre/testseed appeared in v1.251201.0+${NC}"
+      echo -e "${YELLOW}  Fields will be added to the config but will have no effect. Recommended: sudo xraytailscale update.${NC}"
+      echo -n -e "${YELLOW}Continue anyway? [y/N]: ${NC}"
       read -r ans
       [[ "$ans" =~ ^[yYдД]$ ]] || return
     fi
@@ -1240,19 +1240,19 @@ manage_profile_advanced_menu() {
   local cur_pre cur_seed
   cur_pre=$(jq -r '.testpre // "не задано"' "$profile_file" 2>/dev/null)
   cur_seed=$(jq -c '.testseed // []' "$profile_file" 2>/dev/null)
-  echo -e "${CYAN}Текущие значения: testpre=${cur_pre}, testseed=${cur_seed}${NC}"
+  echo -e "${CYAN}Current values: testpre=${cur_pre}, testseed=${cur_seed}${NC}"
   echo ""
 
-  echo -n -e "${YELLOW}testpre (uint32, 0=off, эффект только на клиенте) [0]: ${NC}"
+  echo -n -e "${YELLOW}testpre (uint32, 0=off, effect only on the client) [0]: ${NC}"
   local testpre_val
   read -r testpre_val
   testpre_val=${testpre_val:-0}
   if [[ ! "$testpre_val" =~ ^[0-9]+$ ]]; then
-    echo -e "${YELLOW}Некорректный testpre — будет использован 0${NC}"
+    echo -e "${YELLOW}Invalid testpre — 0 will be used${NC}"
     testpre_val=0
   fi
 
-  echo -n -e "${YELLOW}testseed (uint32 через пробел, пусто=off) []: ${NC}"
+  echo -n -e "${YELLOW}testseed (space-separated uint32, empty=off) []: ${NC}"
   local testseed_input
   read -r testseed_input
   local -a testseed_values=()
@@ -1261,7 +1261,7 @@ manage_profile_advanced_menu() {
     if [[ "$seed" =~ ^[0-9]+$ ]]; then
       testseed_values+=("$seed")
     else
-      echo -e "${RED}✗ Некорректный testseed элемент: $seed${NC}"
+      echo -e "${RED}✗ Invalid testseed element: $seed${NC}"
       sleep 2
       return
     fi
@@ -1273,26 +1273,26 @@ manage_profile_advanced_menu() {
   fi
 
   echo ""
-  echo -e "${CYAN}Будет применено:${NC}"
+  echo -e "${CYAN}Will be applied:${NC}"
   echo -e "  ${YELLOW}testpre${NC} = $testpre_val"
   echo -e "  ${YELLOW}testseed${NC} = $testseed_json"
-  echo -n -e "${YELLOW}Применить? [y/N]: ${NC}"
+  echo -n -e "${YELLOW}Apply? [y/N]: ${NC}"
   local confirm
   read -r confirm
-  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Отменено${NC}"; sleep 1; return; }
+  [[ "$confirm" =~ ^[yYдД]$ ]] || { echo -e "${CYAN}✓ Cancelled${NC}"; sleep 1; return; }
 
   local port uuid
   port=$(jq -r '.port' "$profile_file" 2>/dev/null)
   uuid=$(jq -r '.uuid' "$profile_file" 2>/dev/null)
   if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ -z "$uuid" || "$uuid" == "null" ]]; then
-    echo -e "${RED}✗ В профиле нет корректного port/uuid${NC}"
+    echo -e "${RED}✗ The profile has no valid port/uuid${NC}"
     sleep 2
     return
   fi
 
   local rollback_config="" profiles_snapshot=""
   _snapshot_profiles profiles_snapshot || {
-    echo -e "${RED}✗ Не удалось создать снимок profile JSON${NC}"
+    echo -e "${RED}✗ Could not snapshot the profile JSON${NC}"
     sleep 2
     return
   }
@@ -1303,7 +1303,7 @@ manage_profile_advanced_menu() {
       '. + {testpre: $testpre, testseed: $testseed}' \
       "$profile_file"; then
     _discard_profiles_snapshot "$profiles_snapshot"
-    echo -e "${RED}✗ Ошибка записи profile JSON${NC}"
+    echo -e "${RED}✗ Error writing the profile JSON${NC}"
     sleep 2
     return
   fi
@@ -1321,7 +1321,7 @@ manage_profile_advanced_menu() {
       '(.inbounds[] | select(.port == $port) | .settings.clients[] | select(.id == $uuid)) |= (. + {testpre: $testpre, testseed: $testseed})' \
       "$CONFIG_FILE"; then
     _restore_profiles_snapshot "$profiles_snapshot" >/dev/null 2>&1 || true
-    echo -e "${RED}✗ Ошибка записи config.json${NC}"
+    echo -e "${RED}✗ Error writing config.json${NC}"
     sleep 2
     return
   fi
@@ -1329,12 +1329,12 @@ manage_profile_advanced_menu() {
   fix_xray_permissions
   if ! safe_restart_xray "$rollback_config"; then
     _restore_profiles_snapshot "$profiles_snapshot" >/dev/null 2>&1 || true
-    echo -e "${RED}✗ Xray не перезапустился — profile JSON восстановлен${NC}"
+    echo -e "${RED}✗ Xray did not restart — profile JSON restored${NC}"
     sleep 2
     return
   fi
   _discard_profiles_snapshot "$profiles_snapshot"
-  echo -e "${GREEN}Vision Seed применен. testpre=${testpre_val}, testseed=${testseed_json}${NC}"
+  echo -e "${GREEN}Vision Seed applied. testpre=${testpre_val}, testseed=${testseed_json}${NC}"
   echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
