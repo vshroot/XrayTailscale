@@ -78,8 +78,8 @@ grep -q '^_subscription_external_selfcheck()' src/35-subscription.sh || \
 selfcheck_body=$(_fn_body src/35-subscription.sh _subscription_external_selfcheck)
 echo "$selfcheck_body" | grep -q 'curl -sk --max-time' || \
   fail "_subscription_external_selfcheck должен делать curl -sk --max-time"
-echo "$selfcheck_body" | grep -q 'Проверяю подписку извне' || \
-  fail "_subscription_external_selfcheck: нет маркера 'Проверяю подписку извне'"
+echo "$selfcheck_body" | grep -q 'Checking the subscription from outside' || \
+  fail "_subscription_external_selfcheck: нет маркера 'Checking the subscription from outside'"
 
 ip_body=$(_fn_body src/35-subscription.sh install_subscription_ip_tls)
 [[ -n "$ip_body" ]] || fail "не удалось извлечь тело install_subscription_ip_tls"

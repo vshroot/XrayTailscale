@@ -110,7 +110,7 @@ echo "  ✓ override в install_subscription_ip_tls: EMAIL из мастера, 
 
 # Поведенческая проверка override (не только текст): с валидным
 # SUBSCRIPTION_LE_EMAIL и закрытым stdin исполнение обязано дойти до выбора
-# порта. Если бы prompt остался, read получил бы EOF → «Некорректный email».
+# порта. Если бы prompt остался, read получил бы EOF → «Invalid email».
 _override_probe() {
   (
     show_ascii() { :; }
@@ -123,9 +123,9 @@ _override_probe() {
 _override_out=$(_override_probe)
 grep -qF "wizard@example.com" <<< "$_override_out" || \
   fail "SUBSCRIPTION_LE_EMAIL не используется в install_subscription_ip_tls"
-grep -qF "Нет свободного порта для подписки" <<< "$_override_out" || \
+grep -qF "No free port for the subscription" <<< "$_override_out" || \
   fail "override не пропустил email-prompt (исполнение не дошло до выбора порта)"
-if grep -qF "Некорректный email" <<< "$_override_out"; then
+if grep -qF "Invalid email" <<< "$_override_out"; then
   fail "override игнорируется: installer прочитал пустой stdin вместо SUBSCRIPTION_LE_EMAIL"
 fi
 echo "  ✓ поведение: email из SUBSCRIPTION_LE_EMAIL принимается без prompt'а"

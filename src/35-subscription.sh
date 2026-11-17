@@ -42,13 +42,13 @@ install_subscription_server() {
 
   # Pre-flight: socat (handler bind), openssl/base64/jq уже гарантированы install.sh.
   if ! command -v socat &>/dev/null; then
-    echo -e "${CYAN}  → Установка socat...${NC}"
+    echo -e "${CYAN}  → Installing socat...${NC}"
     if ! apt-get install -y socat >/dev/null 2>&1; then
-      echo -e "${RED}✗ Не удалось установить socat${NC}"
-      echo -e "${YELLOW}Установите вручную: apt-get install -y socat${NC}"
+      echo -e "${RED}✗ Could not install socat${NC}"
+      echo -e "${YELLOW}Install manually: apt-get install -y socat${NC}"
       return 1
     fi
-    echo -e "${GREEN}  ✓ socat установлен${NC}"
+    echo -e "${GREEN}  ✓ socat installed${NC}"
   fi
 
   # ── (1) subhttp.sh ────────────────────────────────────────
@@ -335,10 +335,10 @@ SUBHTTP_EOF
   chmod 755 /usr/local/bin/subhttp.sh
   chown root:root /usr/local/bin/subhttp.sh
   if ! bash -n /usr/local/bin/subhttp.sh; then
-    echo -e "${RED}✗ Сгенерированный /usr/local/bin/subhttp.sh не проходит bash -n${NC}"
+    echo -e "${RED}✗ Generated /usr/local/bin/subhttp.sh fails bash -n${NC}"
     return 1
   fi
-  echo -e "${GREEN}  ✓ /usr/local/bin/subhttp.sh создан${NC}"
+  echo -e "${GREEN}  ✓ /usr/local/bin/subhttp.sh created${NC}"
 
   # ── (2) .happ_defaults.env (idempotent — не перетирать кастомизации оператора) ──
   if [[ ! -f /usr/local/etc/xray/.happ_defaults.env ]]; then
@@ -372,9 +372,9 @@ HAPP_ROUTING_JSON_FILE="/usr/local/etc/xray/.happ_routing.json"
 HAPP_DEFAULTS_EOF
     chmod 644 /usr/local/etc/xray/.happ_defaults.env
     chown xray:xray /usr/local/etc/xray/.happ_defaults.env 2>/dev/null || true
-    echo -e "${GREEN}  ✓ /usr/local/etc/xray/.happ_defaults.env создан${NC}"
+    echo -e "${GREEN}  ✓ /usr/local/etc/xray/.happ_defaults.env created${NC}"
   else
-    echo -e "${YELLOW}  ⚠ /usr/local/etc/xray/.happ_defaults.env уже существует — не трогаем${NC}"
+    echo -e "${YELLOW}  ⚠ /usr/local/etc/xray/.happ_defaults.env already exists — leaving it${NC}"
   fi
 
   # ── (3) systemd unit (REQ-C09 hardening; opt-in, НЕ enable/start здесь) ──
@@ -422,7 +422,7 @@ SUBUNIT_EOF
 
   chmod 644 /etc/systemd/system/xraytailscale-sub.service
   chown root:root /etc/systemd/system/xraytailscale-sub.service
-  echo -e "${GREEN}  ✓ /etc/systemd/system/xraytailscale-sub.service создан${NC}"
+  echo -e "${GREEN}  ✓ /etc/systemd/system/xraytailscale-sub.service created${NC}"
 
   # daemon-reload — чтобы systemctl увидел новый unit. НЕ enable, НЕ start.
   systemctl daemon-reload 2>/dev/null || true
@@ -432,8 +432,8 @@ SUBUNIT_EOF
   chown xray:xray /usr/local/etc/xray/.subscription_installed 2>/dev/null || true
 
   echo ""
-  echo -e "${YELLOW}  ⚠ Юнит создан, но НЕ запущен и НЕ enabled.${NC}"
-  echo -e "${YELLOW}    Запуск/активацию выполняет Plan 7.3 menu (после установки публичного TLS).${NC}"
+  echo -e "${YELLOW}  ⚠ Unit created but NOT started and NOT enabled.${NC}"
+  echo -e "${YELLOW}    Start/enable is done by the menu (after public TLS is set up).${NC}"
   echo ""
   return 0
 }
@@ -463,7 +463,7 @@ _subscription_find_free_port() {
     echo "$p"
     return 0
   done
-  echo -e "${RED}✗ Нет свободного порта для подписки из диапазона 8443–12443${NC}" >&2
+  echo -e "${RED}✗ No free port for the subscription in 8443–12443${NC}" >&2
   return 1
 }
 
@@ -483,13 +483,13 @@ _select_subscription_port() {
   fi
   local fallback
   if ! fallback=$(_subscription_find_free_port); then
-    echo -e "${RED}✗ Порт 443 занят и свободного fallback-порта нет${NC}" >&2
+    echo -e "${RED}✗ Port 443 is taken and no free fallback port${NC}" >&2
     return 1
   fi
   if echo "$listener" | grep -q "xray"; then
-    echo -e "${YELLOW}  ⚠ Порт 443 занят Xray inbound — fallback на ${fallback}${NC}" >&2
+    echo -e "${YELLOW}  ⚠ Port 443 is taken by an Xray inbound — falling back to ${fallback}${NC}" >&2
   else
-    echo -e "${YELLOW}  ⚠ Порт 443 занят сторонним процессом — fallback на ${fallback}${NC}" >&2
+    echo -e "${YELLOW}  ⚠ Port 443 is taken by another process — falling back to ${fallback}${NC}" >&2
   fi
   echo "$fallback"
   return 0
@@ -509,21 +509,21 @@ _subscription_external_selfcheck() {
   else
     url="${base}/sub/"
   fi
-  echo -e "${CYAN}  → Проверяю подписку извне: ${url}${NC}"
+  echo -e "${CYAN}  → Checking the subscription from outside: ${url}${NC}"
   code=$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
   [[ -z "$code" ]] && code="000"
   if [[ "$code" =~ ^[23] ]]; then
-    echo -e "${GREEN}  ✓ Подписка проверена извне: HTTP ${code}${NC}"
+    echo -e "${GREEN}  ✓ Subscription verified from outside: HTTP ${code}${NC}"
     return 0
   fi
   echo -e "${RED}╔═══════════════════════════════════════════════${NC}"
-  echo -e "${RED}  ✗ ПОДПИСКА НЕ ОТВЕЧАЕТ ИЗВНЕ (HTTP ${code})${NC}"
+  echo -e "${RED}  ✗ SUBSCRIPTION NOT RESPONDING FROM OUTSIDE (HTTP ${code})${NC}"
   echo -e "${RED}╚═══════════════════════════════════════════════${NC}"
-  echo -e "${YELLOW}  Что проверить на сервере:${NC}"
-  echo -e "${YELLOW}    ss -tlnp | grep ${port}   — слушает ли nginx порт${NC}"
-  echo -e "${YELLOW}    ufw status | grep ${port} — открыт ли порт в firewall${NC}"
-  echo -e "${YELLOW}    nginx -t                  — валиден ли конфиг nginx${NC}"
-  echo -e "${YELLOW}  Запустите диагностику из меню подписки.${NC}"
+  echo -e "${YELLOW}  What to check on the server:${NC}"
+  echo -e "${YELLOW}    ss -tlnp | grep ${port}   — is nginx listening on the port${NC}"
+  echo -e "${YELLOW}    ufw status | grep ${port} — is the port open in the firewall${NC}"
+  echo -e "${YELLOW}    nginx -t                  — is the nginx config valid${NC}"
+  echo -e "${YELLOW}  Run diagnostics from the subscription menu.${NC}"
   return 0
 }
 
@@ -561,15 +561,15 @@ _happ_ensure_default_multiroute_profile() {
   local existing
   if existing=$(_happ_find_existing_multiroute_profile); then
     HAPP_DEFAULT_PROFILE="$existing"
-    echo -e "${CYAN}  → Использую существующий multi-route профиль: ${GREEN}${existing}${NC}"
+    echo -e "${CYAN}  → Using the existing multi-route profile: ${GREEN}${existing}${NC}"
     return 0
   fi
 
   local profile_name
   profile_name=$(_happ_next_default_profile_name)
-  echo -e "${CYAN}  → Создаю HAPP профиль '${profile_name}' с 7 маршрутами...${NC}"
+  echo -e "${CYAN}  → Creating HAPP profile '${profile_name}' with 7 routes...${NC}"
   if ! create_profile_all_routes "$profile_name" "no_pause" "hide_subscription"; then
-    echo -e "${RED}✗ Не удалось создать HAPP multi-route профиль${NC}"
+    echo -e "${RED}✗ Could not create the HAPP multi-route profile${NC}"
     return 1
   fi
 
@@ -602,7 +602,7 @@ _subscription_restart_service() {
 }
 
 _subscription_repair_handler() {
-  echo -e "${CYAN}  → Восстанавливаю HAPP subscription handler...${NC}"
+  echo -e "${CYAN}  → Restoring the HAPP subscription handler...${NC}"
   if ! install_subscription_server >/dev/null 2>&1; then
     return 1
   fi
@@ -646,13 +646,13 @@ _subscription_local_self_test() {
 
 _subscription_print_selftest_failure() {
   if [[ -n "${SUBSCRIPTION_SELFTEST_HTTP_STATUS:-}" ]]; then
-    echo -e "${YELLOW}  Локальный HTTP status: ${SUBSCRIPTION_SELFTEST_HTTP_STATUS}${NC}"
+    echo -e "${YELLOW}  Local HTTP status: ${SUBSCRIPTION_SELFTEST_HTTP_STATUS}${NC}"
   fi
   if [[ -n "${SUBSCRIPTION_SELFTEST_ERROR:-}" ]]; then
     echo -e "${YELLOW}  curl: ${SUBSCRIPTION_SELFTEST_ERROR}${NC}"
   fi
   if [[ -n "${SUBSCRIPTION_SELFTEST_BODY:-}" ]]; then
-    echo -e "${YELLOW}  Ответ handler: ${SUBSCRIPTION_SELFTEST_BODY}${NC}"
+    echo -e "${YELLOW}  Handler response: ${SUBSCRIPTION_SELFTEST_BODY}${NC}"
   fi
 }
 
@@ -674,20 +674,20 @@ _happ_print_subscription_url_for_profile() {
 
   token=$(jq -r '.sub_token // ""' "$profile_file" 2>/dev/null)
   if [[ ! "$token" =~ ^[a-f0-9]{32}$ ]]; then
-    echo -e "${YELLOW}  ⚠ У профиля ${profile_name} нет валидного sub_token — URL не показан${NC}"
+    echo -e "${YELLOW}  ⚠ Profile ${profile_name} has no valid sub_token — URL not shown${NC}"
     return 1
   fi
 
   url="$(_subscription_base_url)/sub/${token}"
   echo ""
-  echo -e "${GREEN}═══ ГОТОВАЯ HAPP SUBSCRIPTION URL ═══${NC}"
-  echo -e "${BLUE}Профиль:${NC} ${GREEN}${profile_name}${NC}"
+  echo -e "${GREEN}═══ READY HAPP SUBSCRIPTION URL ═══${NC}"
+  echo -e "${BLUE}Profile:${NC} ${GREEN}${profile_name}${NC}"
   if ! _subscription_ensure_profile_ready "$token"; then
-    echo -e "${RED}✗ HAPP subscription handler не отдаёт локальную подписку.${NC}"
-    echo -e "${YELLOW}  Внешний клиент получит 502 Bad Gateway, пока 127.0.0.1:8080 не оживёт.${NC}"
+    echo -e "${RED}✗ HAPP subscription handler is not serving the local subscription.${NC}"
+    echo -e "${YELLOW}  An external client will get 502 Bad Gateway until 127.0.0.1:8080 comes up.${NC}"
     _subscription_print_selftest_failure
-    echo -e "${YELLOW}  Диагностика: systemctl status xraytailscale-sub --no-pager -l${NC}"
-    echo -e "${YELLOW}  Логи: journalctl -u xraytailscale-sub -n 80 --no-pager${NC}"
+    echo -e "${YELLOW}  Diagnostics: systemctl status xraytailscale-sub --no-pager -l${NC}"
+    echo -e "${YELLOW}  Logs: journalctl -u xraytailscale-sub -n 80 --no-pager${NC}"
     echo ""
     return 1
   fi
@@ -706,21 +706,21 @@ _happ_print_subscription_url_for_profile() {
 install_subscription_ip_tls() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}    УСТАНОВКА ПОДПИСКИ ПО IP VPS (HTTPS)      ${NC}"
+  echo -e "${BLUE}    SET UP VPS IP SUBSCRIPTION (HTTPS)      ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
   echo ""
-  echo -e "${CYAN}Режим по умолчанию: внешний HAPP-клиент получает https://<IP>/sub/<token>${NC}"
-  echo -e "${YELLOW}Сертификаты на IP у Let's Encrypt short-lived (~6 дней), нужен рабочий renew.${NC}"
+  echo -e "${CYAN}Default mode: an external HAPP client gets https://<IP>/sub/<token>${NC}"
+  echo -e "${YELLOW}Let's Encrypt IP certificates are short-lived (~6 days); a working renew is required.${NC}"
   echo ""
 
-  echo -e "${CYAN}  → Проверяю HAPP subscription handler...${NC}"
+  echo -e "${CYAN}  → Checking the HAPP subscription handler...${NC}"
   install_subscription_server || return 1
 
   local server_ip
   server_ip=$(get_server_ip)
   if [[ -z "$server_ip" || ! "$server_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo -e "${RED}✗ Не удалось определить публичный IPv4 VPS: ${server_ip:-пусто}${NC}"
-    echo -e "${YELLOW}IPv6 IP-cert режим пока не автоматизирован — используйте домен.${NC}"
+    echo -e "${RED}✗ Could not determine the VPS public IPv4: ${server_ip:-empty}${NC}"
+    echo -e "${YELLOW}IPv6 IP-cert mode is not automated yet — use a domain.${NC}"
     sleep 3
     return 1
   fi
@@ -732,39 +732,39 @@ install_subscription_ip_tls() {
   # пропускается, но валидация остаётся той же.
   if [[ -n "${SUBSCRIPTION_LE_EMAIL:-}" ]]; then
     email="$SUBSCRIPTION_LE_EMAIL"
-    echo -e "${CYAN}  → Email для Let's Encrypt (из мастера): ${email}${NC}"
+    echo -e "${CYAN}  → Let's Encrypt email (from the wizard): ${email}${NC}"
   else
-    echo -n -e "${YELLOW}Email для Let's Encrypt (renew/account notices): ${NC}"
+    echo -n -e "${YELLOW}Let's Encrypt email (renew/account notices): ${NC}"
     read -r email
   fi
   if [[ -z "$email" ]] || ! [[ "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
-    echo -e "${RED}✗ Некорректный email${NC}"
+    echo -e "${RED}✗ Invalid email${NC}"
     sleep 2
     return 1
   fi
 
   local pub_port
   if ! pub_port=$(_select_subscription_port); then
-    echo -e "${RED}✗ Нет свободного порта для подписки (8443–12443 заняты)${NC}"
-    echo -e "${YELLOW}  Освободите один из портов диапазона 8443–12443 и повторите установку.${NC}"
+    echo -e "${RED}✗ No free port for the subscription (8443–12443 are taken)${NC}"
+    echo -e "${YELLOW}  Free one of the ports in 8443–12443 and re-run the install.${NC}"
     return 1
   fi
-  echo -e "${CYAN}  → HTTPS порт подписки: $pub_port${NC}"
+  echo -e "${CYAN}  → Subscription HTTPS port: $pub_port${NC}"
 
-  echo -e "${CYAN}  → Установка nginx...${NC}"
+  echo -e "${CYAN}  → Installing nginx...${NC}"
   if ! apt-get install -y nginx >/dev/null 2>&1; then
-    echo -e "${RED}✗ apt-get install nginx не удалось${NC}"
+    echo -e "${RED}✗ apt-get install nginx failed${NC}"
     return 1
   fi
 
   local certbot_bin
   if ! _ensure_certbot_ip_tls; then
-    echo -e "${YELLOW}Нужен Certbot 5.4+ для webroot IP certificates.${NC}"
-    echo -e "${YELLOW}Временно используйте доменный режим или обновите certbot из актуального источника.${NC}"
+    echo -e "${YELLOW}Certbot 5.4+ is required for webroot IP certificates.${NC}"
+    echo -e "${YELLOW}Use domain mode for now or update certbot from a current source.${NC}"
     return 1
   fi
   certbot_bin="$CERTBOT_IP_BIN"
-  echo -e "${GREEN}  ✓ Certbot с IP support: ${certbot_bin}${NC}"
+  echo -e "${GREEN}  ✓ Certbot with IP support: ${certbot_bin}${NC}"
 
   local webroot="/var/www/xraytailscale-ip-acme"
   mkdir -p "$webroot/.well-known/acme-challenge"
@@ -793,11 +793,11 @@ NGINX_HTTP_EOF
     return 1
   fi
   if ! systemctl enable --now nginx >/dev/null 2>&1; then
-    echo -e "${RED}✗ nginx не запустился. Проверьте, не занят ли порт 80 другим сервисом.${NC}"
+    echo -e "${RED}✗ nginx did not start. Check if port 80 is taken by another service.${NC}"
     return 1
   fi
   if ! systemctl reload nginx >/dev/null 2>&1; then
-    echo -e "${RED}✗ nginx не перечитал HTTP config для ACME challenge${NC}"
+    echo -e "${RED}✗ nginx did not reload the HTTP config for the ACME challenge${NC}"
     return 1
   fi
 
@@ -808,7 +808,7 @@ NGINX_HTTP_EOF
     echo -e "${GREEN}  ✓ UFW: limit 80/tcp + ${pub_port}/tcp${NC}"
   fi
 
-  echo -e "${CYAN}  → Запуск certbot IP certificate для ${server_ip}...${NC}"
+  echo -e "${CYAN}  → Running certbot IP certificate for ${server_ip}...${NC}"
   if ! "$certbot_bin" certonly \
       --cert-name "$server_ip" \
       --preferred-profile shortlived \
@@ -820,16 +820,16 @@ NGINX_HTTP_EOF
       -m "$email" \
       --deploy-hook "systemctl reload nginx" \
       >/tmp/certbot-ip.log 2>&1; then
-    echo -e "${RED}✗ certbot не смог выдать IP certificate. Лог: /tmp/certbot-ip.log${NC}"
+    echo -e "${RED}✗ certbot could not issue the IP certificate. Log: /tmp/certbot-ip.log${NC}"
     tail -30 /tmp/certbot-ip.log
-    echo -e "${YELLOW}Проверьте, что порт 80 доступен снаружи и VPS IP совпадает.${NC}"
+    echo -e "${YELLOW}Check that port 80 is reachable from outside and the VPS IP matches.${NC}"
     return 1
   fi
   systemctl reset-failed certbot.service 2>/dev/null || true
 
   local cert_dir="/etc/letsencrypt/live/${server_ip}"
   if [[ ! -f "$cert_dir/fullchain.pem" || ! -f "$cert_dir/privkey.pem" ]]; then
-    echo -e "${RED}✗ certbot завершился, но cert files не найдены: $cert_dir${NC}"
+    echo -e "${RED}✗ certbot finished but cert files were not found: $cert_dir${NC}"
     return 1
   fi
 
@@ -883,7 +883,7 @@ NGINX_TLS_EOF
     return 1
   fi
   if ! systemctl reload nginx >/dev/null 2>&1; then
-    echo -e "${RED}✗ nginx не перечитал TLS config${NC}"
+    echo -e "${RED}✗ nginx did not reload the TLS config${NC}"
     return 1
   fi
 
@@ -894,7 +894,7 @@ NGINX_TLS_EOF
   chown xray:xray /usr/local/etc/xray/.subscription_port /usr/local/etc/xray/.subscription_domain /usr/local/etc/xray/.subscription_server_addr /usr/local/etc/xray/.subscription_mode 2>/dev/null || true
 
   if ! _subscription_restart_service; then
-    echo -e "${RED}✗ xraytailscale-sub.service не запустился — проверьте journalctl -u xraytailscale-sub${NC}"
+    echo -e "${RED}✗ xraytailscale-sub.service did not start — check journalctl -u xraytailscale-sub${NC}"
     return 1
   fi
 
@@ -908,16 +908,16 @@ NGINX_TLS_EOF
   _summary_base=$(_subscription_base_url)
   echo ""
   echo -e "${GREEN}╔═══════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}    ✓ ПОДПИСКА ПО IP VPS АКТИВНА              ${NC}"
+  echo -e "${GREEN}    ✓ VPS IP SUBSCRIPTION IS ACTIVE              ${NC}"
   echo -e "${GREEN}╚═══════════════════════════════════════════════${NC}"
   echo ""
   echo -e "${BLUE}Base URL:${NC} ${GREEN}${_summary_base}${NC}"
   _happ_print_subscription_url_for_profile "$_happ_profile"
   # Best-effort внешний self-check (не валит установку при неудаче).
   _subscription_external_selfcheck "$_happ_profile" "$pub_port"
-  echo -e "${CYAN}Для ручного контроля маршрутов используйте главное меню → 'Создать новый профиль'.${NC}"
+  echo -e "${CYAN}For manual route control use the main menu → 'Create new profile'.${NC}"
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _ || true
 }
 
@@ -932,12 +932,12 @@ NGINX_TLS_EOF
 install_subscription_public_tls() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}    УСТАНОВКА ПУБЛИЧНОЙ ПОДПИСКИ (HTTPS)      ${NC}"
+  echo -e "${BLUE}    SET UP PUBLIC SUBSCRIPTION (HTTPS)      ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
   echo ""
 
   # Pre-flight: всегда регенерируем handler/unit — это чинит старые partial updates.
-  echo -e "${CYAN}  → Проверяю HAPP subscription handler...${NC}"
+  echo -e "${CYAN}  → Checking the HAPP subscription handler...${NC}"
   install_subscription_server || return 1
 
   # Domain prompt (M6: read -r — без -r теряются backslashes).
@@ -945,14 +945,14 @@ install_subscription_public_tls() {
   local domain saved_domain
   saved_domain=$(get_server_domain)
   if [[ -n "$saved_domain" ]]; then
-    echo -n -e "${YELLOW}Введите домен (A/AAAA должна указывать на этот VPS) [${CYAN}$saved_domain${YELLOW}]: ${NC}"
+    echo -n -e "${YELLOW}Enter the domain (A/AAAA must point to this VPS) [${CYAN}$saved_domain${YELLOW}]: ${NC}"
   else
-    echo -n -e "${YELLOW}Введите домен (A/AAAA должна указывать на этот VPS): ${NC}"
+    echo -n -e "${YELLOW}Enter the domain (A/AAAA must point to this VPS): ${NC}"
   fi
   read -r domain
   [[ -z "$domain" ]] && domain="$saved_domain"
   if [[ -z "$domain" ]] || ! [[ "$domain" =~ ^[a-zA-Z0-9.-]+$ ]]; then
-    echo -e "${RED}✗ Некорректный домен${NC}"
+    echo -e "${RED}✗ Invalid domain${NC}"
     sleep 2
     return 1
   fi
@@ -965,8 +965,8 @@ install_subscription_public_tls() {
   server_ip=$(get_server_ip)
   resolved_ip=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' | head -1)
   if [[ -n "$resolved_ip" ]] && [[ "$resolved_ip" != "$server_ip" ]]; then
-    echo -e "${YELLOW}  ⚠ DNS-резолв $domain → $resolved_ip, но VPS IP = $server_ip${NC}"
-    echo -e "${YELLOW}    certbot скорее всего откажет. Продолжить? [y/N]${NC}"
+    echo -e "${YELLOW}  ⚠ DNS resolves $domain → $resolved_ip, but VPS IP = $server_ip${NC}"
+    echo -e "${YELLOW}    certbot will most likely refuse. Continue? [y/N]${NC}"
     local cont
     read -r cont
     [[ "$cont" =~ ^[yYдД]$ ]] || return 1
@@ -974,10 +974,10 @@ install_subscription_public_tls() {
 
   # Email prompt (для certbot --agree-tos -m).
   local email
-  echo -n -e "${YELLOW}Email для Let's Encrypt (восстановление аккаунта): ${NC}"
+  echo -n -e "${YELLOW}Let's Encrypt email (account recovery): ${NC}"
   read -r email
   if [[ -z "$email" ]] || ! [[ "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
-    echo -e "${RED}✗ Некорректный email${NC}"
+    echo -e "${RED}✗ Invalid email${NC}"
     sleep 2
     return 1
   fi
@@ -986,15 +986,15 @@ install_subscription_public_tls() {
   # 8443→9443→10443→11443→12443 через _subscription_find_free_port.
   local pub_port
   if ! pub_port=$(_select_subscription_port); then
-    echo -e "${RED}✗ Нет свободного порта для подписки (8443–12443 заняты)${NC}"
-    echo -e "${YELLOW}  Освободите один из портов диапазона 8443–12443 и повторите установку.${NC}"
+    echo -e "${RED}✗ No free port for the subscription (8443–12443 are taken)${NC}"
+    echo -e "${YELLOW}  Free one of the ports in 8443–12443 and re-run the install.${NC}"
     return 1
   fi
-  echo -e "${CYAN}  → Публичный порт: $pub_port${NC}"
+  echo -e "${CYAN}  → Public port: $pub_port${NC}"
 
-  echo -e "${CYAN}  → Установка nginx + certbot...${NC}"
+  echo -e "${CYAN}  → Installing nginx + certbot...${NC}"
   if ! apt-get install -y nginx certbot >/dev/null 2>&1; then
-    echo -e "${RED}✗ apt-get install nginx certbot не удалось${NC}"
+    echo -e "${RED}✗ apt-get install nginx certbot failed${NC}"
     return 1
   fi
 
@@ -1005,7 +1005,7 @@ install_subscription_public_tls() {
     certbot_bin=$(command -v certbot 2>/dev/null || true)
   fi
   if [[ -z "$certbot_bin" || ! -x "$certbot_bin" ]]; then
-    echo -e "${RED}✗ certbot не найден после установки${NC}"
+    echo -e "${RED}✗ certbot not found after install${NC}"
     return 1
   fi
 
@@ -1036,11 +1036,11 @@ NGINX_HTTP_EOF
     return 1
   fi
   if ! systemctl enable --now nginx >/dev/null 2>&1; then
-    echo -e "${RED}✗ nginx не запустился. Проверьте, не занят ли порт 80 другим сервисом.${NC}"
+    echo -e "${RED}✗ nginx did not start. Check if port 80 is taken by another service.${NC}"
     return 1
   fi
   if ! systemctl reload nginx >/dev/null 2>&1; then
-    echo -e "${RED}✗ nginx не перечитал HTTP config для ACME challenge${NC}"
+    echo -e "${RED}✗ nginx did not reload the HTTP config for the ACME challenge${NC}"
     return 1
   fi
 
@@ -1051,7 +1051,7 @@ NGINX_HTTP_EOF
     echo -e "${GREEN}  ✓ UFW: limit 80/tcp + ${pub_port}/tcp${NC}"
   fi
 
-  echo -e "${CYAN}  → Запуск certbot webroot для $domain...${NC}"
+  echo -e "${CYAN}  → Running certbot webroot for $domain...${NC}"
   if ! "$certbot_bin" certonly \
       --cert-name "$domain" \
       --webroot \
@@ -1062,16 +1062,16 @@ NGINX_HTTP_EOF
       -m "$email" \
       --deploy-hook "systemctl reload nginx" \
       >/tmp/certbot.log 2>&1; then
-    echo -e "${RED}✗ certbot не смог выдать сертификат. Лог: /tmp/certbot.log${NC}"
+    echo -e "${RED}✗ certbot could not issue the certificate. Log: /tmp/certbot.log${NC}"
     tail -30 /tmp/certbot.log
-    echo -e "${YELLOW}Проверьте, что порт 80 доступен снаружи, DNS указывает на VPS или Cloudflare проксирует HTTP challenge.${NC}"
+    echo -e "${YELLOW}Check that port 80 is reachable from outside, DNS points to the VPS, or Cloudflare proxies the HTTP challenge.${NC}"
     return 1
   fi
   systemctl reset-failed certbot.service 2>/dev/null || true
 
   local cert_dir="/etc/letsencrypt/live/${domain}"
   if [[ ! -f "$cert_dir/fullchain.pem" || ! -f "$cert_dir/privkey.pem" ]]; then
-    echo -e "${RED}✗ certbot завершился, но cert files не найдены: $cert_dir${NC}"
+    echo -e "${RED}✗ certbot finished but cert files were not found: $cert_dir${NC}"
     return 1
   fi
 
@@ -1125,7 +1125,7 @@ NGINX_TLS_EOF
     return 1
   fi
   if ! systemctl reload nginx >/dev/null 2>&1; then
-    echo -e "${RED}✗ nginx не перечитал TLS config${NC}"
+    echo -e "${RED}✗ nginx did not reload the TLS config${NC}"
     return 1
   fi
 
@@ -1138,7 +1138,7 @@ NGINX_TLS_EOF
 
   # Активация unit.
   if ! _subscription_restart_service; then
-    echo -e "${RED}✗ xraytailscale-sub.service не запустился — проверьте journalctl -u xraytailscale-sub${NC}"
+    echo -e "${RED}✗ xraytailscale-sub.service did not start — check journalctl -u xraytailscale-sub${NC}"
     return 1
   fi
 
@@ -1150,19 +1150,19 @@ NGINX_TLS_EOF
 
   echo ""
   echo -e "${GREEN}╔═══════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}    ✓ ПУБЛИЧНАЯ ПОДПИСКА АКТИВНА              ${NC}"
+  echo -e "${GREEN}    ✓ PUBLIC SUBSCRIPTION IS ACTIVE              ${NC}"
   echo -e "${GREEN}╚═══════════════════════════════════════════════${NC}"
   echo ""
   # B1: shared helper — НЕ строим https://${domain} инлайн.
   local _summary_base
   _summary_base=$(_subscription_base_url)
-  echo -e "${BLUE}URL:${NC} ${GREEN}${_summary_base}${NC} (порт ${pub_port})"
+  echo -e "${BLUE}URL:${NC} ${GREEN}${_summary_base}${NC} (port ${pub_port})"
   _happ_print_subscription_url_for_profile "$_happ_profile"
   # Best-effort внешний self-check (не валит установку при неудаче).
   _subscription_external_selfcheck "$_happ_profile" "$pub_port"
-  echo -e "${CYAN}Для ручного контроля маршрутов используйте главное меню → 'Создать новый профиль'.${NC}"
+  echo -e "${CYAN}For manual route control use the main menu → 'Create new profile'.${NC}"
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _ || true
 }
 
@@ -1348,11 +1348,11 @@ PYEOF
 install_subscription_local_only() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}    УСТАНОВКА ПОДПИСКИ (LOCAL-ONLY FALLBACK) ${NC}"
+  echo -e "${BLUE}    SET UP SUBSCRIPTION (LOCAL-ONLY FALLBACK) ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
   echo ""
-  echo -e "${YELLOW}⚠ Подписки доступны только локально (127.0.0.1:8080).${NC}"
-  echo -e "${YELLOW}  Доступ — через ssh-tunnel: ssh -L 8080:127.0.0.1:8080 user@vps${NC}"
+  echo -e "${YELLOW}⚠ Subscriptions are only available locally (127.0.0.1:8080).${NC}"
+  echo -e "${YELLOW}  Access via ssh-tunnel: ssh -L 8080:127.0.0.1:8080 user@vps${NC}"
   echo ""
 
   install_subscription_server || return 1
@@ -1364,7 +1364,7 @@ install_subscription_local_only() {
   chown xray:xray /usr/local/etc/xray/.subscription_port /usr/local/etc/xray/.subscription_domain /usr/local/etc/xray/.subscription_server_addr /usr/local/etc/xray/.subscription_mode 2>/dev/null || true
 
   if ! _subscription_restart_service; then
-    echo -e "${RED}✗ xraytailscale-sub.service не запустился${NC}"
+    echo -e "${RED}✗ xraytailscale-sub.service did not start${NC}"
     return 1
   fi
 
@@ -1375,11 +1375,11 @@ install_subscription_local_only() {
   _happ_profile="$HAPP_DEFAULT_PROFILE"
 
   echo ""
-  echo -e "${GREEN}✓ Local-only handler запущен на 127.0.0.1:8080${NC}"
-  echo -e "${CYAN}  UFW: порт НЕ открыт (loopback bypass).${NC}"
+  echo -e "${GREEN}✓ Local-only handler started on 127.0.0.1:8080${NC}"
+  echo -e "${CYAN}  UFW: port NOT opened (loopback bypass).${NC}"
   _happ_print_subscription_url_for_profile "$_happ_profile"
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 
@@ -1391,12 +1391,12 @@ install_subscription_local_only() {
 manage_subscription_menu() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}    УПРАВЛЕНИЕ ПОДПИСКОЙ                      ${NC}"
+  echo -e "${BLUE}    MANAGE SUBSCRIPTION                      ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
   echo ""
 
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${RED}✗ Подписка не установлена. Создайте её в «Дополнительно → Управление подпиской HAPP».${NC}"
+    echo -e "${RED}✗ Subscription is not installed. Create it under More → HAPP subscription.${NC}"
     sleep 2
     return
   fi
@@ -1407,8 +1407,8 @@ manage_subscription_menu() {
   local local_only=false
   if _subscription_is_local_only; then
     local_only=true
-    echo -e "${RED}⚠ Подписка сейчас в local-only режиме: ${base_url}${NC}"
-    echo -e "${YELLOW}  Этот URL НЕ работает с телефона/внешнего клиента. Включите public TLS в меню подписки.${NC}"
+    echo -e "${RED}⚠ The subscription is currently local-only: ${base_url}${NC}"
+    echo -e "${YELLOW}  This URL does NOT work from a phone/external client. Enable public TLS in the subscription menu.${NC}"
     echo ""
   fi
 
@@ -1432,19 +1432,19 @@ manage_subscription_menu() {
   done
 
   if [[ ${#profiles[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}⚠ Нет профилей.${NC}"
+    echo -e "${YELLOW}⚠ No profiles.${NC}"
     if [[ "$stale_count" -gt 0 ]]; then
-      echo -e "${RED}  Найдено stale profile JSON: $stale_count. Их порты отсутствуют в live config.json.${NC}"
+      echo -e "${RED}  Found stale profile JSON: $stale_count. Their ports are absent from the live config.json.${NC}"
     fi
     sleep 2
     return
   fi
   if [[ "$stale_count" -gt 0 ]]; then
-    echo -e "${YELLOW}⚠ Скрыто stale профилей: $stale_count (их порты уже не слушаются Xray).${NC}"
+    echo -e "${YELLOW}⚠ Hidden stale profiles: $stale_count (their ports are no longer listened by Xray).${NC}"
     echo ""
   fi
 
-  echo -e "${YELLOW}Выберите профиль:${NC}"
+  echo -e "${YELLOW}Choose a profile:${NC}"
   echo ""
   local i=1
   for profile in "${profiles[@]}"; do
@@ -1455,14 +1455,14 @@ manage_subscription_menu() {
     echo -e "${CYAN} $i)${NC} $profile ${BLUE}[token: ${short}..., live routes: ${live}]${NC}"
     ((i++))
   done
-  echo -e "${CYAN} 0)${NC} Назад"
+  echo -e "${CYAN} 0)${NC} Back"
   echo ""
-  echo -n -e "${YELLOW}Профиль: ${NC}"
+  echo -n -e "${YELLOW}Profile: ${NC}"
   local choice
   read -r choice
   [[ "$choice" == "0" ]] && return
   if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ $choice -lt 1 ]] || [[ $choice -gt ${#profiles[@]} ]]; then
-    echo -e "${RED}✗ Неверный выбор${NC}"
+    echo -e "${RED}✗ Invalid choice${NC}"
     sleep 2
     return
   fi
@@ -1472,7 +1472,7 @@ manage_subscription_menu() {
   local token
   token=$(jq -r '.sub_token // ""' "$pfile" 2>/dev/null)
   if [[ ! "$token" =~ ^[a-f0-9]{32}$ ]]; then
-    echo -e "${RED}✗ В профиле нет валидного sub_token. Запустите 'sudo xraytailscale' — миграция .subscription_tokens_2026 догенерирует.${NC}"
+    echo -e "${RED}✗ The profile has no valid sub_token. Run 'sudo xraytailscale' — the .subscription_tokens_2026 migration will generate it.${NC}"
     sleep 3
     return
   fi
@@ -1480,27 +1480,27 @@ manage_subscription_menu() {
   while true; do
     show_ascii
     local url="${base_url}/sub/${token}"
-    echo -e "${BLUE}═══ Профиль: ${selected} ═══${NC}"
+    echo -e "${BLUE}═══ Profile: ${selected} ═══${NC}"
     echo ""
     if [[ "$local_only" == "true" ]]; then
       echo -e "${YELLOW}Local-only debug URL:${NC}"
       echo -e "  ${YELLOW}$url${NC}"
-      echo -e "${RED}  Не QR-кодить для телефона: 127.0.0.1 у клиента указывает на сам клиент.${NC}"
+      echo -e "${RED}  Do not QR-code for a phone: 127.0.0.1 on the client points to the client itself.${NC}"
     else
       echo -e "${BLUE}Subscription URL:${NC}"
       echo -e "  ${GREEN}$url${NC}"
     fi
     echo ""
     if [[ "$local_only" == "true" ]]; then
-      echo -e "${CYAN} 1)${NC} Включить public TLS по IP VPS для внешней подписки"
+      echo -e "${CYAN} 1)${NC} Enable public TLS on the VPS IP for an external subscription"
     else
-      echo -e "${CYAN} 1)${NC} Показать QR-код subscription URL"
+      echo -e "${CYAN} 1)${NC} Show the subscription URL QR code"
     fi
-    echo -e "${CYAN} 2)${NC} Revoke (сгенерировать новый sub_token)"
-    echo -e "${CYAN} 3)${NC} Показать raw vless:// (advanced)"
-    echo -e "${CYAN} 0)${NC} Назад"
+    echo -e "${CYAN} 2)${NC} Revoke (generate a new sub_token)"
+    echo -e "${CYAN} 3)${NC} Show raw vless:// (advanced)"
+    echo -e "${CYAN} 0)${NC} Back"
     echo ""
-    echo -n -e "${YELLOW}Выбор: ${NC}"
+    echo -n -e "${YELLOW}Choose: ${NC}"
     local act
     read -r act
     case "$act" in
@@ -1519,13 +1519,13 @@ manage_subscription_menu() {
           if _subscription_ensure_profile_ready "$token"; then
             _print_qr_block "$url"
           else
-            echo -e "${RED}✗ HAPP subscription handler не отвечает локально.${NC}"
-            echo -e "${YELLOW}  Внешний клиент сейчас получит 502 Bad Gateway.${NC}"
+            echo -e "${RED}✗ HAPP subscription handler is not responding locally.${NC}"
+            echo -e "${YELLOW}  An external client will currently get 502 Bad Gateway.${NC}"
             _subscription_print_selftest_failure
-            echo -e "${YELLOW}  Проверьте: systemctl status xraytailscale-sub --no-pager -l${NC}"
-            echo -e "${YELLOW}  Логи: journalctl -u xraytailscale-sub -n 80 --no-pager${NC}"
+            echo -e "${YELLOW}  Check: systemctl status xraytailscale-sub --no-pager -l${NC}"
+            echo -e "${YELLOW}  Logs: journalctl -u xraytailscale-sub -n 80 --no-pager${NC}"
             echo ""
-            echo -n -e "${YELLOW}Enter для продолжения...${NC}"
+            echo -n -e "${YELLOW}Press Enter to continue...${NC}"
             read -r _
           fi
         fi
@@ -1536,19 +1536,19 @@ manage_subscription_menu() {
         local new_token
         new_token=$(openssl rand -hex 16)
         if [[ ! "$new_token" =~ ^[a-f0-9]{32}$ ]]; then
-          echo -e "${RED}✗ Не удалось сгенерировать токен${NC}"
+          echo -e "${RED}✗ Could not generate the token${NC}"
           sleep 2
           continue
         fi
         if ! safe_jq_write --arg t "$new_token" '.sub_token = $t' "$pfile"; then
-          echo -e "${RED}✗ Запись в profile JSON не удалась${NC}"
+          echo -e "${RED}✗ Writing to the profile JSON failed${NC}"
           sleep 2
           continue
         fi
         chown xray:xray "$pfile" 2>/dev/null || true
         token="$new_token"
-        echo -e "${GREEN}✓ Новый sub_token. Старая URL более не работает.${NC}"
-        echo -e "${CYAN}  Новая URL: ${base_url}/sub/${token}${NC}"
+        echo -e "${GREEN}✓ New sub_token. The old URL no longer works.${NC}"
+        echo -e "${CYAN}  New URL: ${base_url}/sub/${token}${NC}"
         sleep 3
         ;;
       3)
@@ -1559,7 +1559,7 @@ manage_subscription_menu() {
         # Точный сигнал — pq_enabled поле в profile JSON (Phase 6 REQ-A04 / schema_version:2).
         local raw pq_enabled
         raw=$(_generate_vless_urls_for_profile "$pfile" 2>/dev/null) || {
-          echo -e "${RED}✗ Не удалось построить vless://${NC}"
+          echo -e "${RED}✗ Could not build vless://${NC}"
           sleep 2
           continue
         }
@@ -1573,14 +1573,14 @@ manage_subscription_menu() {
         echo -e "${YELLOW}${raw}${NC}"
         echo ""
         if [[ "$pq_enabled" == "true" ]]; then
-          echo -e "${RED}  ✗ QR не генерируется: PQ-профиль (encryption=mlkem... ~2KB).${NC}"
-          echo -e "${YELLOW}  PQ vless:// строки нечитаемы как QR-код.${NC}"
-          echo -e "${YELLOW}  Используйте subscription URL/QR (пункт 1 — короткий HTTPS-link).${NC}"
+          echo -e "${RED}  ✗ QR not generated: PQ profile (encryption=mlkem... ~2KB).${NC}"
+          echo -e "${YELLOW}  PQ vless:// lines are unreadable as a QR code.${NC}"
+          echo -e "${YELLOW}  Use the subscription URL/QR (option 1 — short HTTPS link).${NC}"
           echo ""
-          echo -n -e "${YELLOW}Enter для продолжения...${NC}"
+          echo -n -e "${YELLOW}Press Enter to continue...${NC}"
           read -r _
         else
-          echo -e "${GREEN}  → legacy профиль (без PQ) — QR допустим${NC}"
+          echo -e "${GREEN}  → legacy profile (no PQ) — QR is fine${NC}"
           _print_qr_block "$raw"
         fi
         ;;
@@ -1597,7 +1597,7 @@ manage_subscription_menu() {
 happ_settings_menu() {
   local env_file=/usr/local/etc/xray/.happ_defaults.env
   if [[ ! -f "$env_file" ]]; then
-    echo -e "${RED}✗ $env_file не существует — сначала выполните установку подписки.${NC}"
+    echo -e "${RED}✗ $env_file does not exist — set up the subscription first.${NC}"
     sleep 2
     return
   fi
@@ -1610,18 +1610,18 @@ happ_settings_menu() {
     source "$env_file"
 
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}    НАСТРОЙКИ HAPP METADATA                   ${NC}"
+    echo -e "${BLUE}    HAPP METADATA SETTINGS                   ${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${CYAN} 1)${NC} HAPP_SERVER_NAME = ${YELLOW}${HAPP_SERVER_NAME:-(имя профиля)}${NC}"
-    echo -e "${CYAN} 2)${NC} HAPP_SUPPORT_URL = ${YELLOW}${HAPP_SUPPORT_URL:-(не задано)}${NC}"
-    echo -e "${CYAN} 3)${NC} HAPP_WEB_URL = ${YELLOW}${HAPP_WEB_URL:-(не задано)}${NC}"
-    echo -e "${CYAN} 4)${NC} HAPP_PROFILE_UPDATE_INTERVAL = ${YELLOW}${HAPP_PROFILE_UPDATE_INTERVAL:-24}${NC} часов"
-    echo -e "${CYAN} 5)${NC} HAPP_ANNOUNCE_FILE = ${YELLOW}${HAPP_ANNOUNCE_FILE:-(не задано)}${NC}"
-    echo -e "${CYAN} 6)${NC} HAPP_ROUTING_JSON_FILE = ${YELLOW}${HAPP_ROUTING_JSON_FILE:-(не задано)}${NC}"
-    echo -e "${CYAN} 0)${NC} Назад"
+    echo -e "${CYAN} 1)${NC} HAPP_SERVER_NAME = ${YELLOW}${HAPP_SERVER_NAME:-(profile name)}${NC}"
+    echo -e "${CYAN} 2)${NC} HAPP_SUPPORT_URL = ${YELLOW}${HAPP_SUPPORT_URL:-(not set)}${NC}"
+    echo -e "${CYAN} 3)${NC} HAPP_WEB_URL = ${YELLOW}${HAPP_WEB_URL:-(not set)}${NC}"
+    echo -e "${CYAN} 4)${NC} HAPP_PROFILE_UPDATE_INTERVAL = ${YELLOW}${HAPP_PROFILE_UPDATE_INTERVAL:-24}${NC} hours"
+    echo -e "${CYAN} 5)${NC} HAPP_ANNOUNCE_FILE = ${YELLOW}${HAPP_ANNOUNCE_FILE:-(not set)}${NC}"
+    echo -e "${CYAN} 6)${NC} HAPP_ROUTING_JSON_FILE = ${YELLOW}${HAPP_ROUTING_JSON_FILE:-(not set)}${NC}"
+    echo -e "${CYAN} 0)${NC} Back"
     echo ""
-    echo -n -e "${YELLOW}Изменить (1-6, 0=назад): ${NC}"
+    echo -n -e "${YELLOW}Change (1-6, 0=back): ${NC}"
     local choice
     read -r choice
     case "$choice" in
@@ -1632,7 +1632,7 @@ happ_settings_menu() {
       4) _happ_edit_field "$env_file" "HAPP_PROFILE_UPDATE_INTERVAL" "$HAPP_PROFILE_UPDATE_INTERVAL" ;;
       5) _happ_edit_field "$env_file" "HAPP_ANNOUNCE_FILE" "$HAPP_ANNOUNCE_FILE" ;;
       6) _happ_edit_field "$env_file" "HAPP_ROUTING_JSON_FILE" "$HAPP_ROUTING_JSON_FILE" ;;
-      *) echo -e "${RED}✗ Некорректный выбор${NC}"; sleep 1 ;;
+      *) echo -e "${RED}✗ Invalid choice${NC}"; sleep 1 ;;
     esac
   done
 }
@@ -1644,12 +1644,12 @@ _happ_edit_field() {
   local env_file="$1"
   local key="$2"
   local current="$3"
-  echo -n -e "${YELLOW}Новое значение для ${key} (Enter=оставить '${current}'): ${NC}"
+  echo -n -e "${YELLOW}New value for ${key} (Enter=keep '${current}'): ${NC}"
   local new_val
   read -r new_val
   [[ -z "$new_val" ]] && return 0   # пользователь отменил
   if [[ "$new_val" =~ [\"\\\$\`] ]]; then
-    echo -e "${RED}✗ Значение не может содержать символы \" \\ \$ \`${NC}"
+    echo -e "${RED}✗ The value cannot contain the characters \" \\ \$ \`${NC}"
     sleep 2
     return 1
   fi
@@ -1663,18 +1663,18 @@ _happ_edit_field() {
   fi
   if [[ ! -s "$tmp" ]]; then
     rm -f "$tmp"
-    echo -e "${RED}✗ Временный файл пуст — отмена${NC}"
+    echo -e "${RED}✗ Temporary file is empty — cancelled${NC}"
     return 1
   fi
   mv "$tmp" "$env_file"
   chmod 644 "$env_file"
   chown xray:xray "$env_file" 2>/dev/null || true
-  echo -e "${GREEN}✓ ${key} обновлено (рестарт subhttp не требуется — source на каждый request)${NC}"
+  echo -e "${GREEN}✓ ${key} updated (no subhttp restart needed — sourced on each request)${NC}"
   if [[ -f /usr/local/etc/xray/.subscription_installed ]]; then
     if install_subscription_server >/dev/null 2>&1; then
-      echo -e "${GREEN}subscription handler регенерирован${NC}"
+      echo -e "${GREEN}subscription handler regenerated${NC}"
     else
-      echo -e "${YELLOW}Регенерация subscription handler не удалась — переустановите подписку через меню${NC}"
+      echo -e "${YELLOW}Subscription handler regeneration failed — reinstall the subscription via the menu${NC}"
     fi
   fi
   sleep 1
@@ -1689,31 +1689,31 @@ edit_happ_announce_menu() {
   while true; do
     show_ascii
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}    HAPP ANNOUNCEMENT (текст подписки)         ${NC}"
+    echo -e "${BLUE}    HAPP ANNOUNCEMENT (subscription text)         ${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
     echo ""
 
     if [[ -s "$ann_file" ]]; then
-      echo -e "${GREEN}Текущий announcement:${NC}"
+      echo -e "${GREEN}Current announcement:${NC}"
       head -c 200 "$ann_file"
       echo ""
       echo ""
     else
-      echo -e "${YELLOW}Announcement не задан (HAPP header отсутствует)${NC}"
+      echo -e "${YELLOW}Announcement not set (no HAPP header)${NC}"
       echo ""
     fi
 
-    echo -e "${CYAN} 1)${NC} Установить/изменить текст"
-    echo -e "${CYAN} 2)${NC} Очистить (убрать announcement)"
-    echo -e "${CYAN} 0)${NC} Назад"
+    echo -e "${CYAN} 1)${NC} Set/change the text"
+    echo -e "${CYAN} 2)${NC} Clear (remove the announcement)"
+    echo -e "${CYAN} 0)${NC} Back"
     echo ""
-    echo -n -e "${YELLOW}Выбор: ${NC}"
+    echo -n -e "${YELLOW}Choose: ${NC}"
     local choice
     read -r choice
 
     case "$choice" in
       1)
-        echo -e "${YELLOW}Введите однострочный текст (~200 char max, без переносов строк):${NC}"
+        echo -e "${YELLOW}Enter a single-line text (~200 char max, no newlines):${NC}"
         echo -n -e "${CYAN}> ${NC}"
         local new_text
         read -r new_text
@@ -1722,16 +1722,16 @@ edit_happ_announce_menu() {
         new_text="${new_text//$'\r'/}"
         if [[ -z "$new_text" ]]; then
           rm -f "$ann_file"
-          echo -e "${GREEN}Announcement очищен${NC}"
+          echo -e "${GREEN}Announcement cleared${NC}"
         else
-          echo -n -e "${YELLOW}Сохранить '${new_text}'? [y/N]: ${NC}"
+          echo -n -e "${YELLOW}Save '${new_text}'? [y/N]: ${NC}"
           local confirm
           read -r confirm
           if [[ "$confirm" =~ ^[yYдД]$ ]]; then
             local tmp
             tmp=$(mktemp /tmp/announce.XXXXXX) || {
               echo -e "${RED}✗ mktemp failed${NC}"
-              echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+              echo -n -e "${YELLOW}Press Enter to continue...${NC}"
               read -r _
               continue
             }
@@ -1739,36 +1739,36 @@ edit_happ_announce_menu() {
             mv "$tmp" "$ann_file"
             chown xray:xray "$ann_file" 2>/dev/null || true
             chmod 644 "$ann_file"
-            echo -e "${GREEN}Announcement сохранен в $ann_file${NC}"
+            echo -e "${GREEN}Announcement saved to $ann_file${NC}"
           else
-            echo -e "${CYAN}✓ Отменено${NC}"
+            echo -e "${CYAN}✓ Cancelled${NC}"
           fi
         fi
         if [[ -f /usr/local/etc/xray/.subscription_installed ]]; then
           if install_subscription_server >/dev/null 2>&1; then
-            echo -e "${GREEN}subhttp.sh регенерирован с announce-логикой${NC}"
+            echo -e "${GREEN}subhttp.sh regenerated with announce logic${NC}"
           else
-            echo -e "${YELLOW}Регенерация subhttp.sh не удалась — переустановите подписку через меню${NC}"
+            echo -e "${YELLOW}subhttp.sh regeneration failed — reinstall the subscription via the menu${NC}"
           fi
         fi
-        echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+        echo -n -e "${YELLOW}Press Enter to continue...${NC}"
         read -r _
         ;;
       2)
         rm -f "$ann_file"
-        echo -e "${GREEN}Announcement очищен${NC}"
+        echo -e "${GREEN}Announcement cleared${NC}"
         if [[ -f /usr/local/etc/xray/.subscription_installed ]]; then
           if install_subscription_server >/dev/null 2>&1; then
-            echo -e "${GREEN}subhttp.sh регенерирован без announcement${NC}"
+            echo -e "${GREEN}subhttp.sh regenerated without announcement${NC}"
           else
-            echo -e "${YELLOW}Регенерация subhttp.sh не удалась — переустановите подписку через меню${NC}"
+            echo -e "${YELLOW}subhttp.sh regeneration failed — reinstall the subscription via the menu${NC}"
           fi
         fi
-        echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+        echo -n -e "${YELLOW}Press Enter to continue...${NC}"
         read -r _
         ;;
       0) return ;;
-      *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
+      *) echo -e "${RED}Invalid choice${NC}"; sleep 1 ;;
     esac
   done
 }
@@ -1791,25 +1791,25 @@ happ_subscription_menu() {
       _status_mode=$(cat /usr/local/etc/xray/.subscription_mode 2>/dev/null || echo "unknown")
       if _subscription_is_local_only; then
         echo -e "${YELLOW}  ⚠ Local-only (${_status_mode}): ${_status_url}${NC}"
-        echo -e "${RED}    Не подходит для внешнего клиента. Включите public TLS (пункт 1).${NC}"
+        echo -e "${RED}    Not suitable for an external client. Enable public TLS (option 1).${NC}"
       else
         echo -e "${GREEN}  ✓ Public subscription (${_status_mode}): ${_status_url}${NC}"
       fi
       echo ""
     else
-      echo -e "${YELLOW}  ⚠ Не установлено${NC}"
+      echo -e "${YELLOW}  ⚠ Not installed${NC}"
       echo ""
     fi
 
-    echo -e "${CYAN} 1)${NC} Создать HAPP-подписку по IP VPS ${GREEN}(7 маршрутов + URL/QR)${NC}"
-    echo -e "${CYAN} 2)${NC} Создать HAPP-подписку по домену ${GREEN}(7 маршрутов + URL/QR)${NC}"
+    echo -e "${CYAN} 1)${NC} Create HAPP subscription on the VPS IP ${GREEN}(7 routes + URL/QR)${NC}"
+    echo -e "${CYAN} 2)${NC} Create HAPP subscription on a domain ${GREEN}(7 routes + URL/QR)${NC}"
     echo -e "${CYAN} 3)${NC} Local-only debug (127.0.0.1:8080)"
-    echo -e "${CYAN} 4)${NC} Управление существующими подписками (URL / QR / revoke)"
-    echo -e "${CYAN} 5)${NC} Настройки HAPP (.happ_defaults.env)"
-    echo -e "${CYAN} 6)${NC} Настроить announcement (HAPP)"
-    echo -e "${CYAN} 0)${NC} Назад"
+    echo -e "${CYAN} 4)${NC} Manage existing subscriptions (URL / QR / revoke)"
+    echo -e "${CYAN} 5)${NC} HAPP settings (.happ_defaults.env)"
+    echo -e "${CYAN} 6)${NC} Configure announcement (HAPP)"
+    echo -e "${CYAN} 0)${NC} Back"
     echo ""
-    echo -n -e "${YELLOW}Выбор: ${NC}"
+    echo -n -e "${YELLOW}Choose: ${NC}"
     local c
     read -r c || return 0
     case "$c" in

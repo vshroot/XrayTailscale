@@ -19,7 +19,7 @@ grep -Fq 'HAPP_SERVER_NAME=""' "$SCRIPT" ||
   fail "default HAPP_SERVER_NAME setting is missing"
 grep -Fq '_happ_edit_field "$env_file" "HAPP_SERVER_NAME"' "$SCRIPT" ||
   fail "HAPP settings menu cannot edit server name"
-grep -Fq 'subscription handler регенерирован' "$SCRIPT" ||
+grep -Fq 'subscription handler regenerated' "$SCRIPT" ||
   fail "handler regeneration after settings update is missing"
 
 echo "PASS: custom HAPP subscription server name"
