@@ -371,4 +371,112 @@ if grep -q 'status_screen' src/55-main-menu.sh; then
 fi
 echo "  ✓ src/55-main-menu.sh не изменён (подключение — следующая фаза)"
 
+# ── 11. Консистентность конфиг/маркер при сбоях (находки quality-ревью) ──
+# Инвариант: если перенос завершился НЕуспешно, конфиг nginx остаётся на
+# старом порту И маркер .subscription_port остаётся на старом порту.
+# Регрессия = «маркер на новом, nginx на старом».
+
+_move_env() {
+  local dir="$1"
+  mkdir -p "$dir/profiles"
+  printf '%s\n' "8443" > "$dir/.subscription_port"
+  printf '%s\n' "8443" > "$dir/.selfsteal_backend_port"
+  printf '%s\n' '{"name":"user-001","sub_token":"0123456789abcdef0123456789abcdef"}' \
+    > "$dir/profiles/user-001.json"
+  CONFIG_FILE="$dir/config.json"
+  PROFILES_DIR="$dir/profiles"
+  STATUS_SUB_PORT_FILE="$dir/.subscription_port"
+  STATUS_SELFSTEAL_PORT_FILE="$dir/.selfsteal_backend_port"
+  STATUS_NGINX_SUB_SITE="$dir/nginx-sub"
+  _subscription_find_free_port() { echo 9443; }
+  _subscription_base_url() { echo "https://203.0.113.10:9443"; }
+}
+
+# 11a. reload nginx падает → откат конфига, маркер не тронут, rc=1.
+_dir="$WORKDIR/m-reload-fail"
+_move_env "$_dir"
+cat > "$_dir/nginx-sub" <<'EOF'
+server {
+    listen 8443 ssl http2;
+    listen [::]:8443 ssl http2;
+}
+EOF
+rc=0
+(
+  _move_env "$_dir"
+  nginx() { return 0; }
+  systemctl() { return 1; }          # reload fails
+  open_firewall_port() { return 0; }
+  _status_move_subscription_port 8443 >/dev/null 2>&1
+) || rc=$?
+[[ $rc -ne 0 ]] || fail "11a: reload-fail должен вернуть ненулевой код"
+grep -q 'listen 8443 ssl' "$_dir/nginx-sub" || fail "11a: конфиг не откачен на старый порт"
+[[ "$(cat "$_dir/.subscription_port")" == "8443" ]] || fail "11a: маркер рассинхронизирован (ожидался 8443)"
+echo "  ✓ 11a: падение reload → конфиг и маркер остаются на старом порту (консистентно)"
+
+# 11b. firewall не открывается → откат конфига, маркер не тронут, rc=1.
+_dir="$WORKDIR/m-fw-fail"
+_move_env "$_dir"
+cat > "$_dir/nginx-sub" <<'EOF'
+server {
+    listen 8443 ssl http2;
+    listen [::]:8443 ssl http2;
+}
+EOF
+rc=0
+(
+  _move_env "$_dir"
+  nginx() { return 0; }
+  systemctl() { return 0; }
+  open_firewall_port() { return 1; }          # firewall fails
+  _status_move_subscription_port 8443 >/dev/null 2>&1
+) || rc=$?
+[[ $rc -ne 0 ]] || fail "11b: firewall-fail должен вернуть ненулевой код"
+grep -q 'listen 8443 ssl' "$_dir/nginx-sub" || fail "11b: конфиг не откачен"
+[[ "$(cat "$_dir/.subscription_port")" == "8443" ]] || fail "11b: маркер рассинхронизирован"
+echo "  ✓ 11b: закрытый firewall → перенос откатывается (нет ложного «исправлено»)"
+
+# 11c. sed не находит listen (конфиг без ssl) → preflight отказывает, rc=1,
+# ничего не меняется.
+_dir="$WORKDIR/m-no-listen"
+_move_env "$_dir"
+cat > "$_dir/nginx-sub" <<'EOF'
+server {
+    server_name 203.0.113.10;
+}
+EOF
+rc=0
+(
+  _move_env "$_dir"
+  nginx() { return 0; }
+  systemctl() { return 0; }
+  open_firewall_port() { return 0; }
+  _status_move_subscription_port 8443 >/dev/null 2>&1
+) || rc=$?
+[[ $rc -ne 0 ]] || fail "11c: отсутствие listen должно давать rc=1"
+[[ "$(cat "$_dir/.subscription_port")" == "8443" ]] || fail "11c: маркер не должен меняться"
+echo "  ✓ 11c: preflight ловит «нет listen :8443» — маркер не уезжает на несуществующий порт"
+
+# 11d. Нечисловой порт не уходит в sed (инъекция через маркер).
+_dir="$WORKDIR/m-badport"
+_move_env "$_dir"
+printf '%s\n' 'server {' > "$_dir/nginx-sub"
+printf '%s\n' 'listen 8443 ssl;' >> "$_dir/nginx-sub"
+printf '%s\n' '}' >> "$_dir/nginx-sub"
+rc=0
+(
+  _move_env "$_dir"
+  nginx() { return 0; }
+  systemctl() { return 0; }
+  open_firewall_port() { return 0; }
+  _status_move_subscription_port '8443; rm -rf /tmp' >/dev/null 2>&1
+) || rc=$?
+[[ $rc -ne 0 ]] || fail "11d: нечисловой порт должен отвергаться"
+echo "  ✓ 11d: нечисловой порт отвергнут до sed/firewall"
+
+# 11e. Дубликата _status_sub_port_conflict больше нет.
+dup=$(grep -c '^_status_sub_port_conflict()' "$STATUS")
+[[ "$dup" == "1" ]] || fail "11e: ожидалось ровно 1 определение _status_sub_port_conflict, найдено $dup"
+echo "  ✓ 11e: мёртвый дубль _status_sub_port_conflict удалён"
+
 echo "✓ status static checks passed"

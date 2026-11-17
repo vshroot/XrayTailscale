@@ -8307,6 +8307,24 @@ _status_repair_3_subscription() {
 
   echo -e "${YELLOW}  ⚠ Подписка ставится в IP-режиме (HTTPS по IP VPS): при self-steal${NC}"
   echo -e "${YELLOW}    доменный режим даёт конфликт server_name во втором nginx-vhost.${NC}"
+  echo ""
+  # Blast radius явно: установка — не «мелкая починка», а выпуск сертификата
+  # + установка nginx + перезапись vhost. Требуем отдельного подтверждения.
+  echo -e "${YELLOW}  Будет выполнено:${NC}"
+  echo -e "${YELLOW}    • выпуск сертификата Let's Encrypt по IP VPS${NC}"
+  echo -e "${YELLOW}    • установка/настройка nginx и systemd-сервиса xraytailscale-sub${NC}"
+  echo -e "${YELLOW}    • запись /etc/nginx/sites-available/xraytailscale-sub${NC}"
+  echo -e "${YELLOW}    • открытие порта в UFW${NC}"
+  echo -n -e "${YELLOW}  Продолжить установку? [д/Н]: ${NC}"
+  local ans
+  if ! read -r ans; then
+    echo ""
+    return 1
+  fi
+  if [[ ! "$ans" =~ ^[yYдД]$ ]]; then
+    echo -e "${YELLOW}  Установка отменена пользователем${NC}"
+    return 1
+  fi
 
   local email=""
   if ! email=$(_status_ask_le_email); then
@@ -8328,18 +8346,7 @@ _status_repair_3_subscription() {
 }
 
 # ── Проверка 4/7: порт подписки слушается ─────────────────
-# Конфликт: порт занят НЕ nginx или совпадает с backend self-steal.
-_status_sub_port_conflict() {
-  local port="${1:-}" line="" backend=""
-  [[ -n "$port" ]] || return 1
-  backend=$(_status_selfsteal_backend_port)
-  [[ -n "$backend" && "$port" == "$backend" ]] && return 0
-  line=$(_status_port_listener "$port")
-  if [[ -n "$line" ]] && ! grep -q 'nginx' <<< "$line"; then
-    return 0
-  fi
-  return 1
-}
+# Конфликт определяет _status_sub_port_check ниже (дубль удалён в ревью).
 
 # Проверка порта подписки: 0 = конфликт/не слушается (причина в _STATUS_REASON).
 _status_sub_port_check() {
@@ -8390,9 +8397,17 @@ _status_diag_4_subport() {
 }
 
 # Автоперенос подписки на свободный порт из диапазона 8443–12443.
+# Инвариант консистентности: конфиг nginx и маркер .subscription_port
+# меняются АТОМАРНО как пара. Любой сбой на полпути → откат конфига
+# и возврат 1, чтобы не осталось «маркер на новом порту, nginx на старом».
 _status_move_subscription_port() {
   local old_port="$1" new_port="" site="$STATUS_NGINX_SUB_SITE"
 
+  # Порт из маркера подставляется в sed и в firewall — только цифры.
+  if [[ ! "$old_port" =~ ^[0-9]+$ ]]; then
+    echo -e "${RED}  ✗ Некорректный текущий порт: '${old_port}'${NC}"
+    return 1
+  fi
   if [[ ! -f "$site" ]]; then
     echo -e "${RED}  ✗ Нет конфига ${site} — перенос невозможен${NC}"
     return 1
@@ -8409,44 +8424,81 @@ _status_move_subscription_port() {
     echo -e "${RED}  ✗ Нет свободного порта для подписки (8443–12443 заняты)${NC}"
     return 1
   fi
+  if [[ ! "$new_port" =~ ^[0-9]+$ ]]; then
+    echo -e "${RED}  ✗ Некорректный новый порт: '${new_port}'${NC}"
+    return 1
+  fi
   if [[ "$new_port" == "$old_port" ]]; then
     echo -e "${RED}  ✗ Свободный порт совпал с текущим (:${old_port}) — перенос не требуется${NC}"
     return 1
   fi
 
+  # Preflight: в конфиге реально есть listen на старом порту, иначе sed
+  # «успешно» ничего не заменит и мы запишем маркер на несуществующий порт.
+  if ! grep -qE "listen[[:space:]]+\[::\]:${old_port}[[:space:]]|listen[[:space:]]+${old_port}[[:space:]]" "$site"; then
+    echo -e "${RED}  ✗ В ${site} нет listen :${old_port} — перенос не требуется/невозможен${NC}"
+    return 1
+  fi
+
   echo -e "${CYAN}  → Перенос подписки :${old_port} → :${new_port}...${NC}"
-  # -i.bak: GNU/BSD-совместимо; .bak удаляется только после успешного nginx -t.
+  # -i.bak остаётся до успешного reload: откатываться может понадобиться позже.
   if ! sed -i.bak -E \
-      "s/listen ${old_port} ssl/listen ${new_port} ssl/; s/listen \[::\]:${old_port} ssl/listen \[::\]:${new_port} ssl/" \
+      "s/listen ${old_port} ssl/listen ${new_port} ssl/; s/listen \[::\]:${old_port} ssl/listen \[::\]:${new_port} ssl/; s/listen ${old_port} http2/listen ${new_port} http2/; s/listen \[::\]:${old_port} http2/listen \[::\]:${new_port} http2/" \
       "$site"; then
     echo -e "${RED}  ✗ Не удалось переписать ${site}${NC}"
+    return 1
+  fi
+  # Пост-проверка: замена реально применилась.
+  if ! grep -qE "listen[[:space:]]+(\[::\]:)?${new_port}[[:space:] ;]" "$site"; then
+    echo -e "${RED}  ✗ sed не применил замену в ${site} — откат${NC}"
+    mv "${site}.bak" "$site" 2>/dev/null || true
     return 1
   fi
   if ! nginx -t >/dev/null 2>&1; then
     echo -e "${RED}  ✗ nginx -t не прошёл после переноса — откат конфига${NC}"
     nginx -t 2>&1 | tail -5
-    mv "${site}.bak" "$site" 2>/dev/null || true
+    if ! mv "${site}.bak" "$site" 2>/dev/null; then
+      echo -e "${RED}  ✗✗ ОТКАТ НЕ УДАЛСЯ. Восстановите вручную: mv ${site}.bak ${site}${NC}"
+    fi
     return 1
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    if ! systemctl reload nginx >/dev/null 2>&1; then
+      echo -e "${RED}  ✗ nginx не перечитал конфиг — откат на :${old_port}${NC}"
+      if mv "${site}.bak" "$site" 2>/dev/null; then
+        systemctl reload nginx >/dev/null 2>&1 || true
+        echo -e "${YELLOW}  Конфиг восстановлен, подписка осталась на :${old_port}${NC}"
+      else
+        echo -e "${RED}  ✗✗ ОТКАТ НЕ УДАЛСЯ. Восстановите вручную: mv ${site}.bak ${site} && systemctl reload nginx${NC}"
+      fi
+      return 1
+    fi
   fi
   rm -f "${site}.bak"
 
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl reload nginx >/dev/null 2>&1 || {
-      echo -e "${RED}  ✗ nginx не перечитал конфиг${NC}"
-      return 1
-    }
-  fi
-
-  printf '%s\n' "$new_port" > "$STATUS_SUB_PORT_FILE" 2>/dev/null || {
-    echo -e "${RED}  ✗ Не удалось записать ${STATUS_SUB_PORT_FILE}${NC}"
-    return 1
-  }
-  chown xray:xray "$STATUS_SUB_PORT_FILE" 2>/dev/null || true
-
+  # Firewall ДО маркера: если порт не открылся, снаружи подписка не работает —
+  # молча объявлять успех нельзя. Откатываем всё.
   if declare -F open_firewall_port >/dev/null 2>&1; then
-    open_firewall_port "$new_port" tcp || \
-      echo -e "${YELLOW}  ⚠ Не удалось открыть ${new_port}/tcp (UFW) — проверьте firewall${NC}"
+    if ! open_firewall_port "$new_port" tcp; then
+      echo -e "${RED}  ✗ Не удалось открыть ${new_port}/tcp — откат на :${old_port}${NC}"
+      sed -i -E "s/listen ${new_port} ssl/listen ${old_port} ssl/; s/listen \[::\]:${new_port} ssl/listen \[::\]:${old_port} ssl/" "$site"
+      nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+      return 1
+    fi
   fi
+
+  # Атомарная запись маркера (tmp + mv): читатели не увидят недописанный порт.
+  local tmp_marker="${STATUS_SUB_PORT_FILE}.tmp.$$"
+  if ! printf '%s\n' "$new_port" > "$tmp_marker" 2>/dev/null \
+     || ! mv "$tmp_marker" "$STATUS_SUB_PORT_FILE" 2>/dev/null; then
+    rm -f "$tmp_marker"
+    echo -e "${RED}  ✗ Не удалось записать ${STATUS_SUB_PORT_FILE} — откат на :${old_port}${NC}"
+    sed -i -E "s/listen ${new_port} ssl/listen ${old_port} ssl/; s/listen \[::\]:${new_port} ssl/listen \[::\]:${old_port} ssl/" "$site"
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+    return 1
+  fi
+  chown xray:xray "$STATUS_SUB_PORT_FILE" 2>/dev/null || true
 
   echo ""
   echo -e "${YELLOW}  ⚠ ВНИМАНИЕ: ссылка подписки ИЗМЕНИЛАСЬ (порт ${old_port} → ${new_port}).${NC}"
