@@ -1,17 +1,17 @@
 delete_profile_menu() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}             УДАЛЕНИЕ ПРОФИЛЯ                 ${NC}"
+  echo -e "${BLUE}             DELETE PROFILE                 ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
   local profiles=($(_list_visible_profile_names))
   if [[ ${#profiles[@]} -eq 0 ]]; then
-    echo -e "${RED}✗ Нет созданных профилей${NC}"
+    echo -e "${RED}✗ No profiles created${NC}"
     echo ""
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read
     return
   fi
-  echo -e "${YELLOW}Доступные профили:${NC}\n"
+  echo -e "${YELLOW}Available profiles:${NC}\n"
   local i=1
   for profile in "${profiles[@]}"; do
     local transport=$(jq -r '.transport' "$PROFILES_DIR/$profile.json" 2>/dev/null)
@@ -19,8 +19,8 @@ delete_profile_menu() {
     echo -e "${CYAN} $i)${NC} $profile ${BLUE}[$transport:$port]${NC}"
     ((i++))
   done
-  echo -e "${CYAN} 0)${NC} Назад в главное меню\n"
-  echo -n -e "${YELLOW}Выберите профиль для удаления: ${NC}"
+  echo -e "${CYAN} 0)${NC} Back to main menu\n"
+  echo -n -e "${YELLOW}Choose a profile to delete: ${NC}"
   read choice
   if [[ "$choice" == "0" ]]; then
     return
@@ -28,7 +28,7 @@ delete_profile_menu() {
   if [[ "$choice" =~ ^[0-9]+$ ]] && [[ $choice -ge 1 ]] && [[ $choice -le ${#profiles[@]} ]]; then
     local profile_name="${profiles[$((choice-1))]}"
     echo ""
-    echo -n -e "${RED}Вы уверены, что хотите удалить профиль '$profile_name'? (y/N): ${NC}"
+    echo -n -e "${RED}Are you sure you want to delete profile '$profile_name'? (y/N): ${NC}"
     read confirm
     if [[ "$confirm" =~ ^[yYдД]$ ]]; then
       local profile_file="$PROFILES_DIR/$profile_name.json"
@@ -39,8 +39,8 @@ delete_profile_menu() {
       local rollback_config=""
       if ! backup_config "delete_profile_$profile_name" rollback_config; then
         echo ""
-        echo -e "${RED}✗ Не удалось создать бэкап config.json — профиль НЕ удалён${NC}"
-        echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+        echo -e "${RED}✗ Could not back up config.json — profile NOT deleted${NC}"
+        echo -n -e "${YELLOW}Press Enter to continue...${NC}"
         read
         return
       fi
@@ -74,17 +74,17 @@ delete_profile_menu() {
             done
             fix_xray_permissions
             echo ""
-            echo -e "${GREEN}✓ Multi-route профиль '$profile_name' успешно удален${NC}"
+            echo -e "${GREEN}✓ Multi-route profile '$profile_name' deleted${NC}"
           else
             echo ""
-            echo -e "${RED}✗ Xray не перезапустился — config.json откачен, профиль НЕ удалён${NC}"
+            echo -e "${RED}✗ Xray did not restart — config.json rolled back, profile NOT deleted${NC}"
           fi
         else
           echo ""
-          echo -e "${RED}✗ Ошибка обновления конфига — профиль НЕ удалён${NC}"
+          echo -e "${RED}✗ Config update error — profile NOT deleted${NC}"
         fi
         echo ""
-        echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+        echo -n -e "${YELLOW}Press Enter to continue...${NC}"
         read
         return
       fi
@@ -101,7 +101,7 @@ delete_profile_menu() {
       if [[ "$clients_count" -le 1 ]]; then
         # Единственный клиент (или inbound отсутствует) — удаляем весь inbound
         if safe_jq_write --argjson port "$port" 'del(.inbounds[] | select(.port == $port))' "$CONFIG_FILE"; then
-          echo -e "${CYAN}  → Удаление inbound на порту $port${NC}"
+          echo -e "${CYAN}  → Removing inbound on port $port${NC}"
           config_ok=true
         fi
       else
@@ -109,7 +109,7 @@ delete_profile_menu() {
         if safe_jq_write --arg uuid "$uuid" --argjson port "$port" '
           (.inbounds[] | select(.port == $port) | .settings.clients) |= map(select(.id != $uuid))
         ' "$CONFIG_FILE"; then
-          echo -e "${CYAN}  → Удаление клиента из inbound (порт $port используется другими профилями)${NC}"
+          echo -e "${CYAN}  → Removing client from inbound (port $port is used by other profiles)${NC}"
           config_ok=true
         fi
       fi
@@ -123,23 +123,23 @@ delete_profile_menu() {
 
           fix_xray_permissions
           echo ""
-          echo -e "${GREEN}✓ Профиль '$profile_name' успешно удален${NC}"
+          echo -e "${GREEN}✓ Profile '$profile_name' deleted${NC}"
         else
           echo ""
-          echo -e "${RED}✗ Xray не перезапустился — config.json откачен, профиль НЕ удалён${NC}"
+          echo -e "${RED}✗ Xray did not restart — config.json rolled back, profile NOT deleted${NC}"
         fi
       else
         echo ""
-        echo -e "${RED}✗ Ошибка обновления конфига — профиль НЕ удалён${NC}"
+        echo -e "${RED}✗ Config update error — profile NOT deleted${NC}"
       fi
     else
-      echo -e "${YELLOW}⚠ Удаление отменено${NC}"
+      echo -e "${YELLOW}⚠ Deletion cancelled${NC}"
     fi
   else
-    echo -e "${RED}✗ Неверный выбор${NC}"
+    echo -e "${RED}✗ Invalid choice${NC}"
   fi
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read
 }
 
@@ -147,18 +147,18 @@ delete_profile_menu() {
 connect_profile_menu() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}          ПОДКЛЮЧЕНИЕ К ПРОФИЛЮ               ${NC}"
+  echo -e "${BLUE}          CONNECT TO PROFILE               ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
   local profiles=($(_list_visible_profile_names))
   if [[ ${#profiles[@]} -eq 0 ]]; then
-    echo -e "${RED}✗ Нет созданных профилей${NC}"
-    echo -e "${CYAN}Создайте профиль через меню 'Создать новый профиль'${NC}"
+    echo -e "${RED}✗ No profiles created${NC}"
+    echo -e "${CYAN}Create a profile via the 'Create new profile' menu${NC}"
     echo ""
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read
     return
   fi
-  echo -e "${YELLOW}Доступные профили:${NC}\n"
+  echo -e "${YELLOW}Available profiles:${NC}\n"
   local i=1
   for profile in "${profiles[@]}"; do
     local transport=$(jq -r '.transport' "$PROFILES_DIR/$profile.json" 2>/dev/null)
@@ -166,8 +166,8 @@ connect_profile_menu() {
     echo -e "${CYAN} $i)${NC} $profile ${BLUE}[$transport:$port]${NC}"
     ((i++))
   done
-  echo -e "${CYAN} 0)${NC} Назад в главное меню\n"
-  echo -n -e "${YELLOW}Выберите профиль: ${NC}"
+  echo -e "${CYAN} 0)${NC} Back to main menu\n"
+  echo -n -e "${YELLOW}Choose a profile: ${NC}"
   read choice
   if [[ "$choice" == "0" ]]; then
     return
@@ -176,7 +176,7 @@ connect_profile_menu() {
     local profile_name="${profiles[$((choice-1))]}"
     generate_connection "$profile_name"
   else
-    echo -e "${RED}✗ Неверный выбор${NC}"
+    echo -e "${RED}✗ Invalid choice${NC}"
     sleep 2
   fi
 }
@@ -185,20 +185,20 @@ manage_profile_menu() {
   while true; do
     show_ascii
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}         УПРАВЛЕНИЕ ПРОФИЛЕМ                  ${NC}"
+    echo -e "${BLUE}         MANAGE PROFILE                  ${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
 
     local profiles=($(_list_visible_profile_names))
     if [[ ${#profiles[@]} -eq 0 ]]; then
-      echo -e "${RED}Нет созданных профилей${NC}"
-      echo -e "${CYAN}Создайте профиль через главное меню 'Создать новый профиль'${NC}"
+      echo -e "${RED}No profiles created${NC}"
+      echo -e "${CYAN}Create a profile via the main menu 'Create new profile'${NC}"
       echo ""
-      echo -n -e "${YELLOW}Нажмите Enter для возврата...${NC}"
+      echo -n -e "${YELLOW}Press Enter to return...${NC}"
       read -r _
       return
     fi
 
-    echo -e "${YELLOW}Выберите профиль для управления:${NC}\n"
+    echo -e "${YELLOW}Choose a profile to manage:${NC}\n"
     local i=1
     local profile
     for profile in "${profiles[@]}"; do
@@ -211,14 +211,14 @@ manage_profile_menu() {
       echo -e "${CYAN} $i)${NC} $profile ${BLUE}[$transport:$port sni=$sni]${NC}"
       ((i++))
     done
-    echo -e "${CYAN} 0)${NC} Назад в главное меню\n"
-    echo -n -e "${YELLOW}Выбор: ${NC}"
+    echo -e "${CYAN} 0)${NC} Back to main menu\n"
+    echo -n -e "${YELLOW}Choose: ${NC}"
     local pchoice
     read -r pchoice
 
     [[ "$pchoice" == "0" ]] && return
     if [[ ! "$pchoice" =~ ^[0-9]+$ ]] || [[ $pchoice -lt 1 ]] || [[ $pchoice -gt ${#profiles[@]} ]]; then
-      echo -e "${RED}Неверный выбор${NC}"
+      echo -e "${RED}Invalid choice${NC}"
       sleep 1
       continue
     fi
@@ -228,14 +228,14 @@ manage_profile_menu() {
     while true; do
       show_ascii
       echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-      echo -e "${BLUE}    ДЕЙСТВИЯ С ПРОФИЛЕМ: $selected${NC}"
+      echo -e "${BLUE}    PROFILE ACTIONS: $selected${NC}"
       echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
-      echo -e "${CYAN} 1)${NC} Изменить SNI (домен маскировки)"
-      echo -e "${CYAN} 2)${NC} Изменить Fingerprint (браузер)"
-      echo -e "${CYAN} 3)${NC} Изменить порт"
-      echo -e "${CYAN} 4)${NC} Адванс настройки (experimental)"
-      echo -e "${CYAN} 0)${NC} Назад (выбрать другой профиль)\n"
-      echo -n -e "${YELLOW}Выбор: ${NC}"
+      echo -e "${CYAN} 1)${NC} Change SNI (camouflage domain)"
+      echo -e "${CYAN} 2)${NC} Change Fingerprint (browser)"
+      echo -e "${CYAN} 3)${NC} Change port"
+      echo -e "${CYAN} 4)${NC} Advanced settings (experimental)"
+      echo -e "${CYAN} 0)${NC} Back (choose another profile)\n"
+      echo -n -e "${YELLOW}Choose: ${NC}"
       local achoice
       read -r achoice
       case "$achoice" in
@@ -244,7 +244,7 @@ manage_profile_menu() {
         3) change_port_menu ;;
         4) manage_profile_advanced_menu "$selected" ;;
         0) break ;;
-        *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
+        *) echo -e "${RED}Invalid choice${NC}"; sleep 1 ;;
       esac
     done
   done
@@ -259,9 +259,9 @@ generate_connection() {
   if [[ "$route_count" =~ ^[0-9]+$ ]] && [[ "$route_count" -gt 0 ]]; then
     show_ascii
     echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}    ДАННЫЕ ДЛЯ ПОДКЛЮЧЕНИЯ: $profile_name${NC}"
+    echo -e "${GREEN}    CONNECTION DETAILS: $profile_name${NC}"
     echo -e "${GREEN}═══════════════════════════════════════════════${NC}\n"
-    echo -e "${BLUE}Маршруты в профиле:${NC}"
+    echo -e "${BLUE}Routes in the profile:${NC}"
     jq -r '.routes[] | "  - \(.label): \(.transport) :\(.port) sni=\(.sni)"' "$profile_file"
     echo ""
 
@@ -272,7 +272,7 @@ generate_connection() {
       url="${base_url}/sub/${token}"
       if _subscription_is_local_only; then
         echo -e "${YELLOW}Local-only debug subscription:${NC} ${url}"
-        echo -e "${RED}QR не показываю: 127.0.0.1 не доступен внешнему клиенту.${NC}"
+        echo -e "${RED}Not showing QR: 127.0.0.1 is not reachable by an external client.${NC}"
       else
         echo -e "${BLUE}Subscription URL:${NC} ${GREEN}${url}${NC}"
         echo ""
@@ -281,11 +281,11 @@ generate_connection() {
     fi
 
     echo ""
-    echo -e "${CYAN}Raw vless:// строки (advanced):${NC}"
+    echo -e "${CYAN}Raw vless:// lines (advanced):${NC}"
     _generate_vless_urls_for_profile "$profile_file" | sed 's/^/  /'
     echo ""
-    echo -e "${YELLOW}Для HAPP используйте subscription URL: он отдаёт все маршруты одной подпиской.${NC}"
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -e "${YELLOW}For HAPP use the subscription URL: it serves all routes in one subscription.${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read -r _
     return 0
   fi
@@ -317,41 +317,41 @@ generate_connection() {
 
   show_ascii
   echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}    ДАННЫЕ ДЛЯ ПОДКЛЮЧЕНИЯ: $profile_name${NC}"
+  echo -e "${GREEN}    CONNECTION DETAILS: $profile_name${NC}"
   echo -e "${GREEN}═══════════════════════════════════════════════${NC}\n"
   # Phase 7 REQ-C10: построение vless:// делегировано pure-функции _generate_vless_url_pure.
   # Все транспорты (tcp/tcp-utls/tcp-xudp/tcp-mux/grpc/xhttp legacy/xhttp PQ) обрабатываются там.
   local vless_link
   vless_link=$(_generate_vless_url_pure "$profile_file") || {
-    echo -e "${RED}✗ Не удалось построить vless:// URL для профиля $profile_name${NC}"
+    echo -e "${RED}✗ Could not build the vless:// URL for profile $profile_name${NC}"
     if [[ "$transport" == "xhttp" ]] && [[ "$pq_enabled" == "true" ]] && [[ ! -f "$VLESS_ENCRYPTION_FILE" ]]; then
-      echo -e "${YELLOW}  Причина: $VLESS_ENCRYPTION_FILE отсутствует. Перезапустите xraytailscale (миграция .mlkem_keys_generated).${NC}"
+      echo -e "${YELLOW}  Reason: $VLESS_ENCRYPTION_FILE is missing. Restart xraytailscale (migration .mlkem_keys_generated).${NC}"
     fi
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read -r
     return 1
   }
-  echo -e "${BLUE}Ссылка для подключения:${NC}"
+  echo -e "${BLUE}Connection link:${NC}"
   echo -e "${YELLOW}${vless_link}${NC}\n"
-  echo -e "${BLUE}QR-код:${NC}\n"
+  echo -e "${BLUE}QR code:${NC}\n"
   _print_qr_block "$vless_link"
   echo ""
   echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
-  echo -e "${CYAN}Параметры для ручной настройки:${NC}"
+  echo -e "${CYAN}Manual setup parameters:${NC}"
   echo ""
-  echo -e "${CYAN}Адрес:${NC} $SERVER_IP"
-  echo -e "${CYAN}Порт:${NC} $port"
+  echo -e "${CYAN}Address:${NC} $SERVER_IP"
+  echo -e "${CYAN}Port:${NC} $port"
   echo -e "${CYAN}UUID:${NC} $uuid"
   case $transport in
     tcp|tcp-utls|tcp-xudp)
       echo -e "${CYAN}Flow:${NC} xtls-rprx-vision"
       ;;
     tcp-mux)
-      echo -e "${CYAN}Flow:${NC} (пустой)"
-      echo -e "${CYAN}Mux:${NC} включить на клиенте (sing-box: multiplex, v2rayN: mux)"
+      echo -e "${CYAN}Flow:${NC} (empty)"
+      echo -e "${CYAN}Mux:${NC} enable on the client (sing-box: multiplex, v2rayN: mux)"
       ;;
     grpc|xhttp)
-      echo -e "${CYAN}Flow:${NC} (пустой)"
+      echo -e "${CYAN}Flow:${NC} (empty)"
       ;;
   esac
   # Phase 6: Encryption строка зависит от pq_enabled (только для XHTTP)
@@ -365,12 +365,12 @@ generate_connection() {
   echo -e "${CYAN}SNI:${NC} $current_sni"
   echo -e "${CYAN}Fingerprint:${NC} $fingerprint"
   echo -e "${CYAN}PublicKey:${NC} $clean_public_key"
-  echo -e "${CYAN}ShortID:${NC} ${short_id:-(пустой)}"
+  echo -e "${CYAN}ShortID:${NC} ${short_id:-(empty)}"
   if [[ "$transport" == "tcp" ]] || [[ "$transport" == "tcp-utls" ]] || [[ "$transport" == "tcp-xudp" ]] || [[ "$transport" == "tcp-mux" ]]; then
     echo -e "${CYAN}SpiderX:${NC} /"
   elif [[ "$transport" == "grpc" ]]; then
     echo -e "${CYAN}serviceName:${NC} $grpc_service_name"
-    echo -e "${YELLOW}ℹ gRPC:${NC} нужен SNI с живым HTTP/2; на части РУ-провайдеров капризнее XHTTP"
+    echo -e "${YELLOW}ℹ gRPC:${NC} needs an SNI with live HTTP/2; more finicky than XHTTP on some RU providers"
   elif [[ "$transport" == "xhttp" ]]; then
     echo -e "${CYAN}Path:${NC} $xhttp_path"
     echo -e "${CYAN}Host:${NC} $current_sni"
@@ -389,7 +389,7 @@ generate_connection() {
     fi
   fi
   echo -e "${GREEN}═══════════════════════════════════════════════${NC}\n"
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read
 }
 
@@ -402,9 +402,9 @@ change_sni_menu() {
 
   local profiles=($(_list_visible_profile_names))
   if [[ ${#profiles[@]} -eq 0 ]]; then
-    echo -e "${RED}✗ Нет созданных профилей${NC}"
+    echo -e "${RED}✗ No profiles created${NC}"
     echo ""
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read
     return
   fi
@@ -417,9 +417,9 @@ change_sni_menu() {
     echo -e "${CYAN} $i)${NC} $profile ${BLUE}[порт:$port]${NC} ${YELLOW}[SNI:$sni]${NC}"
     ((i++))
   done
-  echo -e "${CYAN} 0)${NC} Назад в главное меню\n"
+  echo -e "${CYAN} 0)${NC} Back to main menu\n"
 
-  echo -n -e "${YELLOW}Выберите профиль: ${NC}"
+  echo -n -e "${YELLOW}Choose a profile: ${NC}"
   read choice
 
   if [[ "$choice" == "0" ]]; then
@@ -427,7 +427,7 @@ change_sni_menu() {
   fi
 
   if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ $choice -lt 1 ]] || [[ $choice -gt ${#profiles[@]} ]]; then
-    echo -e "${RED}✗ Неверный выбор${NC}"
+    echo -e "${RED}✗ Invalid choice${NC}"
     sleep 2
     return
   fi
@@ -538,7 +538,7 @@ change_sni_menu() {
       echo ""
       echo -e "${GREEN}✓ SNI '${target_label}' изменен на: ${YELLOW}$new_sni${NC}"
       echo ""
-      echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+      echo -n -e "${YELLOW}Press Enter to continue...${NC}"
       read
     fi
     return
@@ -547,7 +547,7 @@ change_sni_menu() {
   if [[ ! -f "$SNI_LIST" ]]; then
     echo -e "${RED}✗ Файл списка SNI не найден${NC}"
     echo ""
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read
     return
   fi
@@ -611,7 +611,7 @@ change_sni_menu() {
 
   local new_sni="${sni_array[$sni_choice]}"
   if [[ -z "$new_sni" ]]; then
-    echo -e "${RED}✗ Неверный выбор${NC}"
+    echo -e "${RED}✗ Invalid choice${NC}"
     sleep 2
     return
   fi
@@ -710,7 +710,7 @@ change_sni_menu() {
   echo -e "${MAGENTA}║     Теперь получите новую ссылку для этого профиля!     ║${NC}"
   echo -e "${MAGENTA}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read
 }
 
@@ -723,9 +723,9 @@ change_fingerprint_menu() {
 
   local profiles=($(_list_visible_profile_names))
   if [[ ${#profiles[@]} -eq 0 ]]; then
-    echo -e "${RED}✗ Нет созданных профилей${NC}"
+    echo -e "${RED}✗ No profiles created${NC}"
     echo ""
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read
     return
   fi
@@ -738,9 +738,9 @@ change_fingerprint_menu() {
     echo -e "${CYAN} $i)${NC} $profile ${BLUE}[порт:$port]${NC} ${YELLOW}[fp:$fp]${NC}"
     ((i++))
   done
-  echo -e "${CYAN} 0)${NC} Назад в главное меню\n"
+  echo -e "${CYAN} 0)${NC} Back to main menu\n"
 
-  echo -n -e "${YELLOW}Выберите профиль: ${NC}"
+  echo -n -e "${YELLOW}Choose a profile: ${NC}"
   read choice
 
   if [[ "$choice" == "0" ]]; then
@@ -748,7 +748,7 @@ change_fingerprint_menu() {
   fi
 
   if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ $choice -lt 1 ]] || [[ $choice -gt ${#profiles[@]} ]]; then
-    echo -e "${RED}✗ Неверный выбор${NC}"
+    echo -e "${RED}✗ Invalid choice${NC}"
     sleep 2
     return
   fi
@@ -796,7 +796,7 @@ change_fingerprint_menu() {
     5) new_fp="ios" ;;
     6) new_fp="random" ;;
     0) return ;;
-    *) echo -e "${RED}✗ Неверный выбор${NC}"; sleep 2; return ;;
+    *) echo -e "${RED}✗ Invalid choice${NC}"; sleep 2; return ;;
   esac
 
   if [[ "$new_fp" == "$current_fp" ]]; then
@@ -835,7 +835,7 @@ change_fingerprint_menu() {
   echo ""
   echo -e "${GREEN}✓ Подписка на сервере уже содержит новый fp=${new_fp}.${NC}"
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read
 }
 
@@ -847,9 +847,9 @@ change_port_menu() {
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
   local profiles=($(_list_visible_profile_names))
   if [[ ${#profiles[@]} -eq 0 ]]; then
-    echo -e "${RED}✗ Нет созданных профилей${NC}"
+    echo -e "${RED}✗ No profiles created${NC}"
     echo ""
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read
     return
   fi
@@ -861,14 +861,14 @@ change_port_menu() {
     echo -e "${CYAN} $i)${NC} $profile ${BLUE}[$transport:$port]${NC}"
     ((i++))
   done
-  echo -e "${CYAN} 0)${NC} Назад в главное меню\n"
-  echo -n -e "${YELLOW}Выберите профиль: ${NC}"
+  echo -e "${CYAN} 0)${NC} Back to main menu\n"
+  echo -n -e "${YELLOW}Choose a profile: ${NC}"
   read choice
   if [[ "$choice" == "0" ]]; then
     return
   fi
   if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ $choice -lt 1 ]] || [[ $choice -gt ${#profiles[@]} ]]; then
-    echo -e "${RED}✗ Неверный выбор${NC}"
+    echo -e "${RED}✗ Invalid choice${NC}"
     sleep 2
     return
   fi
@@ -924,7 +924,7 @@ change_port_menu() {
       read new_port
       ;;
     0) return ;;
-    *) echo -e "${RED}✗ Неверный выбор${NC}"; sleep 2; return ;;
+    *) echo -e "${RED}✗ Invalid choice${NC}"; sleep 2; return ;;
   esac
   if [[ ! "$new_port" =~ ^[0-9]+$ ]] || [[ $new_port -lt 1 ]] || [[ $new_port -gt 65535 ]]; then
     echo -e "${RED}✗ Неверный порт. Используйте число от 1 до 65535${NC}"
@@ -1002,7 +1002,7 @@ change_port_menu() {
       echo ""
       echo -e "${CYAN}Нельзя объединить разные транспорты на одном порту.${NC}"
       echo ""
-      echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+      echo -n -e "${YELLOW}Press Enter to continue...${NC}"
       read
       return
     fi
@@ -1182,7 +1182,7 @@ change_port_menu() {
   echo -e "${MAGENTA}║        Теперь ОБЯЗАТЕЛЬНО получите новую ссылку!        ║${NC}"
   echo -e "${MAGENTA}╚═══════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read
 }
 
@@ -1335,7 +1335,7 @@ manage_profile_advanced_menu() {
   fi
   _discard_profiles_snapshot "$profiles_snapshot"
   echo -e "${GREEN}Vision Seed применен. testpre=${testpre_val}, testseed=${testseed_json}${NC}"
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read -r _
 }
 

@@ -9,10 +9,27 @@ _cleanup_legacy_subscription_artifacts() {
   systemctl daemon-reload >/dev/null 2>&1 || true
 }
 
+# ═══════════════════════════════════════════════════════════
+# Общая rate-limit зона для /sub/ — в отдельном conf.d файле.
+# Она нужна И IP-vhost'у, И self-steal backend (доменный режим), поэтому
+# не может жить внутри одного из них: отключение IP-vhost при переходе на
+# домен раньше уносило зону и роняло nginx -t («zero size shared memory zone»).
+# conf.d/*.conf подключается на http-уровне и не зависит от sites-enabled.
+# ═══════════════════════════════════════════════════════════
+SUBSCRIPTION_LIMIT_ZONE_CONF="/etc/nginx/conf.d/xraytailscale-sub-limit.conf"
+_subscription_ensure_limit_zone() {
+  mkdir -p /etc/nginx/conf.d 2>/dev/null || true
+  cat > "$SUBSCRIPTION_LIMIT_ZONE_CONF" <<'ZONE_EOF'
+# Shared rate-limit zone for the HAPP /sub/ location.
+# Used by both the IP-mode vhost and the self-steal backend (domain mode).
+limit_req_zone $binary_remote_addr zone=xraytailscale_sub:10m rate=30r/m;
+ZONE_EOF
+}
+
 install_subscription_server() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}     УСТАНОВКА HAPP SUBSCRIPTION SERVER       ${NC}"
+  echo -e "${BLUE}     HAPP SUBSCRIPTION SERVER SETUP           ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
   echo ""
 
@@ -21,6 +38,7 @@ install_subscription_server() {
   fi
   chmod 755 /usr/local/bin/xraytailscale 2>/dev/null || true
   _cleanup_legacy_subscription_artifacts
+  _subscription_ensure_limit_zone
 
   # Pre-flight: socat (handler bind), openssl/base64/jq уже гарантированы install.sh.
   if ! command -v socat &>/dev/null; then
@@ -753,8 +771,6 @@ install_subscription_ip_tls() {
   chmod -R 755 "$webroot"
 
   cat > /etc/nginx/sites-available/xraytailscale-sub << NGINX_HTTP_EOF
-limit_req_zone \$binary_remote_addr zone=xraytailscale_sub:10m rate=30r/m;
-
 server {
     listen 80;
     listen [::]:80;
@@ -818,8 +834,6 @@ NGINX_HTTP_EOF
   fi
 
   cat > /etc/nginx/sites-available/xraytailscale-sub << NGINX_TLS_EOF
-limit_req_zone \$binary_remote_addr zone=xraytailscale_sub:10m rate=30r/m;
-
 server {
     listen 80;
     listen [::]:80;
@@ -1000,8 +1014,6 @@ install_subscription_public_tls() {
   chmod -R 755 "$webroot"
 
   cat > /etc/nginx/sites-available/xraytailscale-sub << NGINX_HTTP_EOF
-limit_req_zone \$binary_remote_addr zone=xraytailscale_sub:10m rate=30r/m;
-
 server {
     listen 80;
     listen [::]:80;
@@ -1064,8 +1076,6 @@ NGINX_HTTP_EOF
   fi
 
   cat > /etc/nginx/sites-available/xraytailscale-sub << NGINX_TLS_EOF
-limit_req_zone \$binary_remote_addr zone=xraytailscale_sub:10m rate=30r/m;
-
 server {
     listen 80;
     listen [::]:80;
