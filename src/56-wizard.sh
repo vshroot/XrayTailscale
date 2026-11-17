@@ -57,22 +57,39 @@ _wizard_state_set() {
   local value="${2:-}"
   [[ -n "$key" ]] || return 1
 
-  local dir tmp
+  local dir tmp lock_fd
   dir=$(dirname "$WIZARD_STATE_FILE")
   mkdir -p "$dir" 2>/dev/null || true
-  tmp=$(mktemp "${WIZARD_STATE_FILE}.XXXXXX" 2>/dev/null) || return 1
+
+  # Сериализация read-modify-write: два одновременных запуска мастера
+  # (меню + CLI) иначе теряют ключи друг друга (проверено: 3 писателя → 1 ключ).
+  # flock может отсутствовать (util-linux) — тогда пишем без блокировки.
+  if command -v flock >/dev/null 2>&1; then
+    exec {lock_fd}>"${WIZARD_STATE_FILE}.lock" 2>/dev/null || lock_fd=""
+    if [[ -n "$lock_fd" ]]; then
+      flock -w 5 "$lock_fd" 2>/dev/null || true
+    fi
+  fi
+
+  tmp=$(mktemp "${WIZARD_STATE_FILE}.XXXXXX" 2>/dev/null) || {
+    [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
+    return 1
+  }
   if [[ -f "$WIZARD_STATE_FILE" ]]; then
     grep -v "^${key}=" "$WIZARD_STATE_FILE" > "$tmp" 2>/dev/null || true
   fi
   if ! printf '%s=%s\n' "$key" "$value" >> "$tmp"; then
     rm -f "$tmp"
+    [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
     return 1
   fi
   chmod 600 "$tmp" 2>/dev/null || true
   if ! mv "$tmp" "$WIZARD_STATE_FILE"; then
     rm -f "$tmp"
+    [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
     return 1
   fi
+  [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
   return 0
 }
 
@@ -123,8 +140,14 @@ _wizard_step_banner() {
 
 # Спросить «повторить шаг или выйти». return 0 = повторить, 1 = выйти.
 _wizard_confirm_retry_or_exit() {
-  local ans
+  local ans attempts=0
   while true; do
+    ((attempts++))
+    if [[ $attempts -gt 10 ]]; then
+      echo ""
+      echo -e "${RED}  Слишком много неверных попыток — выход${NC}"
+      return 1
+    fi
     echo ""
     echo -e "${CYAN}  [1]${NC} Повторить шаг   ${CYAN}[0]${NC} Выйти"
     echo -n -e "${YELLOW}Выберите действие: ${NC}"
@@ -221,7 +244,9 @@ _wizard_final_report() {
   echo -e "${GREEN}${url}${NC}"
   echo ""
 
-  if printf '%s\n' "$url" > "$WIZARD_URL_FILE" 2>/dev/null; then
+  # umask 077: файл создаётся сразу 600 (в URL — sub_token, это секрет).
+  # chmod ниже — страховка (defense-in-depth) и контракт для тестов.
+  if ( umask 077; printf '%s\n' "$url" > "$WIZARD_URL_FILE" ) 2>/dev/null; then
     chmod 600 "$WIZARD_URL_FILE" 2>/dev/null || true
     echo -e "${CYAN}Ссылка сохранена в файл: ${WIZARD_URL_FILE}${NC}"
   else
@@ -513,7 +538,12 @@ run_first_run_wizard() {
       fi
       local saved_user=""
       saved_user=$(_wizard_state_get USER_NAME || true)
-      [[ -n "$saved_user" ]] && default_user="$saved_user"
+      # Ревалидация: state-файл может быть подправлен вручную (../../etc/...).
+      # Имя идёт в путь $PROFILES_DIR/<name>.json — инвариант «валидация до
+      # любых файловых операций» соблюдается и в resume-ветке.
+      if [[ -n "$saved_user" ]] && [[ "$saved_user" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+        default_user="$saved_user"
+      fi
 
       if [[ -f "$PROFILES_DIR/${default_user}.json" ]]; then
         echo -e "${YELLOW}ℹ Пользователь ${default_user} уже существует — создание не нужно${NC}"
@@ -585,6 +615,11 @@ run_first_run_wizard() {
       fi
 
       if [[ "$mode" == "domain" ]]; then
+        if [[ -z "$domain" ]]; then
+          echo -e "${RED}✗ Не найден домен для self-steal${NC}"
+          echo -e "${YELLOW}  Вернитесь к шагу 2 и укажите домен.${NC}"
+          step4_ok=0
+        else
         # КРИТИЧНО: self-steal первым — он занимает :443 и забирает
         # localhost-backend порт, подписка затем выбирает следующий свободный.
         echo -e "${CYAN}  → Self-steal для ${domain}: :443 под ваш сайт + Reality...${NC}"
@@ -600,6 +635,7 @@ run_first_run_wizard() {
         else
           echo -e "${GREEN}✓ Self-steal готов: https://${domain}${NC}"
         fi
+        fi
       fi
 
       if [[ $step4_ok -eq 1 ]]; then
@@ -610,15 +646,22 @@ run_first_run_wizard() {
           echo -e "${CYAN}  → Подписка HAPP: IP-режим (HTTPS по IP сервера).${NC}"
           echo -e "${CYAN}    Доменный режим здесь нельзя: домен уже занят self-steal.${NC}"
           # Email override: мастер уже спросил email на шаге 2 —
-          # installer не должен спрашивать его повторно.
-          # shellcheck disable=SC2034  # переменную читает installer подписки
+          # installer не должен спрашивать его повторно. Сохраняем прежнее
+          # значение (если было), чтобы не затирать его у вызывающей стороны.
+          local _prev_le_email="${SUBSCRIPTION_LE_EMAIL-}"
+          local _had_le_email=0
+          [[ -n "${SUBSCRIPTION_LE_EMAIL+x}" ]] && _had_le_email=1
           SUBSCRIPTION_LE_EMAIL="$email"
           if install_subscription_ip_tls; then
             sub_rc=0
           else
             sub_rc=1
           fi
-          unset SUBSCRIPTION_LE_EMAIL
+          if [[ $_had_le_email -eq 1 ]]; then
+            SUBSCRIPTION_LE_EMAIL="$_prev_le_email"
+          else
+            unset SUBSCRIPTION_LE_EMAIL
+          fi
 
           if [[ $sub_rc -ne 0 ]]; then
             echo ""
@@ -668,7 +711,8 @@ run_first_run_wizard() {
         step5_ok=0
       fi
 
-      if [[ -n "$sub_port" ]] && ss -tlnH "sport = :${sub_port}" 2>/dev/null | grep -q .; then
+      if [[ -n "$sub_port" ]] && command -v ss >/dev/null 2>&1 \
+         && ss -tlnH "sport = :${sub_port}" 2>/dev/null | grep -q .; then
         echo -e "${GREEN}✓ Порт подписки :${sub_port} слушается${NC}"
       else
         echo -e "${RED}✗ Порт подписки ${sub_port:-неизвестен} не слушается${NC}"

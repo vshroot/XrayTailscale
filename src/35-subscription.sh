@@ -886,7 +886,7 @@ NGINX_TLS_EOF
   echo -e "${CYAN}Для ручного контроля маршрутов используйте главное меню → 'Создать новый профиль'.${NC}"
   echo ""
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
-  read -r _
+  read -r _ || true
 }
 
 # Public TLS installer by domain.
@@ -1135,7 +1135,7 @@ NGINX_TLS_EOF
   echo -e "${CYAN}Для ручного контроля маршрутов используйте главное меню → 'Создать новый профиль'.${NC}"
   echo ""
   echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
-  read -r _
+  read -r _ || true
 }
 
 # Local-only fallback installer (REQ-C03).
