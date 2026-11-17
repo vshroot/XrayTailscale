@@ -612,21 +612,29 @@ cascade_mode_menu() {
     show_ascii
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
     echo -e "${BLUE}    КАСКАД / UPSTREAM-НОДЫ                    ${NC}"
-    echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
+    echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW} Обход VPN имеет смысл только при включённом каскаде${NC}\n"
     _cascade_print_status
     echo ""
     echo -e "${CYAN} 1)${NC} Настроить зарубежную upstream-ноду"
     echo -e "${CYAN} 2)${NC} Включить каскад"
     echo -e "${CYAN} 3)${NC} Отключить каскад"
+    echo -e "${CYAN} 4)${NC} Обход VPN (банки/госуслуги напрямую)"
+    echo -e "${CYAN} 5)${NC} Поднять outbound-сервер (зарубежная нода)"
     echo -e "${CYAN} 0)${NC} Назад"
     echo ""
     echo -n -e "${YELLOW}Выбор: ${NC}"
     local c
-    read -r c
+    if ! read -r c; then
+      echo ""
+      return 0
+    fi
     case "$c" in
       1) configure_cascade_upstream ;;
       2) enable_cascade_mode ;;
       3) disable_cascade_mode ;;
+      4) bypass_routing_menu ;;
+      5) setup_outbound_server_menu ;;
       0) return ;;
       *) echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
     esac

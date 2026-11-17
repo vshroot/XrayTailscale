@@ -73,8 +73,8 @@ type setup_outbound_server_menu >/dev/null 2>&1 || fail "missing setup_outbound_
 
 grep -q '^UPSTREAMS_DIR=' xraytailscale || fail "missing UPSTREAMS_DIR constant"
 grep -q '^CASCADE_ACTIVE_FILE=' xraytailscale || fail "missing CASCADE_ACTIVE_FILE constant"
-grep -q 'cascade_mode_menu' src/50-cascade.sh || fail "cascade_mode_menu must remain available"
-grep -q 'setup_outbound_server_menu' src/50-cascade.sh || fail "setup_outbound_server_menu must remain available"
+grep -q '4) bypass_routing_menu' xraytailscale || fail "cascade menu option 4 must route to bypass routing"
+grep -q '5) setup_outbound_server_menu' xraytailscale || fail "cascade menu option 5 must route to outbound server setup"
 
 _cascade_validate_upstream_fields "203.0.113.10" "443" "11111111-1111-4111-8111-111111111111" \
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN" "abcd1234" "front.example.com" "chrome" "" \

@@ -510,49 +510,26 @@ _status_extra_menu() {
   while true; do
     echo ""
     echo -e "${MAGENTA}═══ ДОПОЛНИТЕЛЬНО ═══${NC}"
-    echo -e "${CYAN} 1)${NC} Self-steal: статус (nginx, сертификат, inbound)"
-    echo -e "${CYAN} 2)${NC} Подписка HAPP (установка / настройки)"
-    echo -e "${CYAN} 3)${NC} Управление профилями"
-    echo -e "${CYAN} 4)${NC} Обновить Xray-core"
+    echo -e "${CYAN} 1)${NC} Пакетное добавление пользователей"
+    echo -e "${CYAN} 2)${NC} Tailscale exit node"
+    echo -e "${CYAN} 3)${NC} Каскад / upstream"
+    echo -e "${CYAN} 4)${NC} Управление подпиской HAPP"
+    echo -e "${CYAN} 5)${NC} Self-steal (статус/удаление)"
+    echo -e "${CYAN} 6)${NC} Профили advanced (SNI/порт/fingerprint)"
+    echo -e "${CYAN} 7)${NC} Удалить пользователя"
+    echo -e "${CYAN} 8)${NC} Обновить Xray-core"
     echo -e "${CYAN} 0)${NC} Назад"
     echo -n -e "${YELLOW}Выбор: ${NC}"
-    if ! read -r choice; then
-      echo ""
-      return 0
-    fi
+    if ! read -r choice; then return 0; fi
     case "$choice" in
-      1)
-        if declare -F selfsteal_status >/dev/null 2>&1; then
-          selfsteal_status
-        else
-          echo -e "${YELLOW}  Self-steal-модуль недоступен${NC}"
-          _status_pause
-        fi
-        ;;
-      2)
-        if declare -F happ_subscription_menu >/dev/null 2>&1; then
-          happ_subscription_menu
-        else
-          echo -e "${YELLOW}  Модуль подписки недоступен${NC}"
-          _status_pause
-        fi
-        ;;
-      3)
-        if declare -F manage_profile_menu >/dev/null 2>&1; then
-          manage_profile_menu
-        else
-          echo -e "${YELLOW}  Модуль профилей недоступен${NC}"
-          _status_pause
-        fi
-        ;;
-      4)
-        if declare -F update_command >/dev/null 2>&1; then
-          update_command
-        else
-          echo -e "${YELLOW}  Модуль обновления недоступен${NC}"
-          _status_pause
-        fi
-        ;;
+      1) declare -F bulk_happ_users_menu >/dev/null 2>&1 && bulk_happ_users_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      2) declare -F tailscale_exit_node_menu >/dev/null 2>&1 && tailscale_exit_node_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      3) declare -F cascade_mode_menu >/dev/null 2>&1 && cascade_mode_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      4) declare -F manage_subscription_menu >/dev/null 2>&1 && manage_subscription_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      5) declare -F selfsteal_menu >/dev/null 2>&1 && selfsteal_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      6) declare -F manage_profile_menu >/dev/null 2>&1 && manage_profile_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      7) declare -F delete_profile_menu >/dev/null 2>&1 && delete_profile_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      8) declare -F update_command >/dev/null 2>&1 && update_command || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       0|"") return 0 ;;
       *) echo -e "${RED}  Неверный выбор${NC}" ;;
     esac
