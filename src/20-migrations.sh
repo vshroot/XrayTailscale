@@ -80,16 +80,16 @@ migrate_remove_legacy_tcp_tuning_v3() {
   local expected_uid="${7:-0}"
 
   if [[ -L "$marker" ]]; then
-    echo -e "${RED}  ✗ Migration marker не должен быть symlink: $marker${NC}"
+    echo -e "${RED}  ✗ Migration marker must not be a symlink: $marker${NC}"
     return 1
   fi
   [[ -f "$marker" ]] && return 0
   if [[ -e "$marker" ]]; then
-    echo -e "${RED}  ✗ Migration marker имеет неожиданный тип: $marker${NC}"
+    echo -e "${RED}  ✗ Migration marker has an unexpected type: $marker${NC}"
     return 1
   fi
 
-  echo -e "${MAGENTA}[migration] Удаление legacy BBR/TCP tuning${NC}"
+  echo -e "${MAGENTA}[migration] Removing legacy BBR/TCP tuning${NC}"
 
   local backup_dir=""
   local candidate=""
@@ -107,7 +107,7 @@ migrate_remove_legacy_tcp_tuning_v3() {
       if [[ -L "$legacy_candidate" || ! -f "$legacy_candidate" ]] \
          || [[ "$(stat -c %u "$legacy_candidate" 2>/dev/null)" != "$expected_uid" ]] \
          || ! _is_known_legacy_tcp_tuning_file "$legacy_candidate"; then
-        echo -e "${RED}  ✗ Неизвестный или изменённый файл оставлен без изменений: $legacy_candidate${NC}"
+        echo -e "${RED}  ✗ Unknown or modified file left unchanged: $legacy_candidate${NC}"
         unsafe_config=1
       else
         mkdir -p "$XRAY_BACKUPS_DIR" || return 1
@@ -117,7 +117,7 @@ migrate_remove_legacy_tcp_tuning_v3() {
         fi
         cp -a -- "$legacy_candidate" "$backup_dir/$(basename "$legacy_candidate")" || return 1
         rm -f -- "$legacy_candidate" || return 1
-        echo -e "${GREEN}  ✓ Удалён legacy sysctl.d-файл: $legacy_candidate${NC}"
+        echo -e "${GREEN}  ✓ Removed legacy sysctl.d file: $legacy_candidate${NC}"
       fi
     fi
   done
@@ -125,7 +125,7 @@ migrate_remove_legacy_tcp_tuning_v3() {
   if [[ -e "$sysctl_conf" || -L "$sysctl_conf" ]]; then
     if [[ -L "$sysctl_conf" || ! -f "$sysctl_conf" ]] \
        || [[ "$(stat -c %u "$sysctl_conf" 2>/dev/null)" != "$expected_uid" ]]; then
-      echo -e "${RED}  ✗ Небезопасный системный конфиг оставлен без изменений: $sysctl_conf${NC}"
+      echo -e "${RED}  ✗ Unsafe system config left unchanged: $sysctl_conf${NC}"
       unsafe_config=1
     else
       candidate=$(mktemp "$(dirname "$sysctl_conf")/.xraytailscale-sysctl.XXXXXX") || return 1
@@ -147,19 +147,19 @@ migrate_remove_legacy_tcp_tuning_v3() {
           rm -f -- "$candidate"
           return 1
         }
-        echo -e "${GREEN}  ✓ Удалён legacy-блок XrayTailscale из sysctl.conf${NC}"
+        echo -e "${GREEN}  ✓ Removed the XrayTailscale legacy block from sysctl.conf${NC}"
       elif [[ "$strip_rc" -eq 1 ]]; then
         rm -f -- "$candidate"
       else
         rm -f -- "$candidate"
         unsafe_config=1
-        echo -e "${RED}  ✗ Legacy sysctl-блок изменён вручную; файл оставлен без изменений${NC}"
+        echo -e "${RED}  ✗ Legacy sysctl block was edited manually; file left unchanged${NC}"
       fi
     fi
   fi
 
   if [[ ! -r "$active_file" || ! -r "$available_file" ]]; then
-    echo -e "${RED}  ✗ Ядро не предоставляет congestion-control state${NC}"
+    echo -e "${RED}  ✗ The kernel does not expose congestion-control state${NC}"
     return 1
   fi
   current_cc=$(<"$active_file")
@@ -171,44 +171,44 @@ migrate_remove_legacy_tcp_tuning_v3() {
     elif [[ " $available_cc " == *" reno "* ]]; then
       target_cc="reno"
     else
-      echo -e "${RED}  ✗ Не найден безопасный congestion-control fallback (cubic/reno)${NC}"
+      echo -e "${RED}  ✗ No safe congestion-control fallback found (cubic/reno)${NC}"
       return 1
     fi
 
     if ! sysctl -q -w "net.ipv4.tcp_congestion_control=$target_cc"; then
-      echo -e "${RED}  ✗ Не удалось переключить congestion control на $target_cc${NC}"
-      [[ -n "$backup_dir" ]] && echo -e "${YELLOW}    Persistent-настройки удалены; backup: $backup_dir${NC}"
+      echo -e "${RED}  ✗ Could not switch congestion control to $target_cc${NC}"
+      [[ -n "$backup_dir" ]] && echo -e "${YELLOW}    Persistent settings removed; backup: $backup_dir${NC}"
       return 1
     fi
     current_cc=$(<"$active_file")
     if [[ "$current_cc" == "bbr" ]]; then
-      echo -e "${RED}  ✗ Congestion control остался BBR после переключения${NC}"
+      echo -e "${RED}  ✗ Congestion control is still BBR after the switch${NC}"
       return 1
     fi
-    echo -e "${GREEN}  ✓ Активный congestion control: $current_cc${NC}"
+    echo -e "${GREEN}  ✓ Active congestion control: $current_cc${NC}"
   fi
 
   remaining_sources=$(_find_persistent_bbr_sources "$scan_paths")
   if [[ -n "$remaining_sources" ]]; then
-    echo -e "${RED}  ✗ BBR задан сторонним sysctl-конфигом; файл не изменён:${NC}"
+    echo -e "${RED}  ✗ BBR is set by a third-party sysctl config; file unchanged:${NC}"
     printf '%s\n' "$remaining_sources" | sed 's/^/    /'
-    echo -e "${YELLOW}    Удалите настройку вручную; migration повторится при следующем запуске.${NC}"
+    echo -e "${YELLOW}    Remove the setting manually; the migration will retry on the next run.${NC}"
     return 1
   fi
 
   if [[ "$unsafe_config" -ne 0 ]]; then
-    echo -e "${YELLOW}  ⚠ Часть persistent-конфигов требует ручной проверки; marker не установлен.${NC}"
+    echo -e "${YELLOW}  ⚠ Some persistent configs need manual review; marker not set.${NC}"
     return 1
   fi
 
   mkdir -p "$(dirname "$marker")" || return 1
   if ! touch "$marker"; then
-    echo -e "${RED}  ✗ Не удалось записать migration marker: $marker${NC}"
+    echo -e "${RED}  ✗ Could not write the migration marker: $marker${NC}"
     return 1
   fi
   chown xray:xray "$marker" 2>/dev/null || true
   chmod 0640 "$marker" 2>/dev/null || true
-  echo -e "${GREEN}  ✓ Legacy BBR/TCP tuning полностью отключён${NC}"
+  echo -e "${GREEN}  ✓ Legacy BBR/TCP tuning fully disabled${NC}"
   return 0
 }
 
@@ -216,7 +216,7 @@ migrate_legacy_managed_udp443_block_v3() {
   local count
   count=$(jq '[.routing.rules[]? | select(. == {"type":"field","network":"udp","port":443,"outboundTag":"block"})] | length' "$CONFIG_FILE" 2>/dev/null || echo 0)
   if [[ ! "$count" =~ ^[0-9]+$ || "$count" -eq 0 ]]; then
-    echo -e "${GREEN}✓ Legacy bare UDP/443 block отсутствует${NC}"
+    echo -e "${GREEN}✓ Legacy bare UDP/443 block is absent${NC}"
     return 1
   fi
 
@@ -226,11 +226,11 @@ migrate_legacy_managed_udp443_block_v3() {
       | select(. != {"type":"field","network":"udp","port":443,"outboundTag":"block"})
     ]
   ' "$CONFIG_FILE"; then
-    echo -e "${GREEN}✓ Legacy bare UDP/443 block удалён${NC}"
+    echo -e "${GREEN}✓ Legacy bare UDP/443 block removed${NC}"
     return 0
   fi
 
-  echo -e "${RED}✗ Не удалось удалить legacy bare UDP/443 block${NC}"
+  echo -e "${RED}✗ Could not remove the legacy bare UDP/443 block${NC}"
   return 2
 }
 
@@ -277,7 +277,7 @@ run_migration() {
   # Step 1: backup BEFORE any mutation and keep this exact path for rollback.
   local rollback_config=""
   if ! backup_config "$marker_basename" rollback_config; then
-    echo -e "${RED}  ✗ Migration aborted: не удалось создать бэкап${NC}"
+    echo -e "${RED}  ✗ Migration aborted: could not create a backup${NC}"
     return 1
   fi
 
@@ -294,8 +294,8 @@ run_migration() {
         echo -e "${GREEN}  ✓ Migration applied: ${marker_basename}${NC}"
         return 0
       else
-        echo -e "${RED}  ✗ safe_restart_xray failed для ${description}${NC}"
-        echo -e "${YELLOW}    Маркер НЕ выставлен — config откачен (auto-rollback), миграция повторится${NC}"
+        echo -e "${RED}  ✗ safe_restart_xray failed for ${description}${NC}"
+        echo -e "${YELLOW}    Marker NOT set — config rolled back (auto-rollback), migration will retry${NC}"
         return 2
       fi
       ;;
@@ -310,7 +310,7 @@ run_migration() {
     *)
       # fn вернула ≥2 — реальная ошибка (НЕ no-op).
       echo -e "${RED}  ✗ Migration fn '$fn_name' returned $fn_rc${NC}"
-      echo -e "${YELLOW}    Маркер НЕ выставлен — миграция повторится при следующем запуске${NC}"
+      echo -e "${YELLOW}    Marker NOT set — migration will retry on the next run${NC}"
       return 1
       ;;
   esac
@@ -353,20 +353,20 @@ migrate_client_fingerprint_state_2026() {
   _remove_ignored_reality_server_fingerprints "$CONFIG_FILE" || clean_rc=$?
   if [[ "$clean_rc" -ge 2 ]]; then
     _restore_config_backup "$rollback_config" || true
-    echo -e "${RED}  ✗ Не удалось удалить устаревший server-side fingerprint${NC}"
+    echo -e "${RED}  ✗ Could not remove the obsolete server-side fingerprint${NC}"
     return 1
   fi
 
   if ! touch "$marker"; then
     _restore_config_backup "$rollback_config" || true
-    echo -e "${RED}  ✗ Не удалось записать migration marker: $marker${NC}"
+    echo -e "${RED}  ✗ Could not write the migration marker: $marker${NC}"
     return 1
   fi
   chown xray:xray "$marker" 2>/dev/null || true
 
   if [[ "$clean_rc" -eq 0 ]]; then
     fix_xray_permissions
-    echo -e "${GREEN}  ✓ Fingerprint переведён в client-only режим (профили сохранены)${NC}"
+    echo -e "${GREEN}  ✓ Fingerprint switched to client-only mode (profiles preserved)${NC}"
   fi
   return 0
 }
@@ -375,7 +375,7 @@ migrate_transport_profile_metadata() {
   local migrated=0
   local profile_file
 
-  echo -e "${CYAN}Проверка transport metadata профилей...${NC}"
+  echo -e "${CYAN}Checking profile transport metadata...${NC}"
   # backup_config удалён: централизован в run_migration (Phase 4 refactor, REQ-D07)
 
   for profile_file in "$PROFILES_DIR"/*.json; do
@@ -409,10 +409,10 @@ migrate_transport_profile_metadata() {
   # EXPLICIT return: 0=changed (restart нужен), 1=no-op (нечего мигрировать)
   # Раньше всегда return 0 — принудительный restart даже когда migrated==0
   if [[ $migrated -gt 0 ]]; then
-    echo -e "${GREEN}✓ Transport metadata backfill: $migrated профилей${NC}"
+    echo -e "${GREEN}✓ Transport metadata backfill: $migrated profiles${NC}"
     return 0
   else
-    echo -e "${GREEN}✓ Transport metadata backfill не требуется${NC}"
+    echo -e "${GREEN}✓ Transport metadata backfill not needed${NC}"
     return 1
   fi
 }
@@ -421,7 +421,7 @@ migrate_transport_profile_metadata() {
 migrate_xhttp_profiles() {
   local migrated=0
 
-  echo -e "${CYAN}Проверка XHTTP профилей для миграции...${NC}"
+  echo -e "${CYAN}Checking XHTTP profiles for migration...${NC}"
   # backup_config удалён: централизован в run_migration (Phase 4 refactor, REQ-D07)
 
   for profile_file in "$PROFILES_DIR"/*.json; do
@@ -437,7 +437,7 @@ migrate_xhttp_profiles() {
       "$CONFIG_FILE" 2>/dev/null)
 
     if [[ "$has_host" == "true" ]]; then
-      echo -e "${YELLOW}  → Удаляю XHTTP Host check: $(basename "$profile_file" .json)${NC}"
+      echo -e "${YELLOW}  → Removing XHTTP Host check: $(basename "$profile_file" .json)${NC}"
 
       if safe_jq_write --argjson port "$port" '
         (.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings) |= del(.host)
@@ -450,10 +450,10 @@ migrate_xhttp_profiles() {
   # safe_restart_xray удалён: вызывается run_migration после fn (Phase 4 refactor)
   # EXPLICIT return: 0=changed (restart нужен), 1=no-op (нечего мигрировать)
   if [[ $migrated -gt 0 ]]; then
-    echo -e "${GREEN}✓ Удалён XHTTP Host check у $migrated профилей${NC}"
+    echo -e "${GREEN}✓ Removed XHTTP Host check from $migrated profiles${NC}"
     return 0   # changed → run_migration вызовет safe_restart_xray
   else
-    echo -e "${GREEN}✓ Миграция XHTTP профилей не требуется${NC}"
+    echo -e "${GREEN}✓ XHTTP profile migration not needed${NC}"
     return 1   # no-op → run_migration touch-ит marker без restart
   fi
 }
@@ -462,11 +462,11 @@ _migrate_xhttp_drop_host_2026() {
   local count
   count=$(jq '[.inbounds[]? | select(.streamSettings.network == "xhttp" and (.streamSettings.xhttpSettings | has("host")))] | length' "$CONFIG_FILE" 2>/dev/null || echo 0)
   if [[ ! "$count" =~ ^[0-9]+$ || "$count" -eq 0 ]]; then
-    echo -e "${GREEN}✓ XHTTP Host check уже отсутствует${NC}"
+    echo -e "${GREEN}✓ XHTTP Host check already absent${NC}"
     return 1
   fi
 
-  echo -e "${YELLOW}  → Удаляю xhttpSettings.host у ${count} XHTTP inbound(ов)${NC}"
+  echo -e "${YELLOW}  → Removing xhttpSettings.host from ${count} XHTTP inbound(s)${NC}"
   if safe_jq_write '
     .inbounds |= map(
       if .streamSettings.network == "xhttp" and (.streamSettings.xhttpSettings | type == "object") then
@@ -476,18 +476,18 @@ _migrate_xhttp_drop_host_2026() {
       end
     )
   ' "$CONFIG_FILE"; then
-    echo -e "${GREEN}✓ XHTTP Host check удалён${NC}"
+    echo -e "${GREEN}✓ XHTTP Host check removed${NC}"
     return 0
   fi
 
-  echo -e "${RED}✗ Не удалось удалить XHTTP Host check${NC}"
+  echo -e "${RED}✗ Could not remove the XHTTP Host check${NC}"
   return 2
 }
 
 _migrate_xhttp_path_sync_2026() {
   local migrated=0 failed=0 profile_file
 
-  echo -e "${CYAN}Проверка XHTTP path между profiles и config.json...${NC}"
+  echo -e "${CYAN}Checking XHTTP path between profiles and config.json...${NC}"
 
   for profile_file in "$PROFILES_DIR"/*.json; do
     [[ -f "$profile_file" ]] || continue
@@ -504,7 +504,7 @@ _migrate_xhttp_path_sync_2026() {
       ' "$CONFIG_FILE" 2>/dev/null | head -1)
 
       if [[ -z "$current_path" || "$current_path" == "null" ]]; then
-        echo -e "${YELLOW}  → Восстанавливаю XHTTP path на порту $port: $path${NC}"
+        echo -e "${YELLOW}  → Restoring XHTTP path on port $port: $path${NC}"
         if safe_jq_write --argjson port "$port" --arg path "$path" '
           (.inbounds[]? | select(.port == $port and .streamSettings.network == "xhttp") | .streamSettings.xhttpSettings.path) = $path
         ' "$CONFIG_FILE"; then
@@ -529,15 +529,15 @@ _migrate_xhttp_path_sync_2026() {
   done
 
   if [[ $failed -gt 0 ]]; then
-    echo -e "${RED}✗ XHTTP path sync: $failed ошибок, $migrated исправлено${NC}"
+    echo -e "${RED}✗ XHTTP path sync: $failed errors, $migrated fixed${NC}"
     return 2
   fi
   if [[ $migrated -gt 0 ]]; then
-    echo -e "${GREEN}✓ XHTTP path sync: исправлено $migrated inbound(ов)${NC}"
+    echo -e "${GREEN}✓ XHTTP path sync: fixed $migrated inbound(s)${NC}"
     return 0
   fi
 
-  echo -e "${GREEN}✓ XHTTP path sync не требуется${NC}"
+  echo -e "${GREEN}✓ XHTTP path sync not needed${NC}"
   return 1
 }
 
@@ -555,26 +555,26 @@ _migrate_xhttp_reality_stream_one_2026() {
   ' "$CONFIG_FILE" 2>/dev/null)
 
   if [[ -z "$affected" ]]; then
-    echo -e "${GREEN}✓ XHTTP Reality уже использует stream-one${NC}"
+    echo -e "${GREEN}✓ XHTTP Reality already uses stream-one${NC}"
     return 1
   fi
 
-  echo -e "${YELLOW}  → Переключаю XHTTP Reality mode на stream-one: ${affected//$'\n'/, }${NC}"
+  echo -e "${YELLOW}  → Switching XHTTP Reality mode to stream-one: ${affected//$'\n'/, }${NC}"
   if safe_jq_write '
     (.inbounds[]? | select(.streamSettings.network == "xhttp" and .streamSettings.security == "reality") | .streamSettings.xhttpSettings.mode) = "stream-one"
   ' "$CONFIG_FILE"; then
-    echo -e "${GREEN}✓ XHTTP Reality mode=stream-one применён${NC}"
+    echo -e "${GREEN}✓ XHTTP Reality mode=stream-one applied${NC}"
     return 0
   fi
 
-  echo -e "${RED}✗ Не удалось переключить XHTTP Reality на stream-one${NC}"
+  echo -e "${RED}✗ Could not switch XHTTP Reality to stream-one${NC}"
   return 2
 }
 
 # Migration function for routing configuration (v2.0)
 # Adds default "direct" rule if missing
 migrate_routing_config() {
-  echo -e "${CYAN}Проверка конфигурации маршрутизации...${NC}"
+  echo -e "${CYAN}Checking the routing configuration...${NC}"
   # backup_config удалён: централизован в run_migration (Phase 4 refactor, REQ-D07)
 
   # Check if default direct rule exists
@@ -583,21 +583,21 @@ migrate_routing_config() {
   ' "$CONFIG_FILE" 2>/dev/null)
 
   if [[ -z "$has_direct_rule" ]]; then
-    echo -e "${YELLOW}  → Добавляю default direct rule...${NC}"
+    echo -e "${YELLOW}  → Adding the default direct rule...${NC}"
 
     if safe_jq_write '.routing.rules += [{
       "type": "field",
       "network": "tcp,udp",
       "outboundTag": "direct"
     }]' "$CONFIG_FILE"; then
-      echo -e "${GREEN}  ✓ Маршрутизация исправлена${NC}"
+      echo -e "${GREEN}  ✓ Routing fixed${NC}"
       return 0  # Needs restart
     else
-      echo -e "${RED}  ✗ Ошибка миграции маршрутизации${NC}"
+      echo -e "${RED}  ✗ Routing migration error${NC}"
       return 1
     fi
   else
-    echo -e "${GREEN}✓ Маршрутизация в порядке${NC}"
+    echo -e "${GREEN}✓ Routing is fine${NC}"
     return 1  # No restart needed
   fi
 }
@@ -606,7 +606,7 @@ migrate_routing_config() {
 # Fixes sing-box compatibility issues
 # NOTE: extra settings preserved — they are critical for DPI bypass
 migrate_xhttp_mode() {
-  echo -e "${CYAN}Проверка XHTTP mode для миграции...${NC}"
+  echo -e "${CYAN}Checking XHTTP mode for migration...${NC}"
   # backup_config удалён: централизован в run_migration (Phase 4 refactor, REQ-D07)
 
   local migrated=0
@@ -622,7 +622,7 @@ migrate_xhttp_mode() {
       "$CONFIG_FILE" 2>/dev/null)
 
     if [[ "$current_mode" == "stream" ]]; then
-      echo -e "${YELLOW}  → Миграция XHTTP mode на порту $port: stream → auto${NC}"
+      echo -e "${YELLOW}  → Migrating XHTTP mode on port $port: stream → auto${NC}"
 
       if safe_jq_write --argjson port "$port" '
         (.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings.mode) = "auto"
@@ -633,10 +633,10 @@ migrate_xhttp_mode() {
   done
 
   if [[ $migrated -gt 0 ]]; then
-    echo -e "${GREEN}✓ Мигрировано $migrated XHTTP inbound(ов)${NC}"
+    echo -e "${GREEN}✓ Migrated $migrated XHTTP inbound(s)${NC}"
     return 0  # Needs restart
   else
-    echo -e "${GREEN}✓ XHTTP mode миграция не требуется${NC}"
+    echo -e "${GREEN}✓ XHTTP mode migration not needed${NC}"
     return 1  # No restart needed
   fi
 }
@@ -644,7 +644,7 @@ migrate_xhttp_mode() {
 # Migration: restore XHTTP extra settings wiped by previous migrate_xhttp_mode bug
 # Without extra (padding, xmux, post limits) XHTTP is easily detected by DPI
 migrate_xhttp_extra_restore() {
-  echo -e "${CYAN}Проверка XHTTP extra для восстановления...${NC}"
+  echo -e "${CYAN}Checking XHTTP extra for restoration...${NC}"
   # backup_config удалён: централизован в run_migration (Phase 4 refactor, REQ-D07)
 
   local restored=0
@@ -660,7 +660,7 @@ migrate_xhttp_extra_restore() {
       "$CONFIG_FILE" 2>/dev/null)
 
     if [[ "$extra_keys" == "0" ]] || [[ -z "$extra_keys" ]]; then
-      echo -e "${YELLOW}  → Восстановление XHTTP extra на порту $port${NC}"
+      echo -e "${YELLOW}  → Restoring XHTTP extra on port $port${NC}"
 
       if safe_jq_write --argjson port "$port" '
         (.inbounds[] | select(.port == $port) | .streamSettings.xhttpSettings.extra) = {
@@ -680,10 +680,10 @@ migrate_xhttp_extra_restore() {
   done
 
   if [[ $restored -gt 0 ]]; then
-    echo -e "${GREEN}✓ Восстановлено extra для $restored XHTTP inbound(ов)${NC}"
+    echo -e "${GREEN}✓ Restored extra for $restored XHTTP inbound(s)${NC}"
     return 0  # Needs restart
   else
-    echo -e "${GREEN}✓ XHTTP extra в порядке${NC}"
+    echo -e "${GREEN}✓ XHTTP extra is fine${NC}"
     return 1  # No restart needed
   fi
 }
@@ -692,18 +692,18 @@ migrate_xhttp_extra_restore() {
 # Applies DNS DoH Local, freedom UseIPv4, sniffing routeOnly,
 # access log none, policy bufferSize, and BitTorrent blocking
 migrate_config_optimization() {
-  echo -e "${CYAN}Оптимизация конфигурации...${NC}"
+  echo -e "${CYAN}Optimizing the configuration...${NC}"
   # backup_config удалён: централизован в run_migration (Phase 4 refactor, REQ-D07)
 
   local changed=false
 
   local current_dns=$(jq -r '.dns.servers[0] // ""' "$CONFIG_FILE" 2>/dev/null)
   if [[ "$current_dns" == "127.0.0.1" ]]; then
-    echo -e "${GREEN}  ✓ DNS -> 127.0.0.1 (AdGuard Home) сохранён${NC}"
+    echo -e "${GREEN}  ✓ DNS -> 127.0.0.1 (AdGuard Home) preserved${NC}"
   elif [[ "$current_dns" == "https+local://1.1.1.1/dns-query" ]]; then
-    echo -e "${GREEN}  ✓ DNS уже оптимизирован${NC}"
+    echo -e "${GREEN}  ✓ DNS already optimized${NC}"
   else
-    echo -e "${YELLOW}  → DNS: миграция на DoH Local${NC}"
+    echo -e "${YELLOW}  → DNS: migrating to Local DoH${NC}"
     if safe_jq_write '.dns = {
       "servers": [
         "https+local://1.1.1.1/dns-query",
@@ -712,61 +712,61 @@ migrate_config_optimization() {
       "queryStrategy": "UseIPv4",
       "disableCache": false
     }' "$CONFIG_FILE"; then
-      echo -e "${GREEN}  ✓ DNS переведён на DoH Local${NC}"
+      echo -e "${GREEN}  ✓ DNS switched to Local DoH${NC}"
       changed=true
     else
-      echo -e "${RED}  ✗ Ошибка миграции DNS${NC}"
+      echo -e "${RED}  ✗ DNS migration error${NC}"
     fi
   fi
 
   local freedom_strategy=$(jq -r '.outbounds[] | select(.protocol == "freedom") | .settings.domainStrategy // "none"' "$CONFIG_FILE" 2>/dev/null)
   if [[ "$freedom_strategy" == "UseIPv4" ]]; then
-    echo -e "${GREEN}  ✓ Freedom уже использует UseIPv4${NC}"
+    echo -e "${GREEN}  ✓ Freedom already uses UseIPv4${NC}"
   else
-    echo -e "${YELLOW}  → Freedom: добавляю UseIPv4${NC}"
+    echo -e "${YELLOW}  → Freedom: adding UseIPv4${NC}"
     if safe_jq_write '
       (.outbounds[] | select(.protocol == "freedom")).settings.domainStrategy = "UseIPv4"
     ' "$CONFIG_FILE"; then
-      echo -e "${GREEN}  ✓ Freedom переведён на UseIPv4${NC}"
+      echo -e "${GREEN}  ✓ Freedom switched to UseIPv4${NC}"
       changed=true
     else
-      echo -e "${RED}  ✗ Ошибка обновления Freedom outbound${NC}"
+      echo -e "${RED}  ✗ Error updating the Freedom outbound${NC}"
     fi
   fi
 
   local route_only_missing=$(jq '[.inbounds[] | select(.sniffing.routeOnly != true)] | length' "$CONFIG_FILE" 2>/dev/null)
   if [[ "$route_only_missing" -gt 0 ]]; then
-    echo -e "${YELLOW}  → Sniffing: включаю routeOnly для $route_only_missing inbound(ов)${NC}"
+    echo -e "${YELLOW}  → Sniffing: enabling routeOnly for $route_only_missing inbound(s)${NC}"
     if safe_jq_write '
       .inbounds[] |= (if .sniffing then .sniffing.routeOnly = true else . end)
     ' "$CONFIG_FILE"; then
-      echo -e "${GREEN}  ✓ Sniffing routeOnly включён${NC}"
+      echo -e "${GREEN}  ✓ Sniffing routeOnly enabled${NC}"
       changed=true
     else
-      echo -e "${RED}  ✗ Ошибка включения sniffing routeOnly${NC}"
+      echo -e "${RED}  ✗ Error enabling sniffing routeOnly${NC}"
     fi
   else
-    echo -e "${GREEN}  ✓ Sniffing routeOnly уже включён${NC}"
+    echo -e "${GREEN}  ✓ Sniffing routeOnly already enabled${NC}"
   fi
 
   local access_log=$(jq -r '.log.access // "not_set"' "$CONFIG_FILE" 2>/dev/null)
   if [[ "$access_log" == "none" ]]; then
-    echo -e "${GREEN}  ✓ Access log уже отключён${NC}"
+    echo -e "${GREEN}  ✓ Access log already disabled${NC}"
   else
-    echo -e "${YELLOW}  → Логирование: отключаю access log${NC}"
+    echo -e "${YELLOW}  → Logging: disabling access log${NC}"
     if safe_jq_write '.log.access = "none"' "$CONFIG_FILE"; then
-      echo -e "${GREEN}  ✓ Access log отключён${NC}"
+      echo -e "${GREEN}  ✓ Access log disabled${NC}"
       changed=true
     else
-      echo -e "${RED}  ✗ Ошибка отключения access log${NC}"
+      echo -e "${RED}  ✗ Error disabling the access log${NC}"
     fi
   fi
 
   local policy_section=$(jq '.policy // empty' "$CONFIG_FILE" 2>/dev/null)
   if [[ -n "$policy_section" ]]; then
-    echo -e "${GREEN}  ✓ Policy уже настроен${NC}"
+    echo -e "${GREEN}  ✓ Policy already configured${NC}"
   else
-    echo -e "${YELLOW}  → Policy: добавляю bufferSize=4${NC}"
+    echo -e "${YELLOW}  → Policy: adding bufferSize=4${NC}"
     if safe_jq_write '.policy = {
       "levels": {
         "0": {
@@ -778,25 +778,25 @@ migrate_config_optimization() {
         }
       }
     }' "$CONFIG_FILE"; then
-      echo -e "${GREEN}  ✓ Policy добавлен (bufferSize=4)${NC}"
+      echo -e "${GREEN}  ✓ Policy added (bufferSize=4)${NC}"
       changed=true
     else
-      echo -e "${RED}  ✗ Ошибка добавления policy${NC}"
+      echo -e "${RED}  ✗ Error adding policy${NC}"
     fi
   fi
 
   local bittorrent_rule_count=$(jq -r '[.routing.rules[] | select(.protocol != null) | .protocol[] | select(. == "bittorrent")] | length' "$CONFIG_FILE" 2>/dev/null)
   if [[ -n "$bittorrent_rule_count" ]] && [[ "$bittorrent_rule_count" != "0" ]]; then
-    echo -e "${GREEN}  ✓ Блокировка BitTorrent уже настроена${NC}"
+    echo -e "${GREEN}  ✓ BitTorrent blocking already configured${NC}"
   else
-    echo -e "${YELLOW}  → Маршрутизация: блокирую BitTorrent${NC}"
+    echo -e "${YELLOW}  → Routing: blocking BitTorrent${NC}"
     if safe_jq_write '
       .routing.rules |= (.[:-1] + [{"type":"field","protocol":["bittorrent"],"outboundTag":"block"}] + .[-1:])
     ' "$CONFIG_FILE"; then
-      echo -e "${GREEN}  ✓ BitTorrent заблокирован${NC}"
+      echo -e "${GREEN}  ✓ BitTorrent blocked${NC}"
       changed=true
     else
-      echo -e "${RED}  ✗ Ошибка добавления правила BitTorrent${NC}"
+      echo -e "${RED}  ✗ Error adding the BitTorrent rule${NC}"
     fi
   fi
 
@@ -819,7 +819,7 @@ migrate_config_optimization() {
 #   1 — no-op, все XHTTP inbound'ы уже корректны (или их нет)
 #   ≥2 — fail (safe_jq_write провалился где-то)
 migrate_xmux_explicit_2026() {
-  echo -e "${CYAN}Проверка XHTTP inbounds для explicit xmux...${NC}"
+  echo -e "${CYAN}Checking XHTTP inbounds for explicit xmux...${NC}"
   # backup_config удален: централизован в run_migration (Phase 4 REQ-D07)
 
   local migrated=0 skipped=0 failed=0
@@ -831,7 +831,7 @@ migrate_xmux_explicit_2026() {
 
   # Edge case: ни одного XHTTP inbound'а — миграция не нужна, return 1.
   if [[ -z "$xhttp_ports" ]]; then
-    echo -e "${GREEN}✓ XHTTP inbound'ов не найдено, миграция не требуется${NC}"
+    echo -e "${GREEN}✓ No XHTTP inbounds found, migration not needed${NC}"
     return 1
   fi
 
@@ -847,7 +847,7 @@ migrate_xmux_explicit_2026() {
     ' "$CONFIG_FILE" 2>/dev/null)
 
     if [[ "$has_xmux" == "true" ]]; then
-      echo -e "${CYAN}  → Порт $port: xmux уже есть, skip${NC}"
+      echo -e "${CYAN}  → Port $port: xmux already present, skip${NC}"
       ((skipped++))
       continue
     fi
@@ -860,10 +860,10 @@ migrate_xmux_explicit_2026() {
     ' "$CONFIG_FILE" 2>/dev/null)
 
     if [[ "$has_max_connections" == "true" ]]; then
-      echo -e "${YELLOW}  → Порт $port: удаляю deprecated max_connections${NC}"
+      echo -e "${YELLOW}  → Port $port: removing deprecated max_connections${NC}"
     fi
 
-    echo -e "${YELLOW}  → Порт $port: добавляю explicit xmux block${NC}"
+    echo -e "${YELLOW}  → Port $port: adding explicit xmux block${NC}"
 
     # Atomic transformation через safe_jq_write (Phase 4 helper).
     # |= update-в-place на subtree extra.
@@ -884,28 +884,28 @@ migrate_xmux_explicit_2026() {
     ' "$CONFIG_FILE"; then
       ((migrated++))
     else
-      echo -e "${RED}  ✗ safe_jq_write провалился для порта $port${NC}"
+      echo -e "${RED}  ✗ safe_jq_write failed for port $port${NC}"
       ((failed++))
     fi
   done
 
   # Three-valued return:
   if [[ $failed -gt 0 ]]; then
-    echo -e "${RED}✗ xmux explicit миграция: $failed inbound(ов) с ошибкой, $migrated успешно, $skipped skip${NC}"
+    echo -e "${RED}✗ xmux explicit migration: $failed inbound(s) failed, $migrated succeeded, $skipped skipped${NC}"
     return 2  # fail — marker НЕ создается, повторится при следующем запуске
   fi
 
   if [[ $migrated -gt 0 ]]; then
-    echo -e "${GREEN}✓ xmux explicit добавлен для $migrated XHTTP inbound(ов), skip $skipped${NC}"
+    echo -e "${GREEN}✓ xmux explicit added for $migrated XHTTP inbound(s), $skipped skipped${NC}"
     return 0  # changed → restart needed
   else
-    echo -e "${GREEN}✓ xmux explicit миграция не требуется (все $skipped XHTTP уже корректны)${NC}"
+    echo -e "${GREEN}✓ xmux explicit migration not needed (all $skipped XHTTP already correct)${NC}"
     return 1  # no-op → marker создается, restart НЕ нужен
   fi
 }
 
 _migrate_xhttp_xmux_throughput_2026() {
-  echo -e "${CYAN}Проверка XHTTP XMUX throughput-профиля...${NC}"
+  echo -e "${CYAN}Checking XHTTP XMUX throughput profile...${NC}"
 
   local affected
   affected=$(jq -r '
@@ -919,11 +919,11 @@ _migrate_xhttp_xmux_throughput_2026() {
   ' "$CONFIG_FILE" 2>/dev/null)
 
   if [[ -z "$affected" ]]; then
-    echo -e "${GREEN}✓ XHTTP XMUX throughput-профиль уже нормальный${NC}"
+    echo -e "${GREEN}✓ XHTTP XMUX throughput profile already normal${NC}"
     return 1
   fi
 
-  echo -e "${YELLOW}  → Обновляю XHTTP XMUX на портах: ${affected//$'\n'/, }${NC}"
+  echo -e "${YELLOW}  → Updating XHTTP XMUX on ports: ${affected//$'\n'/, }${NC}"
   if safe_jq_write '
     (.inbounds[] | select(.streamSettings.network == "xhttp") | .streamSettings.xhttpSettings.extra.xmux) |= (
       (. // {})
@@ -936,7 +936,7 @@ _migrate_xhttp_xmux_throughput_2026() {
     return 0
   fi
 
-  echo -e "${RED}✗ Не удалось обновить XHTTP XMUX throughput-профиль${NC}"
+  echo -e "${RED}✗ Could not update the XHTTP XMUX throughput profile${NC}"
   return 2
 }
 
@@ -950,13 +950,13 @@ _migrate_xhttp_xmux_throughput_2026() {
 #   1 — done (ключи уже есть ИЛИ успешно сгенерированы — в обоих случаях marker ставится)
 #   ≥2 — fail (Xray-core < 25.9.5 ИЛИ vlessenc ошибка ИЛИ парсер не справился)
 _migrate_mlkem_keys() {
-  echo -e "${CYAN}Проверка наличия PQ ключей VLESS Encryption...${NC}"
+  echo -e "${CYAN}Checking for VLESS Encryption PQ keys...${NC}"
 
   # Уже есть оба файла + они валидны? — no-op.
   if [[ -f "$VLESS_DECRYPTION_FILE" ]] && [[ -f "$VLESS_ENCRYPTION_FILE" ]] && \
      grep -q '^mlkem768x25519plus\.' "$VLESS_DECRYPTION_FILE" 2>/dev/null && \
      grep -q '^mlkem768x25519plus\.' "$VLESS_ENCRYPTION_FILE" 2>/dev/null; then
-    echo -e "${GREEN}✓ PQ ключи уже сгенерированы${NC}"
+    echo -e "${GREEN}✓ PQ keys already generated${NC}"
     return 1
   fi
 
@@ -965,8 +965,8 @@ _migrate_mlkem_keys() {
   local xray_ver_full xray_major xray_minor xray_patch
   xray_ver_full=$(/usr/local/bin/xray version 2>/dev/null | grep -oE 'Xray [0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
   if [[ -z "$xray_ver_full" ]]; then
-    echo -e "${RED}✗ Не удалось определить версию Xray-core${NC}"
-    echo -e "${YELLOW}  Запустите: /usr/local/bin/xray version${NC}"
+    echo -e "${RED}✗ Could not determine the Xray-core version${NC}"
+    echo -e "${YELLOW}  Run: /usr/local/bin/xray version${NC}"
     return 2
   fi
   xray_major=$(echo "$xray_ver_full" | cut -d. -f1)
@@ -975,14 +975,14 @@ _migrate_mlkem_keys() {
   if [[ "$xray_major" -lt 25 ]] || \
      { [[ "$xray_major" -eq 25 ]] && [[ "$xray_minor" -lt 9 ]]; } || \
      { [[ "$xray_major" -eq 25 ]] && [[ "$xray_minor" -eq 9 ]] && [[ "$xray_patch" -lt 5 ]]; }; then
-    echo -e "${RED}✗ Xray-core $xray_ver_full < 25.9.5 — vlessenc недоступен${NC}"
-    echo -e "${YELLOW}  Обновите Xray-core: sudo xraytailscale update${NC}"
-    echo -e "${YELLOW}  После обновления миграция повторится автоматически${NC}"
+    echo -e "${RED}✗ Xray-core $xray_ver_full < 25.9.5 — vlessenc unavailable${NC}"
+    echo -e "${YELLOW}  Update Xray-core: sudo xraytailscale update${NC}"
+    echo -e "${YELLOW}  The migration will retry automatically after the update${NC}"
     return 2
   fi
 
   # Запуск vlessenc (тот же 3-layer парсер что в install.sh — keep in sync).
-  echo -e "${CYAN}  → Запуск xray vlessenc${NC}"
+  echo -e "${CYAN}  → Running xray vlessenc${NC}"
   local vlessenc_output vlessenc_rc
   vlessenc_output=$(/usr/local/bin/xray vlessenc 2>&1)
   vlessenc_rc=$?
@@ -1010,8 +1010,8 @@ _migrate_mlkem_keys() {
   fi
 
   if [[ ! "$decryption" =~ ^mlkem768x25519plus\. ]] || [[ ! "$encryption" =~ ^mlkem768x25519plus\. ]]; then
-    echo -e "${RED}✗ Не удалось распарсить mlkem768x25519plus ключи${NC}"
-    echo -e "${YELLOW}Полный вывод vlessenc:${NC}"; echo "$vlessenc_output"
+    echo -e "${RED}✗ Could not parse the mlkem768x25519plus keys${NC}"
+    echo -e "${YELLOW}Full vlessenc output:${NC}"; echo "$vlessenc_output"
     return 2
   fi
 
@@ -1020,7 +1020,7 @@ _migrate_mlkem_keys() {
   chmod 600 "$VLESS_DECRYPTION_FILE" "$VLESS_ENCRYPTION_FILE"
   chown xray:xray "$VLESS_DECRYPTION_FILE" "$VLESS_ENCRYPTION_FILE" 2>/dev/null || true
 
-  echo -e "${GREEN}✓ PQ ключи сгенерированы (mlkem768x25519plus.native)${NC}"
+  echo -e "${GREEN}✓ PQ keys generated (mlkem768x25519plus.native)${NC}"
 
   # IMPORTANT: return 1, не 0. Config.json не мутировал — restart не нужен.
   # run_migration touch-нет marker без вызова safe_restart_xray.
@@ -1034,8 +1034,8 @@ _migrate_mlkem_keys() {
 # тот же паттерн pq_banner_shown).
 # Возвращает 1 (no-op/mark) — run_migration ставит маркер без safe_restart_xray.
 _migrate_xhttp_default_2026() {
-  echo -e "${CYAN}Маркируем default-template create_profile_menu как XHTTP+PQ...${NC}"
-  echo -e "${GREEN}✓ Default template обновлён в коде (REQ-A08: existing inbounds не тронуты)${NC}"
+  echo -e "${CYAN}Marking the create_profile_menu default template as XHTTP+PQ...${NC}"
+  echo -e "${GREEN}✓ Default template updated in code (REQ-A08: existing inbounds untouched)${NC}"
   return 1
 }
 
@@ -1065,14 +1065,14 @@ _migrate_pq_all_profiles_2026() {
   done < <(_list_legacy_pq_profile_names)
 
   if [[ ${#legacy_profiles[@]} -eq 0 ]]; then
-    echo -e "${GREEN}✓ Single-route legacy профилей для PQ-миграции не найдено${NC}"
+    echo -e "${GREEN}✓ No single-route legacy profiles found for PQ migration${NC}"
     return 1
   fi
 
   if [[ ! -f "$VLESS_DECRYPTION_FILE" ]] || [[ ! -f "$VLESS_ENCRYPTION_FILE" ]]; then
-    echo -e "${YELLOW}⚠ PQ-миграция отложена: не найдены ключи VLESS Encryption${NC}"
-    echo -e "${YELLOW}  Ожидаются: $VLESS_DECRYPTION_FILE и $VLESS_ENCRYPTION_FILE${NC}"
-    echo -e "${YELLOW}  Их должна сгенерировать миграция _migrate_mlkem_keys; config.json не изменён${NC}"
+    echo -e "${YELLOW}⚠ PQ migration deferred: VLESS Encryption keys not found${NC}"
+    echo -e "${YELLOW}  Expected: $VLESS_DECRYPTION_FILE and $VLESS_ENCRYPTION_FILE${NC}"
+    echo -e "${YELLOW}  They should be generated by the _migrate_mlkem_keys migration; config.json unchanged${NC}"
     return 1
   fi
 
@@ -1087,25 +1087,25 @@ _migrate_pq_all_profiles_2026() {
       continue
     fi
 
-    echo -e "${CYAN}  → PQ-миграция профиля '$profile_name'${NC}"
+    echo -e "${CYAN}  → PQ-migrating profile '$profile_name'${NC}"
     if _pq_upgrade_one_profile "$profile_name"; then
       ((ok += 1))
     else
-      echo -e "${RED}  ✗ Не удалось мигрировать профиль '$profile_name'${NC}"
+      echo -e "${RED}  ✗ Could not migrate profile '$profile_name'${NC}"
       ((fail += 1))
     fi
   done
 
   if [[ $fail -gt 0 ]]; then
-    echo -e "${RED}✗ PQ-миграция: успешно $ok, с ошибками $fail${NC}"
+    echo -e "${RED}✗ PQ migration: $ok succeeded, $fail failed${NC}"
     return 2
   fi
   if [[ $ok -gt 0 ]]; then
-    echo -e "${GREEN}✓ PQ-миграция завершена: обновлено профилей $ok${NC}"
+    echo -e "${GREEN}✓ PQ migration finished: $ok profiles updated${NC}"
     return 0
   fi
 
-  echo -e "${GREEN}✓ Все найденные профили уже обновлены${NC}"
+  echo -e "${GREEN}✓ All found profiles already updated${NC}"
   return 1
 }
 
@@ -1128,22 +1128,22 @@ _migrate_subscription_tokens_2026() {
     local new_token
     new_token=$(openssl rand -hex 16)
     if [[ ! "$new_token" =~ ^[a-f0-9]{32}$ ]]; then
-      echo -e "${RED}  ✗ openssl rand вернул некорректный токен для $(basename "$profile_file")${NC}"
+      echo -e "${RED}  ✗ openssl rand returned an invalid token for $(basename "$profile_file")${NC}"
       return 2
     fi
     if ! safe_jq_write --arg t "$new_token" '.sub_token = $t' "$profile_file"; then
-      echo -e "${RED}  ✗ safe_jq_write failed для $profile_file${NC}"
+      echo -e "${RED}  ✗ safe_jq_write failed for $profile_file${NC}"
       return 2
     fi
     chown xray:xray "$profile_file" 2>/dev/null || true
     chmod 644 "$profile_file" 2>/dev/null || true
-    echo -e "${GREEN}  ✓ sub_token сгенерирован для $(basename "$profile_file" .json)${NC}"
+    echo -e "${GREEN}  ✓ sub_token generated for $(basename "$profile_file" .json)${NC}"
     changed=1
   done
   # Возвращаем 1 даже при изменениях — config.json НЕ модифицирован, рестарт Xray не нужен.
   # run_migration на rc=1 ставит marker без safe_restart_xray. Это и нужно.
   if [[ $changed -eq 1 ]]; then
-    echo -e "${CYAN}  → sub_token backfill завершён (рестарт Xray не требуется)${NC}"
+    echo -e "${CYAN}  → sub_token backfill finished (no Xray restart needed)${NC}"
   fi
   return 1
 }
@@ -1195,7 +1195,7 @@ _migrate_sni_list_2026() {
 
   local tmp
   tmp=$(mktemp /tmp/sni-list.XXXXXX) || {
-    echo -e "${RED}  ✗ mktemp failed для SNI list${NC}"
+    echo -e "${RED}  ✗ mktemp failed for the SNI list${NC}"
     return 2
   }
 
@@ -1226,26 +1226,26 @@ _migrate_sni_list_2026() {
   chown xray:xray "$sni_file" 2>/dev/null || true
   chmod 644 "$sni_file" 2>/dev/null || true
 
-  echo -e "${GREEN}✓ SNI list 2026 обновлен: РФ-банки/логистика + github, apple/icloud удалены${NC}"
+  echo -e "${GREEN}✓ SNI list 2026 updated: RU banks/logistics + github, apple/icloud removed${NC}"
   return 0
 }
 
 _migrate_bypass_routing_2026() {
   echo ""
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}  BYPASS ROUTING (новое в v2.0)               ${NC}"
+  echo -e "${BLUE}  BYPASS ROUTING (new in v2.0)               ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
   echo ""
-  echo -e "${CYAN}Можно настроить чтобы определенные домены шли в обход VPN:${NC}"
-  echo -e "  ${YELLOW}-${NC} Steam (CDN, чат, community) — быстрее без VPN"
-  echo -e "  ${YELLOW}-${NC} РФ-сервисы (gosuslugi, nalog, mos) — обязательно с РФ-IP"
-  echo -e "  ${YELLOW}-${NC} РФ-банки (sber, vtb, tinkoff, alfa) — требуют РФ-IP"
-  echo -e "  ${YELLOW}-${NC} Маркетплейсы (ozon, wb, avito)"
-  echo -e "  ${YELLOW}-${NC} Yandex сервисы"
+  echo -e "${CYAN}You can route certain domains around the VPN:${NC}"
+  echo -e "  ${YELLOW}-${NC} Steam (CDN, chat, community) — faster without VPN"
+  echo -e "  ${YELLOW}-${NC} RU services (gosuslugi, nalog, mos) — must use a RU IP"
+  echo -e "  ${YELLOW}-${NC} RU banks (sber, vtb, tinkoff, alfa) — require a RU IP"
+  echo -e "  ${YELLOW}-${NC} Marketplaces (ozon, wb, avito)"
+  echo -e "  ${YELLOW}-${NC} Yandex services"
   echo ""
-  echo -e "${CYAN}Эти домены пойдут через freedom outbound (direct), не через VPN.${NC}"
+  echo -e "${CYAN}These domains will go through the freedom outbound (direct), not the VPN.${NC}"
   echo ""
-  echo -n -e "${YELLOW}Добавить дефолтные bypass-правила? [y/N]: ${NC}"
+  echo -n -e "${YELLOW}Add the default bypass rules? [y/N]: ${NC}"
 
   local ans
   read -r ans
@@ -1254,7 +1254,7 @@ _migrate_bypass_routing_2026() {
   if [[ "$ans" =~ ^[yYдД]$ ]]; then
     _bypass_apply_bundle
   else
-    echo -e "${CYAN}Пропущено. Можно настроить позже через «Дополнительно → Каскад / upstream → Обход VPN».${NC}"
+    echo -e "${CYAN}Skipped. You can set it up later via More → Cascade / upstream → VPN bypass.${NC}"
     sleep 1
   fi
 
@@ -1264,22 +1264,22 @@ _migrate_bypass_routing_2026() {
 
 _migrate_subhttp_multiroute_2026() {
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${CYAN}  → HAPP subscription не установлена — subhttp migration skip${NC}"
+    echo -e "${CYAN}  → HAPP subscription not installed — subhttp migration skip${NC}"
     return 1
   fi
 
-  echo -e "${CYAN}  → Регенерация subhttp.sh для multi-route подписок...${NC}"
+  echo -e "${CYAN}  → Regenerating subhttp.sh for multi-route subscriptions...${NC}"
   if ! install_subscription_server >/dev/null 2>&1; then
-    echo -e "${RED}  ✗ Не удалось регенерировать subhttp.sh${NC}"
+    echo -e "${RED}  ✗ Could not regenerate subhttp.sh${NC}"
     return 2
   fi
 
   if systemctl is-active --quiet xraytailscale-sub.service; then
     systemctl restart xraytailscale-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
+      echo -e "${RED}  ✗ Could not restart xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service restarted${NC}"
   fi
 
   return 1
@@ -1287,22 +1287,22 @@ _migrate_subhttp_multiroute_2026() {
 
 _migrate_subhttp_client_compat_2026() {
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${CYAN}  → HAPP subscription не установлена — client-compat migration skip${NC}"
+    echo -e "${CYAN}  → HAPP subscription not installed — client-compat migration skip${NC}"
     return 1
   fi
 
-  echo -e "${CYAN}  → Регенерация subhttp.sh для v2rayNG/v2rayN-compatible подписок...${NC}"
+  echo -e "${CYAN}  → Regenerating subhttp.sh for v2rayNG/v2rayN-compatible subscriptions...${NC}"
   if ! install_subscription_server >/dev/null 2>&1; then
-    echo -e "${RED}  ✗ Не удалось регенерировать subhttp.sh${NC}"
+    echo -e "${RED}  ✗ Could not regenerate subhttp.sh${NC}"
     return 2
   fi
 
   if systemctl is-active --quiet xraytailscale-sub.service; then
     systemctl restart xraytailscale-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
+      echo -e "${RED}  ✗ Could not restart xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service restarted${NC}"
   fi
 
   return 1
@@ -1310,22 +1310,22 @@ _migrate_subhttp_client_compat_2026() {
 
 _migrate_subhttp_no_default_happ_routing_2026() {
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${CYAN}  → HAPP subscription не установлена — no-default-routing migration skip${NC}"
+    echo -e "${CYAN}  → HAPP subscription not installed — no-default-routing migration skip${NC}"
     return 1
   fi
 
-  echo -e "${CYAN}  → Регенерация subhttp.sh без default HAPP routing profile...${NC}"
+  echo -e "${CYAN}  → Regenerating subhttp.sh without the default HAPP routing profile...${NC}"
   if ! install_subscription_server >/dev/null 2>&1; then
-    echo -e "${RED}  ✗ Не удалось регенерировать subhttp.sh${NC}"
+    echo -e "${RED}  ✗ Could not regenerate subhttp.sh${NC}"
     return 2
   fi
 
   if systemctl is-active --quiet xraytailscale-sub.service; then
     systemctl restart xraytailscale-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
+      echo -e "${RED}  ✗ Could not restart xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service restarted${NC}"
   fi
 
   return 1
@@ -1333,22 +1333,22 @@ _migrate_subhttp_no_default_happ_routing_2026() {
 
 _migrate_subhttp_stale_profiles_410_2026() {
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${CYAN}  → HAPP subscription не установлена — stale-profile migration skip${NC}"
+    echo -e "${CYAN}  → HAPP subscription not installed — stale-profile migration skip${NC}"
     return 1
   fi
 
-  echo -e "${CYAN}  → Регенерация subhttp.sh для stale profile diagnostics...${NC}"
+  echo -e "${CYAN}  → Regenerating subhttp.sh for stale profile diagnostics...${NC}"
   if ! install_subscription_server >/dev/null 2>&1; then
-    echo -e "${RED}  ✗ Не удалось регенерировать subhttp.sh${NC}"
+    echo -e "${RED}  ✗ Could not regenerate subhttp.sh${NC}"
     return 2
   fi
 
   if systemctl is-active --quiet xraytailscale-sub.service; then
     systemctl restart xraytailscale-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
+      echo -e "${RED}  ✗ Could not restart xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service restarted${NC}"
   fi
 
   return 1
@@ -1356,51 +1356,51 @@ _migrate_subhttp_stale_profiles_410_2026() {
 
 _migrate_subhttp_happ_xhttp_compat_2026() {
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${CYAN}  → HAPP subscription не установлена — HAPP XHTTP compatibility migration skip${NC}"
+    echo -e "${CYAN}  → HAPP subscription not installed — HAPP XHTTP compatibility migration skip${NC}"
     return 1
   fi
 
-  echo -e "${CYAN}  → Регенерация subhttp.sh для HAPP XHTTP compatibility...${NC}"
+  echo -e "${CYAN}  → Regenerating subhttp.sh for HAPP XHTTP compatibility...${NC}"
   if ! install_subscription_server >/dev/null 2>&1; then
-    echo -e "${RED}  ✗ Не удалось регенерировать subhttp.sh${NC}"
+    echo -e "${RED}  ✗ Could not regenerate subhttp.sh${NC}"
     return 2
   fi
 
   if systemctl is-active --quiet xraytailscale-sub.service; then
     systemctl restart xraytailscale-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
+      echo -e "${RED}  ✗ Could not restart xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service restarted${NC}"
   fi
 
   return 1
 }
 
 _migrate_happ_legacy_xhttp_route_2026() {
-  echo -e "${CYAN}  → HAPP больше не добавляет маршруты в существующие профили автоматически${NC}"
-  echo -e "${CYAN}    Быстрый HAPP-flow создаёт отдельный multi-route профиль; ручной контроль — через 'Создать профиль'.${NC}"
+  echo -e "${CYAN}  → HAPP no longer adds routes to existing profiles automatically${NC}"
+  echo -e "${CYAN}    The quick HAPP flow creates a separate multi-route profile; manual control via 'Create profile'.${NC}"
   return 1
 }
 
 _migrate_subhttp_happ_legacy_xhttp_2026() {
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${CYAN}  → HAPP subscription не установлена — legacy-XHTTP subscription migration skip${NC}"
+    echo -e "${CYAN}  → HAPP subscription not installed — legacy-XHTTP subscription migration skip${NC}"
     return 1
   fi
 
-  echo -e "${CYAN}  → Регенерация subhttp.sh с приоритетом legacy XHTTP для HAPP...${NC}"
+  echo -e "${CYAN}  → Regenerating subhttp.sh with legacy XHTTP priority for HAPP...${NC}"
   if ! install_subscription_server >/dev/null 2>&1; then
-    echo -e "${RED}  ✗ Не удалось регенерировать subhttp.sh${NC}"
+    echo -e "${RED}  ✗ Could not regenerate subhttp.sh${NC}"
     return 2
   fi
 
   if systemctl is-active --quiet xraytailscale-sub.service; then
     systemctl restart xraytailscale-sub.service || {
-      echo -e "${RED}  ✗ Не удалось перезапустить xraytailscale-sub.service${NC}"
+      echo -e "${RED}  ✗ Could not restart xraytailscale-sub.service${NC}"
       return 2
     }
-    echo -e "${GREEN}  ✓ xraytailscale-sub.service перезапущен${NC}"
+    echo -e "${GREEN}  ✓ xraytailscale-sub.service restarted${NC}"
   fi
 
   return 1
