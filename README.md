@@ -70,11 +70,11 @@ The manager adapts to the server state — you no longer pick from a 16-item lis
 - **Configured server** → the **status screen**:
 
 ```text
-  1) Добавить пользователя
-  2) Показать ссылки / QR
-  3) Диагностика и починка
+  1) Add user
+  2) Show links / QR
+  3) Diagnose and repair
   4) More →
-  0) Выход
+  0) Exit
 ```
 
 The status header shows mode (domain/IP), Xray, port 443, subscription,
@@ -106,7 +106,7 @@ sudo xraytailscale
 Status screen → **More**:
 
 ```text
-4) More → 4) Управление подпиской HAPP
+4) More → 4) HAPP subscription
 ```
 
 You can create a public subscription by VPS IP or by domain. Domain mode is better for daily use. The script creates a multi-route profile and returns a subscription URL like:
@@ -152,7 +152,7 @@ sudo xraytailscale
 Status screen → **More**:
 
 ```text
-4) More → 1) Пакетное добавление пользователей
+4) More → 1) Bulk user generation
 ```
 
 The bulk generator creates one hidden shared multi-route seed profile named `_bulk_seed`, then creates normal user profiles such as:
@@ -228,7 +228,7 @@ client -> main VPS -> upstream VPS -> internet
 On the upstream VPS, install XrayTailscale and choose:
 
 ```text
-4) More → 3) Cascade / upstream → 5) Поднять outbound-сервер
+4) More → 3) Cascade / upstream → 5) Deploy the outbound server
 ```
 
 This creates a TCP Reality Vision inbound and prints the values needed by the main VPS: host, port, UUID, public key, short ID, SNI, fingerprint, and flow.
@@ -268,7 +268,7 @@ sudo xraytailscale
 Status screen → **More**:
 
 ```text
-4) More → 5) Self-steal (статус/удаление)
+4) More → 5) Self-steal (status/removal)
 ```
 
 The self-steal wizard asks for the domain once (a previously saved domain is offered as
@@ -337,7 +337,7 @@ sudo xraytailscale
 Then choose:
 
 ```text
-4) More → 8) Обновить Xray-core
+4) More → 8) Update Xray-core
 ```
 
 ## Uninstall

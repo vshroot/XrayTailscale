@@ -119,7 +119,7 @@ Do NOT use raw `jq ... > temp && mv temp file` — always go through `safe_jq_wr
 **UI entry points** (`src/55-main-menu.sh`, `src/56-wizard.sh`, `src/57-status.sh`):
 `main_menu()` is a router, not a 16-item list: `wizard_is_fresh_install` →
 `run_first_run_wizard`, otherwise → `status_screen`. The status screen has
-add-user / links+QR / diagnose-and-repair / «Дополнительно». Everything rare
+add-user / links+QR / diagnose-and-repair / More. Everything rare
 (bulk users, Tailscale, cascade + bypass + outbound node, subscription
 management, self-steal, advanced profile settings, user deletion, core update)
 lives in `_status_extra_menu`. Bypass rules and the outbound-node setup are
