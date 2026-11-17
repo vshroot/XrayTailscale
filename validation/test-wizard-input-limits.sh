@@ -57,7 +57,7 @@ probe() {
   if [[ "$rc" -eq 124 ]]; then
     fail "$label: мастер завис (timeout) на бесконечном невалидном вводе"
   fi
-  if ! grep -q "Слишком много попыток" <<<"$out"; then
+  if ! grep -q "Too many" <<<"$out"; then
     echo "$out" | tail -6
     fail "$label: лимит попыток не сработал (rc=$rc)"
   fi

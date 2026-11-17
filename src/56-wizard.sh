@@ -120,27 +120,27 @@ _wizard_state_clear() {
 _wizard_print_header() {
   echo ""
   echo -e "${BLUE}╔═══════════════════════════════════════════════╗${NC}"
-  echo -e "${BLUE}║      МАСТЕР ПЕРВИЧНОЙ НАСТРОЙКИ СЕРВЕРА       ║${NC}"
-  echo -e "${BLUE}║     от чистого VPS до готовой подписки        ║${NC}"
+  echo -e "${BLUE}║         FIRST-TIME SERVER SETUP WIZARD         ║${NC}"
+  echo -e "${BLUE}║     from a clean VPS to a ready subscription   ║${NC}"
   echo -e "${BLUE}╚═══════════════════════════════════════════════╝${NC}"
   echo ""
 }
 
 _wizard_step_title() {
   case "${1:-}" in
-    1) echo "Проверка сервера" ;;
-    2) echo "Домен и email" ;;
-    3) echo "Первый пользователь" ;;
-    4) echo "Режим домена и подписка" ;;
-    5) echo "Проверка и ссылка" ;;
-    *) echo "продолжение" ;;
+    1) echo "Server check" ;;
+    2) echo "Domain and email" ;;
+    3) echo "First user" ;;
+    4) echo "Domain mode and subscription" ;;
+    5) echo "Verify and link" ;;
+    *) echo "continue" ;;
   esac
 }
 
 _wizard_step_banner() {
   local step="${1:-}"
   echo ""
-  echo -e "${MAGENTA}═══ Шаг ${step}/${WIZARD_TOTAL_STEPS}. $(_wizard_step_title "$step") ═══${NC}"
+  echo -e "${MAGENTA}═══ Step ${step}/${WIZARD_TOTAL_STEPS}. $(_wizard_step_title "$step") ═══${NC}"
   echo ""
 }
 
@@ -151,12 +151,12 @@ _wizard_confirm_retry_or_exit() {
     ((attempts++))
     if [[ $attempts -gt 10 ]]; then
       echo ""
-      echo -e "${RED}  Слишком много неверных попыток — выход${NC}"
+      echo -e "${RED}  Too many invalid attempts — exiting${NC}"
       return 1
     fi
     echo ""
-    echo -e "${CYAN}  [1]${NC} Повторить шаг   ${CYAN}[0]${NC} Выйти"
-    echo -n -e "${YELLOW}Выберите действие: ${NC}"
+    echo -e "${CYAN}  [1]${NC} Retry step   ${CYAN}[0]${NC} Exit"
+    echo -n -e "${YELLOW}Choose an action: ${NC}"
     if ! read -r ans; then
       echo ""
       return 1
@@ -164,7 +164,7 @@ _wizard_confirm_retry_or_exit() {
     case "$ans" in
       1) return 0 ;;
       0) return 1 ;;
-      *) echo -e "${RED}  Неверный выбор — введите 1 или 0${NC}" ;;
+      *) echo -e "${RED}  Invalid choice — enter 1 or 0${NC}" ;;
     esac
   done
 }
@@ -220,10 +220,10 @@ _wizard_detect_ports_note() {
   fi
 
   if [[ "$mode" == "domain" && -n "$backend_port" && "$sub_port" != "$backend_port" ]]; then
-    echo -e "${CYAN}  ℹ Подписка на :${sub_port}${NC} ${YELLOW}(localhost-backend self-steal занял ${backend_port})${NC}"
+    echo -e "${CYAN}  ℹ Subscription on :${sub_port}${NC} ${YELLOW}(self-steal localhost backend took ${backend_port})${NC}"
     echo -e "${CYAN}    ${ufw_note}${NC}"
   else
-    echo -e "${CYAN}  ℹ Подписка на :${sub_port} — ${ufw_note}${NC}"
+    echo -e "${CYAN}  ℹ Subscription on :${sub_port} — ${ufw_note}${NC}"
   fi
   return 0
 }
@@ -234,19 +234,19 @@ _wizard_final_report() {
 
   echo ""
   echo -e "${GREEN}╔═══════════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║         ✓ ГОТОВО: СЕРВЕР НАСТРОЕН             ║${NC}"
+  echo -e "${GREEN}║         ✓ DONE: SERVER IS CONFIGURED             ║${NC}"
   echo -e "${GREEN}╚═══════════════════════════════════════════════╝${NC}"
   echo ""
   if [[ "$mode" == "domain" ]]; then
-    echo -e "${BLUE}Режим:${NC}          ${GREEN}домен ${domain} (self-steal, :443)${NC}"
+    echo -e "${BLUE}Mode:${NC}           ${GREEN}domain ${domain} (self-steal, :443)${NC}"
   else
-    echo -e "${BLUE}Режим:${NC}          ${GREEN}без домена (Reality, :443)${NC}"
+    echo -e "${BLUE}Mode:${NC}           ${GREEN}no domain (Reality, :443)${NC}"
   fi
-  echo -e "${BLUE}Пользователь:${NC}   ${GREEN}${user_name}${NC}"
-  echo -e "${BLUE}Порт подписки:${NC}  ${GREEN}${sub_port}${NC}"
+  echo -e "${BLUE}User:${NC}   ${GREEN}${user_name}${NC}"
+  echo -e "${BLUE}Subscription port:${NC}  ${GREEN}${sub_port}${NC}"
   _wizard_detect_ports_note
   echo ""
-  echo -e "${BLUE}Ссылка подписки (HAPP / v2rayNG / Streisand):${NC}"
+  echo -e "${BLUE}Subscription link (HAPP / v2rayNG / Streisand):${NC}"
   echo -e "${GREEN}${url}${NC}"
   echo ""
 
@@ -254,29 +254,29 @@ _wizard_final_report() {
   # chmod ниже — страховка (defense-in-depth) и контракт для тестов.
   if ( umask 077; printf '%s\n' "$url" > "$WIZARD_URL_FILE" ) 2>/dev/null; then
     chmod 600 "$WIZARD_URL_FILE" 2>/dev/null || true
-    echo -e "${CYAN}Ссылка сохранена в файл: ${WIZARD_URL_FILE}${NC}"
+    echo -e "${CYAN}Link saved to file: ${WIZARD_URL_FILE}${NC}"
   else
-    echo -e "${YELLOW}⚠ Не удалось сохранить ссылку в ${WIZARD_URL_FILE}${NC}"
+    echo -e "${YELLOW}⚠ Could not save the link to ${WIZARD_URL_FILE}${NC}"
   fi
   echo ""
 
   if command -v qrencode >/dev/null 2>&1; then
     if ! _print_qr_block "$url"; then
-      echo -e "${YELLOW}⚠ qrencode не построил QR — скопируйте ссылку выше${NC}"
+      echo -e "${YELLOW}⚠ qrencode could not build the QR — copy the link above${NC}"
     fi
   else
-    echo -e "${YELLOW}⚠ qrencode не установлен — QR не показан.${NC}"
-    echo -e "${YELLOW}  Установите: apt-get install -y qrencode${NC}"
+    echo -e "${YELLOW}⚠ qrencode is not installed — QR not shown.${NC}"
+    echo -e "${YELLOW}  Install it: apt-get install -y qrencode${NC}"
   fi
   echo ""
-  echo -e "${CYAN}Импортируйте ссылку в клиент: одна подписка отдаёт все маршруты.${NC}"
+  echo -e "${CYAN}Import the link into your client: one subscription serves all routes.${NC}"
 
   touch "$WIZARD_DONE_FILE" 2>/dev/null || true
   chmod 600 "$WIZARD_DONE_FILE" 2>/dev/null || true
   _wizard_state_clear
 
   echo ""
-  echo -e "${GREEN}✓ Мастер завершён. Повторный запуск: sudo xraytailscale wizard${NC}"
+  echo -e "${GREEN}✓ Wizard finished. Run again: sudo xraytailscale wizard${NC}"
   echo ""
 }
 
@@ -289,14 +289,14 @@ run_first_run_wizard() {
   _wizard_print_header
 
   if ! _wizard_has_root; then
-    echo -e "${RED}✗ Мастеру нужны права root${NC}"
-    echo -e "${YELLOW}  Запустите: sudo xraytailscale wizard${NC}"
+    echo -e "${RED}✗ The wizard needs root privileges${NC}"
+    echo -e "${YELLOW}  Run: sudo xraytailscale wizard${NC}"
     return 1
   fi
 
   if [[ -f "$WIZARD_DONE_FILE" && "$force" != "force" ]]; then
-    echo -e "${YELLOW}Сервер уже настроен мастером (маркер ${WIZARD_DONE_FILE}).${NC}"
-    echo -e "${YELLOW}  Перезапустить принудительно: sudo xraytailscale wizard${NC}"
+    echo -e "${YELLOW}The server is already configured by the wizard (marker ${WIZARD_DONE_FILE}).${NC}"
+    echo -e "${YELLOW}  Force re-run: sudo xraytailscale wizard${NC}"
     return 0
   fi
 
@@ -309,18 +309,18 @@ run_first_run_wizard() {
       saved_mode=$(_wizard_state_get MODE || true)
       saved_domain=$(_wizard_state_get DOMAIN || true)
 
-      echo -e "${YELLOW}Найден незавершённый мастер: последний шаг ${saved_step}/${WIZARD_TOTAL_STEPS}.${NC}"
+      echo -e "${YELLOW}Found an unfinished wizard: last step ${saved_step}/${WIZARD_TOTAL_STEPS}.${NC}"
       if [[ -n "$saved_mode" ]]; then
         if [[ -n "$saved_domain" ]]; then
-          echo -e "${CYAN}  Сохранено: режим ${saved_mode} (${saved_domain})${NC}"
+          echo -e "${CYAN}  Saved: mode ${saved_mode} (${saved_domain})${NC}"
         else
-          echo -e "${CYAN}  Сохранено: режим ${saved_mode}${NC}"
+          echo -e "${CYAN}  Saved: mode ${saved_mode}${NC}"
         fi
       fi
-      echo -n -e "${YELLOW}Продолжить с шага ${saved_step}? [Y/n]: ${NC}"
+      echo -n -e "${YELLOW}Continue from step ${saved_step}? [Y/n]: ${NC}"
       if ! read -r ans; then
         echo ""
-        echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+        echo -e "${RED}✗ No input (non-interactive run) — wizard aborted${NC}"
         return 1
       fi
       if [[ "$ans" =~ ^[nNнН]$ ]]; then
@@ -342,7 +342,7 @@ run_first_run_wizard() {
       local step1_failed=0
       local xray_bin="" listener=""
 
-      echo -e "${GREEN}✓ root-права${NC}"
+      echo -e "${GREEN}✓ root privileges${NC}"
 
       if command -v xray >/dev/null 2>&1; then
         xray_bin=$(command -v xray)
@@ -352,54 +352,54 @@ run_first_run_wizard() {
       if [[ -n "$xray_bin" ]]; then
         echo -e "${GREEN}✓ xray-core: ${xray_bin}${NC}"
       else
-        echo -e "${RED}✗ xray-core не найден (ни в PATH, ни в /usr/local/bin/xray)${NC}"
-        echo -e "${YELLOW}  Установите: sudo bash install.sh${NC}"
+        echo -e "${RED}✗ xray-core not found (neither in PATH nor /usr/local/bin/xray)${NC}"
+        echo -e "${YELLOW}  Install: sudo bash install.sh${NC}"
         step1_failed=1
       fi
 
       if command -v systemctl >/dev/null 2>&1; then
-        echo -e "${GREEN}✓ systemd доступен (systemctl)${NC}"
+        echo -e "${GREEN}✓ systemd is available (systemctl)${NC}"
       else
-        echo -e "${RED}✗ systemctl не найден — сервер не на systemd${NC}"
-        echo -e "${YELLOW}  Проект рассчитан на Debian/Ubuntu с systemd.${NC}"
+        echo -e "${RED}✗ systemctl not found — the server is not on systemd${NC}"
+        echo -e "${YELLOW}  This project targets Debian/Ubuntu with systemd.${NC}"
         step1_failed=1
       fi
 
       if command -v ufw >/dev/null 2>&1; then
         local ufw_status_line=""
         ufw_status_line=$(ufw status 2>/dev/null | head -1)
-        echo -e "${GREEN}✓ ufw: ${ufw_status_line:-статус неизвестен}${NC}"
+        echo -e "${GREEN}✓ ufw: ${ufw_status_line:-status unknown}${NC}"
         if ! ufw status 2>/dev/null | grep -q "Status: active"; then
-          echo -e "${YELLOW}  ℹ ufw выключен — порты откроются iptables-правилами проекта${NC}"
+          echo -e "${YELLOW}  ℹ ufw is off — ports will be opened by the project iptables rules${NC}"
         fi
       else
-        echo -e "${YELLOW}⚠ ufw не установлен — порты откроются iptables-правилами проекта${NC}"
+        echo -e "${YELLOW}⚠ ufw is not installed — ports will be opened by the project iptables rules${NC}"
       fi
 
       if ! command -v ss >/dev/null 2>&1; then
-        echo -e "${YELLOW}⚠ ss не найден (iproute2) — пропускаю проверку :443${NC}"
+        echo -e "${YELLOW}⚠ ss not found (iproute2) — skipping the :443 check${NC}"
       else
         # -p нужен, чтобы показать, кто именно слушает порт.
         listener=$(ss -tlnpH 'sport = :443' 2>/dev/null | head -1)
         if [[ -z "$listener" ]]; then
-          echo -e "${GREEN}✓ порт :443 свободен${NC}"
+          echo -e "${GREEN}✓ port :443 is free${NC}"
         elif [[ "$listener" == *xray* ]]; then
-          echo -e "${GREEN}✓ порт :443 уже слушает Xray${NC}"
+          echo -e "${GREEN}✓ port :443 is already listened by Xray${NC}"
         else
-          echo -e "${RED}✗ порт :443 занят сторонним процессом${NC}"
-          echo -e "${YELLOW}  Слушает: ${listener}${NC}"
-          echo -e "${YELLOW}  Освободите порт: systemctl stop <сервис> (nginx/apache/др.)${NC}"
+          echo -e "${RED}✗ port :443 is taken by another process${NC}"
+          echo -e "${YELLOW}  Listening: ${listener}${NC}"
+          echo -e "${YELLOW}  Free the port: systemctl stop <service> (nginx/apache/etc.)${NC}"
           step1_failed=1
         fi
       fi
 
       if [[ $step1_failed -eq 0 ]]; then
         echo ""
-        echo -e "${GREEN}✓ Проверка сервера пройдена${NC}"
+        echo -e "${GREEN}✓ Server check passed${NC}"
         break
       fi
       echo ""
-      echo -e "${YELLOW}  Устраните замечания выше и повторите шаг.${NC}"
+      echo -e "${YELLOW}  Fix the issues above and retry the step.${NC}"
       _wizard_confirm_retry_or_exit || return 1
     done
   fi
@@ -415,14 +415,14 @@ run_first_run_wizard() {
     saved_mode=$(_wizard_state_get MODE || true)
     saved_domain=$(_wizard_state_get DOMAIN || true)
 
-    echo -e "${CYAN}Свой домен даёт режим self-steal: на :443 для чужих — ваш сайт${NC}"
-    echo -e "${CYAN}с валидным сертификатом, для ваших клиентов — VLESS+Reality.${NC}"
-    echo -e "${CYAN}Без домена — классический Reality по IP (SNI из whitelist).${NC}"
+    echo -e "${CYAN}Your own domain enables self-steal mode: on :443 outsiders see your site${NC}"
+    echo -e "${CYAN}with a valid certificate, your clients get VLESS+Reality.${NC}"
+    echo -e "${CYAN}Without a domain — classic Reality over IP (SNI from the whitelist).${NC}"
     echo ""
-    echo -n -e "${YELLOW}У вас есть свой домен, направленный на этот сервер? [д/Н]: ${NC}"
+    echo -n -e "${YELLOW}Do you have your own domain pointing to this server? [y/N]: ${NC}"
     if ! read -r have_domain; then
       echo ""
-      echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+      echo -e "${RED}✗ No input (non-interactive run) — wizard aborted${NC}"
       return 1
     fi
     [[ -z "$have_domain" ]] && have_domain="n"
@@ -433,25 +433,25 @@ run_first_run_wizard() {
       while true; do
         ((domain_attempts++))
         if [[ $domain_attempts -gt 10 ]]; then
-          echo -e "${RED}✗ Слишком много попыток ввода домена — мастер прерван${NC}"
+          echo -e "${RED}✗ Too many domain attempts — wizard aborted${NC}"
           return 1
         fi
         local domain_hint="$saved_domain"
         if [[ -n "$domain_hint" ]]; then
-          echo -n -e "${YELLOW}Домен [${CYAN}${domain_hint}${YELLOW}]: ${NC}"
+          echo -n -e "${YELLOW}Domain [${CYAN}${domain_hint}${YELLOW}]: ${NC}"
         else
-          echo -n -e "${YELLOW}Домен (A-запись → этот сервер): ${NC}"
+          echo -n -e "${YELLOW}Domain (A record → this server): ${NC}"
         fi
         read -r domain || {
           echo ""
-          echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+          echo -e "${RED}✗ No input (non-interactive run) — wizard aborted${NC}"
           return 1
         }
         [[ -z "$domain" ]] && domain="$domain_hint"
 
         if ! validate_server_domain "$domain"; then
-          echo -e "${RED}✗ Некорректный домен: '${domain}'${NC}"
-          echo -e "${YELLOW}  Нужен FQDN без схемы и пути, например example.com${NC}"
+          echo -e "${RED}✗ Invalid domain: '${domain}'${NC}"
+          echo -e "${YELLOW}  Need an FQDN without scheme or path, e.g. example.com${NC}"
           continue
         fi
 
@@ -460,30 +460,30 @@ run_first_run_wizard() {
           break
         fi
 
-        echo -e "${RED}✗ DNS не совпадает${NC}"
-        echo -e "${YELLOW}  Ожидается IP этого VPS: ${CYAN}$(get_server_ip)${NC}"
-        echo -e "${YELLOW}  Фактический резолв:     ${CYAN}$(_wizard_dns_resolved_ip "$domain")${NC}"
-        echo -e "${YELLOW}  Подождите обновления DNS или поменяйте A-запись у регистратора.${NC}"
+        echo -e "${RED}✗ DNS mismatch${NC}"
+        echo -e "${YELLOW}  Expected this VPS IP: ${CYAN}$(get_server_ip)${NC}"
+        echo -e "${YELLOW}  Actual resolve:     ${CYAN}$(_wizard_dns_resolved_ip "$domain")${NC}"
+        echo -e "${YELLOW}  Wait for DNS to update or change the A record at your registrar.${NC}"
         echo ""
-        echo -e "${CYAN}  [1]${NC} Ввести другой домен"
-        echo -e "${CYAN}  [2]${NC} Продолжить без домена (режим IP)"
-        echo -n -e "${YELLOW}Выберите действие: ${NC}"
+        echo -e "${CYAN}  [1]${NC} Enter another domain"
+        echo -e "${CYAN}  [2]${NC} Continue without a domain (IP mode)"
+        echo -n -e "${YELLOW}Choose an action: ${NC}"
         local dns_choice=""
         if ! read -r dns_choice; then
           echo ""
-          echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+          echo -e "${RED}✗ No input (non-interactive run) — wizard aborted${NC}"
           return 1
         fi
         case "$dns_choice" in
           2)
             mode="ip"
             domain=""
-            echo -e "${YELLOW}  → Продолжаю без домена (Reality по IP)${NC}"
+            echo -e "${YELLOW}  → Continuing without a domain (Reality over IP)${NC}"
             break
             ;;
           1) continue ;;
           *)
-            echo -e "${RED}  Неверный выбор — введите 1 или 2${NC}"
+            echo -e "${RED}  Invalid choice — enter 1 or 2${NC}"
             continue
             ;;
         esac
@@ -495,12 +495,12 @@ run_first_run_wizard() {
     if [[ "$mode" == "domain" && -n "$domain" ]]; then
       _wizard_state_set MODE "domain"
       _wizard_state_set DOMAIN "$domain"
-      echo -e "${GREEN}✓ Режим: домен ${domain}${NC}"
+      echo -e "${GREEN}✓ Mode: domain ${domain}${NC}"
     else
       mode="ip"
       _wizard_state_set MODE "ip"
       _wizard_state_set DOMAIN ""
-      echo -e "${GREEN}✓ Режим: без домена (Reality по IP)${NC}"
+      echo -e "${GREEN}✓ Mode: no domain (Reality over IP)${NC}"
     fi
 
     # Email нужен в обоих режимах: Let's Encrypt (IP-сертификат подписки /
@@ -517,25 +517,25 @@ run_first_run_wizard() {
     while true; do
       ((email_attempts++))
       if [[ $email_attempts -gt 10 ]]; then
-        echo -e "${RED}✗ Слишком много попыток ввода email — мастер прерван${NC}"
+        echo -e "${RED}✗ Too many email attempts — wizard aborted${NC}"
         return 1
       fi
       if [[ -n "$email_default" ]]; then
-        echo -n -e "${YELLOW}Email для Let's Encrypt [${CYAN}${email_default}${YELLOW}]: ${NC}"
+        echo -n -e "${YELLOW}Let's Encrypt email [${CYAN}${email_default}${YELLOW}]: ${NC}"
       else
-        echo -n -e "${YELLOW}Email для Let's Encrypt (обязателен для сертификата): ${NC}"
+        echo -n -e "${YELLOW}Let's Encrypt email (required for the certificate): ${NC}"
       fi
       read -r email || {
         echo ""
-        echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+        echo -e "${RED}✗ No input (non-interactive run) — wizard aborted${NC}"
         return 1
       }
       [[ -z "$email" ]] && email="$email_default"
       if [[ "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
         break
       fi
-      echo -e "${RED}✗ Некорректный email: '${email}'${NC}"
-      echo -e "${YELLOW}  Пример: name@example.com${NC}"
+      echo -e "${RED}✗ Invalid email: '${email}'${NC}"
+      echo -e "${YELLOW}  Example: name@example.com${NC}"
     done
     _wizard_state_set EMAIL "$email"
     echo -e "${GREEN}✓ Email: ${email}${NC}"
@@ -564,52 +564,52 @@ run_first_run_wizard() {
       fi
 
       if [[ -f "$PROFILES_DIR/${default_user}.json" ]]; then
-        echo -e "${YELLOW}ℹ Пользователь ${default_user} уже существует — создание не нужно${NC}"
+        echo -e "${YELLOW}ℹ User ${default_user} already exists — no need to create${NC}"
         user_name="$default_user"
       else
-        echo -e "${CYAN}Имя пользователя — это имя профиля (7 маршрутов, XHTTP+PQ).${NC}"
+        echo -e "${CYAN}The user name is the profile name (7 routes, XHTTP+PQ).${NC}"
         local user_attempts=0
         while true; do
           ((user_attempts++))
           if [[ $user_attempts -gt 10 ]]; then
-            echo -e "${RED}✗ Слишком много попыток ввода имени — мастер прерван${NC}"
+            echo -e "${RED}✗ Too many name attempts — wizard aborted${NC}"
             return 1
           fi
-          echo -n -e "${YELLOW}Имя первого пользователя [${CYAN}${default_user}${YELLOW}]: ${NC}"
+          echo -n -e "${YELLOW}First user name [${CYAN}${default_user}${YELLOW}]: ${NC}"
           read -r user_name || {
             echo ""
-            echo -e "${RED}✗ Нет ввода (не интерактивный запуск) — мастер прерван${NC}"
+            echo -e "${RED}✗ No input (non-interactive run) — wizard aborted${NC}"
             return 1
           }
           [[ -z "$user_name" ]] && user_name="$default_user"
 
           if [[ ! "$user_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
-            echo -e "${RED}✗ Недопустимое имя: '${user_name}'${NC}"
-            echo -e "${YELLOW}  Латиница, цифры, '-' и '_'; первый символ — буква или цифра.${NC}"
+            echo -e "${RED}✗ Invalid name: '${user_name}'${NC}"
+            echo -e "${YELLOW}  Latin letters, digits, '-' and '_'; first character must be a letter or digit.${NC}"
             continue
           fi
           if [[ -f "$PROFILES_DIR/${user_name}.json" ]]; then
-            echo -e "${RED}✗ Пользователь ${user_name} уже существует${NC}"
-            echo -e "${YELLOW}  Введите другое имя.${NC}"
+            echo -e "${RED}✗ User ${user_name} already exists${NC}"
+            echo -e "${YELLOW}  Enter another name.${NC}"
             continue
           fi
           break
         done
 
         echo ""
-        echo -e "${CYAN}  → Создаю профиль ${user_name}: 7 маршрутов (XHTTP+PQ дефолт)...${NC}"
+        echo -e "${CYAN}  → Creating profile ${user_name}: 7 routes (XHTTP+PQ default)...${NC}"
         if ! create_profile_all_routes "$user_name" "no_pause" "hide_subscription"; then
           echo ""
-          echo -e "${RED}✗ Профиль ${user_name} не создан${NC}"
-          echo -e "${YELLOW}  Что проверить:${NC}"
-          echo -e "${YELLOW}    jq . ${CONFIG_FILE} >/dev/null  — валиден ли config.json${NC}"
+          echo -e "${RED}✗ Profile ${user_name} was not created${NC}"
+          echo -e "${YELLOW}  What to check:${NC}"
+          echo -e "${YELLOW}    jq . ${CONFIG_FILE} >/dev/null  — is config.json valid${NC}"
           echo -e "${YELLOW}    systemctl status xray --no-pager -l${NC}"
-          echo -e "${YELLOW}    ss -tlnH | grep LISTEN        — не заняты ли порты маршрутов${NC}"
-          echo -e "${YELLOW}    Бэкапы конфига: ${XRAY_BACKUPS_DIR}${NC}"
+          echo -e "${YELLOW}    ss -tlnH | grep LISTEN        — are the route ports taken${NC}"
+          echo -e "${YELLOW}    Config backups: ${XRAY_BACKUPS_DIR}${NC}"
           _wizard_confirm_retry_or_exit || return 1
           continue
         fi
-        echo -e "${GREEN}✓ Профиль ${user_name} создан (7 маршрутов)${NC}"
+        echo -e "${GREEN}✓ Profile ${user_name} created (7 routes)${NC}"
       fi
 
       _wizard_state_set USER_NAME "$user_name"
@@ -632,39 +632,39 @@ run_first_run_wizard() {
       [[ -n "$mode" ]] || mode="ip"
 
       if [[ -z "$email" ]]; then
-        echo -e "${RED}✗ Не найден email для Let's Encrypt${NC}"
-        echo -e "${YELLOW}  Вернитесь к шагу 2 и укажите email.${NC}"
+        echo -e "${RED}✗ No Let's Encrypt email found${NC}"
+        echo -e "${YELLOW}  Go back to step 2 and provide an email.${NC}"
         _wizard_confirm_retry_or_exit || return 1
         continue
       fi
 
       if [[ "$mode" == "domain" ]]; then
         if [[ -z "$domain" ]]; then
-          echo -e "${RED}✗ Не найден домен для self-steal${NC}"
-          echo -e "${YELLOW}  Вернитесь к шагу 2 и укажите домен.${NC}"
+          echo -e "${RED}✗ No domain found for self-steal${NC}"
+          echo -e "${YELLOW}  Go back to step 2 and provide a domain.${NC}"
           step4_ok=0
         else
         # КРИТИЧНО: self-steal первым — он занимает :443 и забирает
         # localhost-backend порт, подписка затем выбирает следующий свободный.
-        echo -e "${CYAN}  → Self-steal для ${domain}: :443 под ваш сайт + Reality...${NC}"
+        echo -e "${CYAN}  → Self-steal for ${domain}: :443 for your site + Reality...${NC}"
         if ! _selfsteal_provision "$domain" "$email"; then
           echo ""
-          echo -e "${RED}✗ Self-steal не развернулся${NC}"
-          echo -e "${YELLOW}  Что проверить:${NC}"
-          echo -e "${YELLOW}    dig +short ${domain}   — должен вернуть $(get_server_ip)${NC}"
-          echo -e "${YELLOW}    ss -tlnH 'sport = :443' — порт должен освободиться под Xray${NC}"
+          echo -e "${RED}✗ Self-steal did not deploy${NC}"
+          echo -e "${YELLOW}  What to check:${NC}"
+          echo -e "${YELLOW}    dig +short ${domain}   — must return $(get_server_ip)${NC}"
+          echo -e "${YELLOW}    ss -tlnH 'sport = :443' — the port must be freed for Xray${NC}"
           echo -e "${YELLOW}    tail -30 /var/log/letsencrypt/letsencrypt.log${NC}"
-          echo -e "${YELLOW}    nginx -t               — валиден ли конфиг nginx${NC}"
+          echo -e "${YELLOW}    nginx -t               — is the nginx config valid${NC}"
           step4_ok=0
         else
-          echo -e "${GREEN}✓ Self-steal готов: https://${domain}${NC}"
+          echo -e "${GREEN}✓ Self-steal is ready: https://${domain}${NC}"
         fi
         fi
       fi
 
       if [[ $step4_ok -eq 1 ]]; then
         if _wizard_subscription_ready; then
-          echo -e "${GREEN}✓ Подписка уже установлена на :$(cat "$WIZARD_SUB_PORT_FILE" 2>/dev/null) — пропускаю установку${NC}"
+          echo -e "${GREEN}✓ Subscription already installed on :$(cat "$WIZARD_SUB_PORT_FILE" 2>/dev/null) — skipping install${NC}"
         else
           echo ""
           # При self-steal подписку отдаём ТЕМ ЖЕ доменом на том же :443:
@@ -698,15 +698,15 @@ run_first_run_wizard() {
 
           if [[ $sub_rc -ne 0 ]]; then
             echo ""
-            echo -e "${RED}✗ Подписка не установлена${NC}"
-            echo -e "${YELLOW}  Что проверить:${NC}"
-            echo -e "${YELLOW}    ss -tlnH 'sport = :80'   — порт 80 нужен для выпуска сертификата${NC}"
-            echo -e "${YELLOW}    ss -tlnp | grep nginx    — не занят ли выбранный порт подписки${NC}"
+            echo -e "${RED}✗ Subscription is not installed${NC}"
+            echo -e "${YELLOW}  What to check:${NC}"
+            echo -e "${YELLOW}    ss -tlnH 'sport = :80'   — port 80 is needed to issue the certificate${NC}"
+            echo -e "${YELLOW}    ss -tlnp | grep nginx    — is the chosen subscription port taken${NC}"
             echo -e "${YELLOW}    tail -30 /tmp/certbot-ip.log${NC}"
             echo -e "${YELLOW}    systemctl status xraytailscale-sub --no-pager -l${NC}"
             step4_ok=0
           else
-            echo -e "${GREEN}✓ Подписка установлена${NC}"
+            echo -e "${GREEN}✓ Subscription installed${NC}"
           fi
         fi
       fi
@@ -738,18 +738,18 @@ run_first_run_wizard() {
       if [[ "$xray_state" == "active" ]]; then
         echo -e "${GREEN}✓ Xray: active${NC}"
       else
-        echo -e "${RED}✗ Xray не запущен (${xray_state:-неизвестно})${NC}"
-        echo -e "${YELLOW}  Проверьте: systemctl status xray --no-pager -l${NC}"
-        echo -e "${YELLOW}  Перезапуск: systemctl restart xray${NC}"
+        echo -e "${RED}✗ Xray is not running (${xray_state:-unknown})${NC}"
+        echo -e "${YELLOW}  Check: systemctl status xray --no-pager -l${NC}"
+        echo -e "${YELLOW}  Restart: systemctl restart xray${NC}"
         step5_ok=0
       fi
 
       if [[ -n "$sub_port" ]] && command -v ss >/dev/null 2>&1 \
          && ss -tlnH "sport = :${sub_port}" 2>/dev/null | grep -q .; then
-        echo -e "${GREEN}✓ Порт подписки :${sub_port} слушается${NC}"
+        echo -e "${GREEN}✓ Subscription port :${sub_port} is listening${NC}"
       else
-        echo -e "${RED}✗ Порт подписки ${sub_port:-неизвестен} не слушается${NC}"
-        echo -e "${YELLOW}  Проверьте: nginx -t && systemctl reload nginx${NC}"
+        echo -e "${RED}✗ Subscription port ${sub_port:-unknown} is not listening${NC}"
+        echo -e "${YELLOW}  Check: nginx -t && systemctl reload nginx${NC}"
         echo -e "${YELLOW}             systemctl status xraytailscale-sub --no-pager -l${NC}"
         echo -e "${YELLOW}             ss -tlnp | grep ${sub_port:-443}${NC}"
         step5_ok=0
@@ -761,17 +761,17 @@ run_first_run_wizard() {
         curl_code=$(curl -sk --max-time 10 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
         [[ -z "$curl_code" ]] && curl_code="000"
         if [[ "$curl_code" =~ ^[23] ]]; then
-          echo -e "${GREEN}✓ Подписка отвечает: HTTP ${curl_code}${NC}"
+          echo -e "${GREEN}✓ Subscription responds: HTTP ${curl_code}${NC}"
         else
-          echo -e "${RED}✗ Подписка не отвечает: HTTP ${curl_code}${NC}"
-          echo -e "${YELLOW}  Проверьте: curl -sk ${url}${NC}"
+          echo -e "${RED}✗ Subscription does not respond: HTTP ${curl_code}${NC}"
+          echo -e "${YELLOW}  Check: curl -sk ${url}${NC}"
           echo -e "${YELLOW}             ufw status | grep ${sub_port:-443}${NC}"
           echo -e "${YELLOW}             journalctl -u xraytailscale-sub -n 50 --no-pager${NC}"
           step5_ok=0
         fi
       else
-        echo -e "${RED}✗ У профиля ${user_name} нет валидного sub_token${NC}"
-        echo -e "${YELLOW}  Пересоздайте профиль или проверьте ${PROFILES_DIR}/${user_name}.json${NC}"
+        echo -e "${RED}✗ Profile ${user_name} has no valid sub_token${NC}"
+        echo -e "${YELLOW}  Recreate the profile or check ${PROFILES_DIR}/${user_name}.json${NC}"
         step5_ok=0
       fi
 
@@ -780,7 +780,7 @@ run_first_run_wizard() {
         break
       fi
       echo ""
-      echo -e "${YELLOW}  Устраните замечания выше и повторите проверку.${NC}"
+      echo -e "${YELLOW}  Fix the issues above and re-run the check.${NC}"
       _wizard_confirm_retry_or_exit || return 1
     done
   fi
@@ -791,8 +791,8 @@ run_first_run_wizard() {
 # ─── CLI: `xraytailscale wizard` (принудительный перезапуск) ─
 wizard_command() {
   if ! _wizard_has_root; then
-    echo -e "${RED}✗ Требуются права root${NC}"
-    echo -e "${YELLOW}Используйте: sudo xraytailscale wizard${NC}"
+    echo -e "${RED}✗ Root privileges are required${NC}"
+    echo -e "${YELLOW}Use: sudo xraytailscale wizard${NC}"
     return 1
   fi
   run_first_run_wizard "force"
