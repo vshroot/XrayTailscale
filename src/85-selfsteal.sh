@@ -666,7 +666,7 @@ selfsteal_remove() {
   rm -f "$SELFSTEAL_DOMAIN_FILE" "$SELFSTEAL_PORT_FILE"
   echo -e "${GREEN}✓ Сайт и nginx-конфиг self-steal удалены${NC}"
   echo -e "${YELLOW}⚠ Профиль и inbound :443 НЕ удалены автоматически.${NC}"
-  echo -e "${YELLOW}  Удалите профиль через меню 2 — иначе Reality dest указывает на несуществующий сайт.${NC}"
+  echo -e "${YELLOW}  Удалите пользователя через «Дополнительно → Удалить пользователя» — иначе Reality dest указывает на несуществующий сайт.${NC}"
   if [[ -n "$domain" && -d "/etc/letsencrypt/live/${domain}" ]]; then
     echo -e "${YELLOW}  Сертификат LE оставлен. Удалить вручную: certbot delete --cert-name ${domain}${NC}"
   fi

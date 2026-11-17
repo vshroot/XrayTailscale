@@ -2474,7 +2474,7 @@ _migrate_bypass_routing_2026() {
   if [[ "$ans" =~ ^[yYдД]$ ]]; then
     _bypass_apply_bundle
   else
-    echo -e "${CYAN}Пропущено. Можно настроить позже через главное меню → пункт 11.${NC}"
+    echo -e "${CYAN}Пропущено. Можно настроить позже через «Дополнительно → Каскад / upstream → Обход VPN».${NC}"
     sleep 1
   fi
 
@@ -3150,7 +3150,10 @@ _cleanup_xray_backups() {
 }
 
 # CLI subcommand: xraytailscale update (REQ-B02)
-# Запускает update_xray_core, отображает заголовок, возвращает exit code функции.
+# Запускает update_xray_core, отображает заголовок.
+# Возвращает exit code функции, НЕ exit: иначе вызов из «Дополнительно»
+# закрыл бы весь менеджер вместо возврата в меню. CLI (src/99-dispatch.sh)
+# и так отдаёт код возврата как статус процесса.
 update_command() {
   echo -e "${BLUE}╔════════════════════════════════════════════════════╗${NC}"
   echo -e "${BLUE}║  XrayTailscale: обновление Xray-core               ║${NC}"
@@ -3165,7 +3168,7 @@ update_command() {
     2) echo -e "${RED}✗ Критическая ошибка обновления${NC}" ;;
     3) echo -e "${YELLOW}⚠ Откат на старую версию${NC}" ;;
   esac
-  exit $rc
+  return $rc
 }
 
 # Nag: предупреждение об устаревшем Xray-core в main_menu (REQ-B02)
@@ -4488,7 +4491,7 @@ manage_subscription_menu() {
   echo ""
 
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${RED}✗ Подписка не установлена. Сначала выберите 'Установить'.${NC}"
+    echo -e "${RED}✗ Подписка не установлена. Создайте её в «Дополнительно → Управление подпиской HAPP».${NC}"
     sleep 2
     return
   fi
@@ -4900,11 +4903,11 @@ happ_subscription_menu() {
     echo -e "${CYAN} 4)${NC} Управление существующими подписками (URL / QR / revoke)"
     echo -e "${CYAN} 5)${NC} Настройки HAPP (.happ_defaults.env)"
     echo -e "${CYAN} 6)${NC} Настроить announcement (HAPP)"
-    echo -e "${CYAN} 0)${NC} Назад в главное меню"
+    echo -e "${CYAN} 0)${NC} Назад"
     echo ""
     echo -n -e "${YELLOW}Выбор: ${NC}"
     local c
-    read -r c
+    read -r c || return 0
     case "$c" in
       1|"") install_subscription_ip_tls ;;
       2) install_subscription_public_tls ;;
@@ -5315,7 +5318,7 @@ bulk_generate_users_core() {
   [[ -z "$batch_id" ]] && batch_id="bulk-$(date +%Y%m%d-%H%M%S)"
 
   if ! _bulk_subscription_installed; then
-    echo -e "${RED}✗ HAPP subscription не установлена. Сначала включите пункт 9.${NC}"
+    echo -e "${RED}✗ HAPP subscription не установлена. Сначала создайте её: «Дополнительно → Управление подпиской HAPP».${NC}"
     return 1
   fi
   if [[ ! "$count" =~ ^[0-9]+$ || "$count" -lt 1 || "$count" -gt 500 ]]; then
@@ -8016,7 +8019,7 @@ _status_extra_menu() {
     echo -e "${CYAN} 1)${NC} Пакетное добавление пользователей"
     echo -e "${CYAN} 2)${NC} Tailscale exit node"
     echo -e "${CYAN} 3)${NC} Каскад / upstream"
-    echo -e "${CYAN} 4)${NC} Управление подпиской HAPP"
+    echo -e "${CYAN} 4)${NC} Подписка HAPP (создать / управлять)"
     echo -e "${CYAN} 5)${NC} Self-steal (статус/удаление)"
     echo -e "${CYAN} 6)${NC} Профили advanced (SNI/порт/fingerprint)"
     echo -e "${CYAN} 7)${NC} Удалить пользователя"
@@ -8028,11 +8031,17 @@ _status_extra_menu() {
       1) declare -F bulk_happ_users_menu >/dev/null 2>&1 && bulk_happ_users_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       2) declare -F tailscale_exit_node_menu >/dev/null 2>&1 && tailscale_exit_node_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       3) declare -F cascade_mode_menu >/dev/null 2>&1 && cascade_mode_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
-      4) declare -F manage_subscription_menu >/dev/null 2>&1 && manage_subscription_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      4) declare -F happ_subscription_menu >/dev/null 2>&1 && happ_subscription_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       5) declare -F selfsteal_menu >/dev/null 2>&1 && selfsteal_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       6) declare -F manage_profile_menu >/dev/null 2>&1 && manage_profile_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       7) declare -F delete_profile_menu >/dev/null 2>&1 && delete_profile_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
-      8) declare -F update_command >/dev/null 2>&1 && update_command || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      8) if declare -F update_command >/dev/null 2>&1; then
+           update_command
+           _status_pause
+         else
+           echo -e "${YELLOW}  Модуль недоступен${NC}"
+           _status_pause
+         fi ;;
       0|"") return 0 ;;
       *) echo -e "${RED}  Неверный выбор${NC}" ;;
     esac
@@ -8242,7 +8251,7 @@ _status_repair_2_port443() {
   fi
   if ! _status_has_443_inbound; then
     echo -e "${RED}  ✗ В ${CONFIG_FILE} нет inbound на :443 — перезапуск не поможет${NC}"
-    echo -e "${YELLOW}  Создайте профиль или настройте self-steal (меню 16).${NC}"
+    echo -e "${YELLOW}  Создайте пользователя или запустите мастер: sudo xraytailscale wizard${NC}"
     return 1
   fi
   echo -e "${CYAN}  → Inbound :443 есть, но не слушается — перезапуск Xray...${NC}"
@@ -8786,7 +8795,7 @@ create_profile_menu() {
   echo ""
   echo -e "${CYAN} 1)${NC} Multi-route профиль ${YELLOW}(ручной режим, как готовая HAPP-подписка)${NC}"
   echo -e "    ${GREEN}✓${NC} Семь маршрутов в одном профиле: xhttp-legacy, xhttp-pq, TCP, gRPC"
-  echo -e "    ${BLUE}ℹ${NC} Обычному HAPP-пользователю проще выбрать пункт 9 в главном меню"
+  echo -e "    ${BLUE}ℹ${NC} Обычному HAPP-пользователю проще выбрать «Дополнительно → Управление подпиской HAPP»"
   echo ""
   echo -e "${CYAN} 2)${NC} VLESS + TCP + Reality + Vision ${YELLOW}(legacy, отдельный профиль)${NC}"
   echo -e "    ${GREEN}✓${NC} Для sing-box, Hiddify, NekoBox, mihomo и старых клиентов без PQ"
@@ -12305,7 +12314,7 @@ selfsteal_remove() {
   rm -f "$SELFSTEAL_DOMAIN_FILE" "$SELFSTEAL_PORT_FILE"
   echo -e "${GREEN}✓ Сайт и nginx-конфиг self-steal удалены${NC}"
   echo -e "${YELLOW}⚠ Профиль и inbound :443 НЕ удалены автоматически.${NC}"
-  echo -e "${YELLOW}  Удалите профиль через меню 2 — иначе Reality dest указывает на несуществующий сайт.${NC}"
+  echo -e "${YELLOW}  Удалите пользователя через «Дополнительно → Удалить пользователя» — иначе Reality dest указывает на несуществующий сайт.${NC}"
   if [[ -n "$domain" && -d "/etc/letsencrypt/live/${domain}" ]]; then
     echo -e "${YELLOW}  Сертификат LE оставлен. Удалить вручную: certbot delete --cert-name ${domain}${NC}"
   fi

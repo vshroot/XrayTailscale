@@ -1254,7 +1254,7 @@ _migrate_bypass_routing_2026() {
   if [[ "$ans" =~ ^[yYдД]$ ]]; then
     _bypass_apply_bundle
   else
-    echo -e "${CYAN}Пропущено. Можно настроить позже через главное меню → пункт 11.${NC}"
+    echo -e "${CYAN}Пропущено. Можно настроить позже через «Дополнительно → Каскад / upstream → Обход VPN».${NC}"
     sleep 1
   fi
 

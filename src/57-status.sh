@@ -513,7 +513,7 @@ _status_extra_menu() {
     echo -e "${CYAN} 1)${NC} Пакетное добавление пользователей"
     echo -e "${CYAN} 2)${NC} Tailscale exit node"
     echo -e "${CYAN} 3)${NC} Каскад / upstream"
-    echo -e "${CYAN} 4)${NC} Управление подпиской HAPP"
+    echo -e "${CYAN} 4)${NC} Подписка HAPP (создать / управлять)"
     echo -e "${CYAN} 5)${NC} Self-steal (статус/удаление)"
     echo -e "${CYAN} 6)${NC} Профили advanced (SNI/порт/fingerprint)"
     echo -e "${CYAN} 7)${NC} Удалить пользователя"
@@ -525,11 +525,17 @@ _status_extra_menu() {
       1) declare -F bulk_happ_users_menu >/dev/null 2>&1 && bulk_happ_users_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       2) declare -F tailscale_exit_node_menu >/dev/null 2>&1 && tailscale_exit_node_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       3) declare -F cascade_mode_menu >/dev/null 2>&1 && cascade_mode_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
-      4) declare -F manage_subscription_menu >/dev/null 2>&1 && manage_subscription_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      4) declare -F happ_subscription_menu >/dev/null 2>&1 && happ_subscription_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       5) declare -F selfsteal_menu >/dev/null 2>&1 && selfsteal_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       6) declare -F manage_profile_menu >/dev/null 2>&1 && manage_profile_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
       7) declare -F delete_profile_menu >/dev/null 2>&1 && delete_profile_menu || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
-      8) declare -F update_command >/dev/null 2>&1 && update_command || { echo -e "${YELLOW}  Модуль недоступен${NC}"; _status_pause; } ;;
+      8) if declare -F update_command >/dev/null 2>&1; then
+           update_command
+           _status_pause
+         else
+           echo -e "${YELLOW}  Модуль недоступен${NC}"
+           _status_pause
+         fi ;;
       0|"") return 0 ;;
       *) echo -e "${RED}  Неверный выбор${NC}" ;;
     esac
@@ -739,7 +745,7 @@ _status_repair_2_port443() {
   fi
   if ! _status_has_443_inbound; then
     echo -e "${RED}  ✗ В ${CONFIG_FILE} нет inbound на :443 — перезапуск не поможет${NC}"
-    echo -e "${YELLOW}  Создайте профиль или настройте self-steal (меню 16).${NC}"
+    echo -e "${YELLOW}  Создайте пользователя или запустите мастер: sudo xraytailscale wizard${NC}"
     return 1
   fi
   echo -e "${CYAN}  → Inbound :443 есть, но не слушается — перезапуск Xray...${NC}"

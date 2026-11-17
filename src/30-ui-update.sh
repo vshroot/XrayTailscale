@@ -297,7 +297,10 @@ _cleanup_xray_backups() {
 }
 
 # CLI subcommand: xraytailscale update (REQ-B02)
-# Запускает update_xray_core, отображает заголовок, возвращает exit code функции.
+# Запускает update_xray_core, отображает заголовок.
+# Возвращает exit code функции, НЕ exit: иначе вызов из «Дополнительно»
+# закрыл бы весь менеджер вместо возврата в меню. CLI (src/99-dispatch.sh)
+# и так отдаёт код возврата как статус процесса.
 update_command() {
   echo -e "${BLUE}╔════════════════════════════════════════════════════╗${NC}"
   echo -e "${BLUE}║  XrayTailscale: обновление Xray-core               ║${NC}"
@@ -312,7 +315,7 @@ update_command() {
     2) echo -e "${RED}✗ Критическая ошибка обновления${NC}" ;;
     3) echo -e "${YELLOW}⚠ Откат на старую версию${NC}" ;;
   esac
-  exit $rc
+  return $rc
 }
 
 # Nag: предупреждение об устаревшем Xray-core в main_menu (REQ-B02)

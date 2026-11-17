@@ -9,7 +9,7 @@ create_profile_menu() {
   echo ""
   echo -e "${CYAN} 1)${NC} Multi-route профиль ${YELLOW}(ручной режим, как готовая HAPP-подписка)${NC}"
   echo -e "    ${GREEN}✓${NC} Семь маршрутов в одном профиле: xhttp-legacy, xhttp-pq, TCP, gRPC"
-  echo -e "    ${BLUE}ℹ${NC} Обычному HAPP-пользователю проще выбрать пункт 9 в главном меню"
+  echo -e "    ${BLUE}ℹ${NC} Обычному HAPP-пользователю проще выбрать «Дополнительно → Управление подпиской HAPP»"
   echo ""
   echo -e "${CYAN} 2)${NC} VLESS + TCP + Reality + Vision ${YELLOW}(legacy, отдельный профиль)${NC}"
   echo -e "    ${GREEN}✓${NC} Для sing-box, Hiddify, NekoBox, mihomo и старых клиентов без PQ"

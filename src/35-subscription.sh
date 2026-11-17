@@ -1192,7 +1192,7 @@ manage_subscription_menu() {
   echo ""
 
   if [[ ! -f /usr/local/etc/xray/.subscription_installed ]]; then
-    echo -e "${RED}✗ Подписка не установлена. Сначала выберите 'Установить'.${NC}"
+    echo -e "${RED}✗ Подписка не установлена. Создайте её в «Дополнительно → Управление подпиской HAPP».${NC}"
     sleep 2
     return
   fi
@@ -1604,11 +1604,11 @@ happ_subscription_menu() {
     echo -e "${CYAN} 4)${NC} Управление существующими подписками (URL / QR / revoke)"
     echo -e "${CYAN} 5)${NC} Настройки HAPP (.happ_defaults.env)"
     echo -e "${CYAN} 6)${NC} Настроить announcement (HAPP)"
-    echo -e "${CYAN} 0)${NC} Назад в главное меню"
+    echo -e "${CYAN} 0)${NC} Назад"
     echo ""
     echo -n -e "${YELLOW}Выбор: ${NC}"
     local c
-    read -r c
+    read -r c || return 0
     case "$c" in
       1|"") install_subscription_ip_tls ;;
       2) install_subscription_public_tls ;;
