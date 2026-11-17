@@ -26,7 +26,7 @@ grep -q '^configure_tailscale_exit_node()' xraytailscale || fail "missing exit-n
 grep -q -- '--advertise-exit-node' xraytailscale || fail "Tailscale must advertise exit node"
 grep -q 'tailscale set --advertise-exit-node' xraytailscale || fail "existing Tailscale node must be able to advertise exit node"
 grep -q '^tailscale_exit_node_menu()' xraytailscale || fail "missing Tailscale exit-node menu"
-grep -Fq 'Tailscale exit node не VLESS-профиль' xraytailscale || fail "create profile menu must expose Tailscale as a non-VLESS option"
+grep -Fq 'Tailscale exit node is not a VLESS profile' xraytailscale || fail "create profile menu must expose Tailscale as a non-VLESS option"
 grep -q '8) tailscale_exit_node_menu' xraytailscale || fail "create profile menu option 8 must route to Tailscale menu"
 echo "  ✓ exit-node menu path ok"
 

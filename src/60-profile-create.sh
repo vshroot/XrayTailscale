@@ -1,83 +1,83 @@
 create_profile_menu() {
   show_ascii
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
-  echo -e "${BLUE}        СОЗДАНИЕ НОВОГО ПРОФИЛЯ               ${NC}"
+  echo -e "${BLUE}        CREATE NEW PROFILE               ${NC}"
   echo -e "${BLUE}═══════════════════════════════════════════════${NC}\n"
   echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${BLUE}║              ВЫБЕРИТЕ ТИП ПРОФИЛЯ                         ║${NC}"
+  echo -e "${BLUE}║              CHOOSE PROFILE TYPE                         ║${NC}"
   echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "${CYAN} 1)${NC} Multi-route профиль ${YELLOW}(ручной режим, как готовая HAPP-подписка)${NC}"
-  echo -e "    ${GREEN}✓${NC} Семь маршрутов в одном профиле: xhttp-legacy, xhttp-pq, TCP, gRPC"
-  echo -e "    ${BLUE}ℹ${NC} Обычному HAPP-пользователю проще выбрать «Дополнительно → Управление подпиской HAPP»"
+  echo -e "${CYAN} 1)${NC} Multi-route profile ${YELLOW}(manual mode, like a ready HAPP subscription)${NC}"
+  echo -e "    ${GREEN}✓${NC} Seven routes in one profile: xhttp-legacy, xhttp-pq, TCP, gRPC"
+  echo -e "    ${BLUE}ℹ${NC} A regular HAPP user should pick More → HAPP subscription instead"
   echo ""
-  echo -e "${CYAN} 2)${NC} VLESS + TCP + Reality + Vision ${YELLOW}(legacy, отдельный профиль)${NC}"
-  echo -e "    ${GREEN}✓${NC} Для sing-box, Hiddify, NekoBox, mihomo и старых клиентов без PQ"
-  echo -e "    ${YELLOW}⚠${NC} На мобильных сетях режется чаще, чем XHTTP/Mux"
+  echo -e "${CYAN} 2)${NC} VLESS + TCP + Reality + Vision ${YELLOW}(legacy, separate profile)${NC}"
+  echo -e "    ${GREEN}✓${NC} For sing-box, Hiddify, NekoBox, mihomo and older clients without PQ"
+  echo -e "    ${YELLOW}⚠${NC} Throttled more often than XHTTP/Mux on mobile networks"
   echo ""
   echo -e "${CYAN} 3)${NC} VLESS + XHTTP + Reality + ${MAGENTA}Post-Quantum (mlkem768x25519plus.native)${NC}"
-  echo -e "    ${GREEN}✓${NC} ML-KEM-768 защита от harvest-now-decrypt-later атак"
-  echo -e "    ${GREEN}✓${NC} Самый ровный вариант под ТСПУ-2026: мобильные сети и домашние ISP"
-  echo -e "    ${GREEN}✓${NC} Path и порт генерируются случайно, host берётся из текущего SNI"
-  echo -e "    ${YELLOW}⚠${NC} Клиент должен поддерживать VLESS PQ encryption:"
+  echo -e "    ${GREEN}✓${NC} ML-KEM-768 protection against harvest-now-decrypt-later attacks"
+  echo -e "    ${GREEN}✓${NC} The smoothest option for TSPU-2026: mobile networks and home ISPs"
+  echo -e "    ${GREEN}✓${NC} Path and port are generated randomly, host comes from the current SNI"
+  echo -e "    ${YELLOW}⚠${NC} The client must support VLESS PQ encryption:"
   echo -e "       ${GREEN}✓${NC} HAPP 2.10+, v2rayNG 1.10+, v2rayN PR#7782+, Shadowrocket (последние версии)"
-  echo -e "       ${RED}✗${NC} sing-box, NekoBox, Hiddify, mihomo — для них выберите пункт 2"
+  echo -e "       ${RED}✗${NC} sing-box, NekoBox, Hiddify, mihomo — choose option 2 for them"
   echo ""
-  echo -e "${CYAN} 4)${NC} VLESS + TCP + Reality + Mux ${GREEN}(случайный высокий порт)${NC}"
-  echo -e "    ${GREEN}✓${NC} Хороший запасной вариант, если XHTTP-клиента нет"
-  echo -e "    ${GREEN}✓${NC} Часто ведёт себя лучше Vision на мобильных сетях"
-  echo -e "    ${BLUE}ℹ${NC} Mux включается на клиенте, без Vision-flow"
+  echo -e "${CYAN} 4)${NC} VLESS + TCP + Reality + Mux ${GREEN}(random high port)${NC}"
+  echo -e "    ${GREEN}✓${NC} A good fallback if there is no XHTTP client"
+  echo -e "    ${GREEN}✓${NC} Often behaves better than Vision on mobile networks"
+  echo -e "    ${BLUE}ℹ${NC} Mux is enabled on the client, without Vision-flow"
   echo ""
-  echo -e "${CYAN} 5)${NC} VLESS + gRPC + Reality ${YELLOW}(случайный высокий порт)${NC}"
-  echo -e "    ${YELLOW}⚠${NC} Работает только с SNI, где стабилен HTTP/2"
-  echo -e "    ${YELLOW}⚠${NC} На части РУ-провайдеров и старых клиентов совместимость хуже"
-  echo -e "    ${BLUE}ℹ${NC} serviceName генерируется случайно и сохраняется в профиле"
+  echo -e "${CYAN} 5)${NC} VLESS + gRPC + Reality ${YELLOW}(random high port)${NC}"
+  echo -e "    ${YELLOW}⚠${NC} Only works with SNI where HTTP/2 is stable"
+  echo -e "    ${YELLOW}⚠${NC} Worse compatibility on some RU providers and older clients"
+  echo -e "    ${BLUE}ℹ${NC} serviceName is generated randomly and saved in the profile"
   echo ""
-  echo -e "${CYAN} 6)${NC} VLESS + TCP + Reality + Vision + uTLS ${MAGENTA}(случайный высокий порт, Firefox)${NC}"
-  echo -e "    ${GREEN}✓${NC} Подменяет TLS fingerprint под Firefox"
-  echo -e "    ${BLUE}ℹ${NC} Имеет смысл на проводных линиях, где обычный Vision режется по fingerprint"
-  echo -e "    ${YELLOW}⚠${NC} На мобильных сетях всё равно лучше сначала пробовать XHTTP"
+  echo -e "${CYAN} 6)${NC} VLESS + TCP + Reality + Vision + uTLS ${MAGENTA}(random high port, Firefox)${NC}"
+  echo -e "    ${GREEN}✓${NC} Spoofs the TLS fingerprint to Firefox"
+  echo -e "    ${BLUE}ℹ${NC} Makes sense on wired lines where plain Vision is throttled by fingerprint"
+  echo -e "    ${YELLOW}⚠${NC} On mobile networks it is still better to try XHTTP first"
   echo ""
-  echo -e "${CYAN} 7)${NC} VLESS + TCP + Reality + Vision + XUDP ${YELLOW}(случайный высокий порт, anti-Tele2)${NC}"
-  echo -e "    ${GREEN}✓${NC} Может помочь на самых жёстких мобильных фильтрах"
+  echo -e "${CYAN} 7)${NC} VLESS + TCP + Reality + Vision + XUDP ${YELLOW}(random high port, anti-Tele2)${NC}"
+  echo -e "    ${GREEN}✓${NC} May help on the strictest mobile filters"
   echo -e "    ${GREEN}✓${NC} xtls-rprx-vision + xudp"
-  echo -e "    ${GREEN}✓${NC} SNI: api-maps.yandex.ru по умолчанию"
-  echo -e "    ${YELLOW}⚠${NC} Узкий сценарий, не базовый дефолт"
+  echo -e "    ${GREEN}✓${NC} SNI: api-maps.yandex.ru by default"
+  echo -e "    ${YELLOW}⚠${NC} A narrow scenario, not the base default"
   echo ""
-  echo -e "${CYAN} 8)${NC} Tailscale exit node не VLESS-профиль"
-  echo -e "    ${BLUE}ℹ${NC} Устанавливает Tailscale и объявляет VPS как exit node"
-  echo -e "    ${BLUE}ℹ${NC} Не создаёт Xray/VLESS profile JSON"
+  echo -e "${CYAN} 8)${NC} Tailscale exit node is not a VLESS profile"
+  echo -e "    ${BLUE}ℹ${NC} Installs Tailscale and advertises the VPS as an exit node"
+  echo -e "    ${BLUE}ℹ${NC} Does not create an Xray/VLESS profile JSON"
   echo ""
-  echo -e "${CYAN} 0)${NC} Назад в главное меню"
+  echo -e "${CYAN} 0)${NC} Back to main menu"
   echo ""
   echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
-  echo -n -e "${YELLOW}Ваш выбор: ${NC}"
+  echo -n -e "${YELLOW}Your choice: ${NC}"
   read -r route_choice
   case $route_choice in
     1|2|3|4|5|6|7|xorpub) ;;
     8) tailscale_exit_node_menu; return ;;
     0) return ;;
-    *) echo -e "${RED}Неверный выбор${NC}"; sleep 2; return ;;
+    *) echo -e "${RED}Invalid choice${NC}"; sleep 2; return ;;
   esac
 
   echo ""
-  echo -n -e "${YELLOW}Введите имя профиля (или 0 для отмены): ${NC}"
+  echo -n -e "${YELLOW}Enter a profile name (or 0 to cancel): ${NC}"
   read -r profile_name
   if [[ "$profile_name" == "0" ]]; then
     return
   fi
   if [[ -z "$profile_name" ]]; then
-    echo -e "${RED}✗ Имя не может быть пустым${NC}"
+    echo -e "${RED}✗ The name cannot be empty${NC}"
     sleep 2
     return
   fi
   if [[ ! "$profile_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-    echo -e "${RED}✗ Используйте только буквы, цифры, дефис и подчеркивание${NC}"
+    echo -e "${RED}✗ Use only letters, digits, hyphen and underscore${NC}"
     sleep 2
     return
   fi
   if [[ -f "$PROFILES_DIR/$profile_name.json" ]]; then
-    echo -e "${RED}✗ Профиль с таким именем уже существует${NC}"
+    echo -e "${RED}✗ A profile with this name already exists${NC}"
     sleep 2
     return
   fi
@@ -94,10 +94,10 @@ create_profile_menu() {
       # Hidden advanced opt-in (research §«Code Examples» #8 / D1 second-opinion).
       # xorpub mode = security theater в контексте Reality (codex+kimi подтвердили 2026-05-09).
       # Доступен ТОЛЬКО через ввод буквенного "xorpub" в TUI (обычный юзер не наберёт).
-      echo -e "${MAGENTA}[ADVANCED] xorpub режим выбран${NC}"
-      echo -e "${YELLOW}⚠ xorpub = security theater для Reality. Только для отладки/тестирования.${NC}"
-      echo -e "${YELLOW}  Plan 6.2 не реализует отдельный xorpub-параметр vlessenc — профиль будет создан${NC}"
-      echo -e "${YELLOW}  с дефолтным native ключом. xorpub-генерация — backlog (defer to v2.1).${NC}"
+      echo -e "${MAGENTA}[ADVANCED] xorpub mode selected${NC}"
+      echo -e "${YELLOW}⚠ xorpub = security theater for Reality. For debugging/testing only.${NC}"
+      echo -e "${YELLOW}  Plan 6.2 does not implement a separate xorpub vlessenc parameter — the profile will be created${NC}"
+      echo -e "${YELLOW}  with the default native key. xorpub generation is backlog (defer to v2.1).${NC}"
       sleep 3
       create_profile "$profile_name" "xhttp" "" "$DEFAULT_CLIENT_FINGERPRINT"
       ;;
@@ -114,7 +114,7 @@ create_profile_all_routes() {
   local sub_token
   sub_token=$(openssl rand -hex 16)
   if [[ ! "$sub_token" =~ ^[a-f0-9]{32}$ ]]; then
-    echo -e "${RED}✗ Не удалось сгенерировать sub_token (openssl?)${NC}"
+    echo -e "${RED}✗ Could not generate sub_token (openssl?)${NC}"
     return 1
   fi
 
@@ -149,7 +149,7 @@ create_profile_all_routes() {
       + (if $pq_enabled then {pq_enabled: true, schema_version: 2} else {} end)
       + (if $grpc_service_name != "" then {grpc_service_name: $grpc_service_name} else {} end)
       + (if $xhttp_path != "" then {xhttp_path: $xhttp_path} else {} end)' >> "$routes_tmp"; then
-      echo -e "${RED}✗ Не удалось собрать JSON маршрута ${route_label}${NC}"
+      echo -e "${RED}✗ Could not build the JSON for route ${route_label}${NC}"
       return 1
     fi
   }
@@ -187,18 +187,18 @@ create_profile_all_routes() {
   local routes_json
   routes_json=$(jq -s '.' "$routes_tmp") || {
     rm -f "$routes_tmp"
-    echo -e "${RED}✗ Не удалось собрать JSON маршрутов${NC}"
+    echo -e "${RED}✗ Could not build the routes JSON${NC}"
     return 1
   }
   rm -f "$routes_tmp"
 
   local route_count
   route_count=$(jq 'length' <<< "$routes_json") || {
-    echo -e "${RED}✗ Не удалось проверить количество маршрутов${NC}"
+    echo -e "${RED}✗ Could not verify the route count${NC}"
     return 1
   }
   if [[ "$route_count" != "7" ]]; then
-    echo -e "${RED}✗ Multi-route профиль собран некорректно: маршрутов ${route_count}, ожидалось 7${NC}"
+    echo -e "${RED}✗ Multi-route profile built incorrectly: ${route_count} routes, expected 7${NC}"
     return 1
   fi
 
@@ -227,7 +227,7 @@ create_profile_all_routes() {
         pq_enabled: ($routes[0].pq_enabled // false)
       }' > "$PROFILES_DIR/$name.json"; then
     rm -f "$PROFILES_DIR/$name.json"
-    echo -e "${RED}✗ Не удалось создать JSON профиля${NC}"
+    echo -e "${RED}✗ Could not create the profile JSON${NC}"
     return 1
   fi
 
@@ -252,11 +252,11 @@ create_profile_all_routes() {
     if [[ "$transport" == "xhttp" && "$xhttp" != /* ]]; then
       _restore_config_backup "$rollback_config" >/dev/null 2>&1 || true
       rm -f "$PROFILES_DIR/$name.json"
-      echo -e "${RED}✗ XHTTP route ${label} собран без path; профиль удалён${NC}"
+      echo -e "${RED}✗ XHTTP route ${label} built without a path; profile removed${NC}"
       return 1
     fi
 
-    echo -e "${CYAN} → Маршрут ${label}: ${transport} :${port}${NC}"
+    echo -e "${CYAN} → Route ${label}: ${transport} :${port}${NC}"
     if ! add_inbound "$uuid" "$transport" "$port" "$sni" "$fingerprint" "$grpc" "$xhttp" "$pq"; then
       _restore_config_backup "$rollback_config" >/dev/null 2>&1 || true
       rm -f "$PROFILES_DIR/$name.json"
@@ -264,9 +264,9 @@ create_profile_all_routes() {
       for p in "${created_ports[@]}"; do
         close_firewall_port "$p"
       done
-      echo -e "${RED}✗ Не удалось создать маршрут ${label}; профиль удалён, config.json откатан${NC}"
+      echo -e "${RED}✗ Could not create route ${label}; profile removed, config.json rolled back${NC}"
       if [[ "$pause_after" != "no_pause" ]]; then
-        echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+        echo -n -e "${YELLOW}Press Enter to continue...${NC}"
         read -r _
       fi
       return 1
@@ -282,12 +282,12 @@ create_profile_all_routes() {
     done
     echo ""
     echo -e "${RED}╔═══════════════════════════════════════════════${NC}"
-    echo -e "${RED}         ✗ ПРОФИЛЬ НЕ АКТИВИРОВАН             ${NC}"
+    echo -e "${RED}         ✗ PROFILE NOT ACTIVATED             ${NC}"
     echo -e "${RED}╚═══════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${RED}Xray не принял multi-route конфигурацию. Профиль удалён, config.json откатан.${NC}"
+    echo -e "${RED}Xray rejected the multi-route config. Profile removed, config.json rolled back.${NC}"
     if [[ "$pause_after" != "no_pause" ]]; then
-      echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+      echo -n -e "${YELLOW}Press Enter to continue...${NC}"
       read -r _
     fi
     return 1
@@ -295,12 +295,12 @@ create_profile_all_routes() {
 
   echo ""
   echo -e "${GREEN}╔═══════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}         ✓ ПРОФИЛЬ УСПЕШНО СОЗДАН!            ${NC}"
+  echo -e "${GREEN}         ✓ PROFILE CREATED SUCCESSFULLY!            ${NC}"
   echo -e "${GREEN}╚═══════════════════════════════════════════════${NC}"
   echo ""
-  echo -e "${BLUE}Имя профиля:${NC} ${GREEN}$name${NC}"
+  echo -e "${BLUE}Profile name:${NC} ${GREEN}$name${NC}"
   echo -e "${BLUE}UUID:${NC} $uuid"
-  echo -e "${BLUE}Маршрутов:${NC} $(jq 'length' <<< "$routes_json")"
+  echo -e "${BLUE}Routes:${NC} $(jq 'length' <<< "$routes_json")"
   jq -r '.[] | "  - \(.label): \(.transport) :\(.port) sni=\(.sni)"' <<< "$routes_json"
 
   if [[ "$subscription_output" != "hide_subscription" ]]; then
@@ -308,16 +308,16 @@ create_profile_all_routes() {
       _happ_print_subscription_url_for_profile "$name"
     else
       echo ""
-      echo -e "${YELLOW}ℹ HAPP-подписка ещё не установлена. Включите через 'Главное меню → Подписка HAPP'.${NC}"
+      echo -e "${YELLOW}ℹ HAPP subscription is not installed yet. Enable it via Main menu → HAPP subscription.${NC}"
     fi
   fi
 
   echo ""
-  echo -e "${CYAN}Одна подписка этого профиля отдаёт все маршруты.${NC}"
+  echo -e "${CYAN}One subscription for this profile serves all routes.${NC}"
   echo ""
   fix_xray_permissions
   if [[ "$pause_after" != "no_pause" ]]; then
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read -r _
   fi
 }
@@ -341,7 +341,7 @@ create_profile() {
   local sub_token
   sub_token=$(openssl rand -hex 16)
   if [[ ! "$sub_token" =~ ^[a-f0-9]{32}$ ]]; then
-    echo -e "${RED}✗ Не удалось сгенерировать sub_token (openssl?)${NC}"
+    echo -e "${RED}✗ Could not generate sub_token (openssl?)${NC}"
     return 1
   fi
 
@@ -350,7 +350,7 @@ create_profile() {
 
   if [[ -z "$port" ]]; then
     if ! defaults=$(build_transport_defaults "$transport"); then
-      echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+      echo -n -e "${YELLOW}Press Enter to continue...${NC}"
       read
       return 1
     fi
@@ -362,7 +362,7 @@ create_profile() {
   # gRPC требует SNI с поддержкой HTTP/2 (только зарубежные!)
   if [[ "$transport" == "grpc" ]]; then
     default_sni="www.cloudflare.com"
-    echo -e "${YELLOW}⚠ gRPC: используется SNI ${CYAN}$default_sni${YELLOW} (требуется HTTP/2)${NC}"
+    echo -e "${YELLOW}⚠ gRPC: using SNI ${CYAN}$default_sni${YELLOW} (HTTP/2 required)${NC}"
   else
     # Read first valid SNI (skip comments and empty lines)
     default_sni=$(grep -v '^#' "$SNI_LIST" 2>/dev/null | grep -v '^[[:space:]]*$' | head -n 1 | cut -d'|' -f1)
@@ -383,7 +383,7 @@ create_profile() {
 
   if [[ "$port" == "443" ]] && [[ "$transport" == "tcp" || "$transport" == "tcp-utls" || "$transport" == "tcp-xudp" ]] && [[ -z "$reality_dest" ]]; then
     if ! confirm_vision_443_risk; then
-      echo -e "${CYAN}✓ Создание профиля отменено${NC}"
+      echo -e "${CYAN}✓ Profile creation cancelled${NC}"
       sleep 1
       return 0
     fi
@@ -415,7 +415,7 @@ create_profile() {
   jq_expr+=', sub_token: $sub_token, created: $created}'
   if ! jq -n "${jq_args[@]}" "$jq_expr" > "$PROFILES_DIR/$name.json"; then
     rm -f "$PROFILES_DIR/$name.json"
-    echo -e "${RED}✗ Не удалось создать JSON профиля${NC}"
+    echo -e "${RED}✗ Could not create the profile JSON${NC}"
     return 1
   fi
 
@@ -428,13 +428,13 @@ create_profile() {
     rm -f "$PROFILES_DIR/$name.json"
     echo ""
     echo -e "${RED}╔═══════════════════════════════════════════════${NC}"
-    echo -e "${RED}         ✗ ОШИБКА СОЗДАНИЯ ПРОФИЛЯ            ${NC}"
+    echo -e "${RED}         ✗ PROFILE CREATION ERROR            ${NC}"
     echo -e "${RED}╚═══════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${RED}Inbound не создан — файл профиля удалён.${NC}"
-    echo -e "${YELLOW}Попробуйте другой порт или транспорт.${NC}"
+    echo -e "${RED}Inbound not created — the profile file was removed.${NC}"
+    echo -e "${YELLOW}Try a different port or transport.${NC}"
     echo ""
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read
     return 1
   fi
@@ -444,13 +444,13 @@ create_profile() {
     close_firewall_port "$port"
     echo ""
     echo -e "${RED}╔═══════════════════════════════════════════════${NC}"
-    echo -e "${RED}         ✗ ПРОФИЛЬ НЕ АКТИВИРОВАН             ${NC}"
+    echo -e "${RED}         ✗ PROFILE NOT ACTIVATED             ${NC}"
     echo -e "${RED}╚═══════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${RED}Xray не принял новую конфигурацию. Профиль удалён, config.json откатан.${NC}"
-    echo -e "${YELLOW}Проверьте последний бэкап в /usr/local/etc/xray/backups/.${NC}"
+    echo -e "${RED}Xray rejected the new config. Profile removed, config.json rolled back.${NC}"
+    echo -e "${YELLOW}Check the latest backup in /usr/local/etc/xray/backups/.${NC}"
     echo ""
-    echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+    echo -n -e "${YELLOW}Press Enter to continue...${NC}"
     read
     return 1
   fi
@@ -461,13 +461,13 @@ create_profile() {
 
   echo ""
   echo -e "${GREEN}╔═══════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}         ✓ ПРОФИЛЬ УСПЕШНО СОЗДАН!            ${NC}"
+  echo -e "${GREEN}         ✓ PROFILE CREATED SUCCESSFULLY!            ${NC}"
   echo -e "${GREEN}╚═══════════════════════════════════════════════${NC}"
   echo ""
-  echo -e "${BLUE}Имя профиля:${NC} ${GREEN}$name${NC}"
+  echo -e "${BLUE}Profile name:${NC} ${GREEN}$name${NC}"
   echo -e "${BLUE}UUID:${NC} $uuid"
-  echo -e "${BLUE}Транспорт:${NC} $transport"
-  echo -e "${BLUE}Порт:${NC} $port"
+  echo -e "${BLUE}Transport:${NC} $transport"
+  echo -e "${BLUE}Port:${NC} $port"
   echo -e "${BLUE}Fingerprint:${NC} $fingerprint"
   echo -e "${BLUE}SNI:${NC} $actual_sni"
 
@@ -477,14 +477,14 @@ create_profile() {
     _happ_print_subscription_url_for_profile "$name"
   else
     echo ""
-    echo -e "${YELLOW}ℹ HAPP-подписка ещё не установлена. Включите через 'Главное меню → Подписка HAPP'.${NC}"
+    echo -e "${YELLOW}ℹ HAPP subscription is not installed yet. Enable it via Main menu → HAPP subscription.${NC}"
   fi
 
   echo ""
-  echo -e "${CYAN}Используйте меню 'Подключиться по профилю' для получения ссылки${NC}"
+  echo -e "${CYAN}Use the 'Connect to profile' menu to get the link${NC}"
   echo ""
   fix_xray_permissions
-  echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
+  echo -n -e "${YELLOW}Press Enter to continue...${NC}"
   read
 }
 
@@ -512,15 +512,15 @@ add_inbound() {
   local vless_decryption="none"
   if [[ "$transport" == "xhttp" && "$pq_enabled" == "true" ]]; then
     if [[ ! -f "$VLESS_DECRYPTION_FILE" ]]; then
-      echo -e "${RED}✗ PQ ключи отсутствуют: $VLESS_DECRYPTION_FILE${NC}"
-      echo -e "${YELLOW}  Перезапустите xraytailscale — миграция .mlkem_keys_generated должна сгенерировать ключи${NC}"
-      echo -e "${YELLOW}  Если миграция падает — проверьте: sudo /usr/local/bin/xray version (нужен ≥ 25.9.5)${NC}"
+      echo -e "${RED}✗ PQ keys are missing: $VLESS_DECRYPTION_FILE${NC}"
+      echo -e "${YELLOW}  Restart xraytailscale — the .mlkem_keys_generated migration should generate the keys${NC}"
+      echo -e "${YELLOW}  If the migration fails, check: sudo /usr/local/bin/xray version (need ≥ 25.9.5)${NC}"
       return 1
     fi
     vless_decryption=$(cat "$VLESS_DECRYPTION_FILE")
     if [[ ! "$vless_decryption" =~ ^mlkem768x25519plus\. ]]; then
-      echo -e "${RED}✗ $VLESS_DECRYPTION_FILE содержит невалидную PQ строку${NC}"
-      echo -e "${YELLOW}  Удалите файл и перезапустите xraytailscale для регенерации${NC}"
+      echo -e "${RED}✗ $VLESS_DECRYPTION_FILE contains an invalid PQ string${NC}"
+      echo -e "${YELLOW}  Delete the file and restart xraytailscale to regenerate${NC}"
       return 1
     fi
   fi
@@ -539,8 +539,8 @@ add_inbound() {
 
     if [[ -n "$existing_transport" ]] && [[ "$expected_network" != "$existing_transport" ]]; then
       echo ""
-      echo -e "${RED}✗ Порт $port уже используется с транспортом '$existing_transport' (несовместимо с '$transport')${NC}"
-      echo -e "${YELLOW}Используйте другой порт для транспорта '$transport'${NC}"
+      echo -e "${RED}✗ Port $port is already used with transport '$existing_transport' (incompatible with '$transport')${NC}"
+      echo -e "${YELLOW}Use a different port for transport '$transport'${NC}"
       return 1
     fi
 
@@ -552,14 +552,14 @@ add_inbound() {
     if [[ -n "$existing_sni" ]] && [[ "$existing_sni" != "$sni" ]]; then
       echo ""
       echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-      echo -e "${RED}║         ⚠ КОНФЛИКТ SNI НА ПОРТУ $port                    ║${NC}"
+      echo -e "${RED}║         ⚠ SNI CONFLICT ON PORT $port                    ║${NC}"
       echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
       echo ""
-      echo -e "${YELLOW}Порт $port уже используется с SNI: ${MAGENTA}$existing_sni${NC}"
-      echo -e "${YELLOW}Новый профиль пытается использовать SNI: ${MAGENTA}$sni${NC}"
+      echo -e "${YELLOW}Port $port is already used with SNI: ${MAGENTA}$existing_sni${NC}"
+      echo -e "${YELLOW}The new profile tries to use SNI: ${MAGENTA}$sni${NC}"
       echo ""
-      echo -e "${CYAN}Xray Reality не поддерживает разные SNI на одном порту.${NC}"
-      echo -e "${CYAN}Профиль будет создан с SNI: ${YELLOW}$existing_sni${NC}"
+      echo -e "${CYAN}Xray Reality does not support different SNI on one port.${NC}"
+      echo -e "${CYAN}The profile will be created with SNI: ${YELLOW}$existing_sni${NC}"
       echo ""
       sleep 3
 
@@ -573,7 +573,7 @@ add_inbound() {
         local pf_uuid=$(jq -r '.uuid' "$pf" 2>/dev/null)
         if [[ "$pf_uuid" == "$uuid" ]]; then
           safe_jq_write --arg sni "$existing_sni" '.sni = $sni' "$pf" || \
-            echo -e "${YELLOW}  ⚠ Не удалось обновить SNI в профиле$(basename "$pf")${NC}"
+            echo -e "${YELLOW}  ⚠ Could not update SNI in profile $(basename "$pf")${NC}"
           break
         fi
       done
@@ -588,10 +588,10 @@ add_inbound() {
       inbound_metadata=$(read_inbound_transport_metadata "$port" "$transport")
       IFS='|' read -r inbound_grpc_service_name inbound_xhttp_path <<< "$inbound_metadata"
       write_profile_transport_metadata "$profile_file" "$inbound_grpc_service_name" "$inbound_xhttp_path" || \
-        echo -e "${YELLOW}  ⚠ Не удалось синхронизировать transport metadata профиля $(basename "$profile_file")${NC}"
+        echo -e "${YELLOW}  ⚠ Could not sync transport metadata for profile $(basename "$profile_file")${NC}"
     fi
 
-    echo -e "${CYAN} → Добавление клиента в существующий inbound на порту $port${NC}"
+    echo -e "${CYAN} → Adding a client to the existing inbound on port $port${NC}"
     # Phase 6 note: decryption инбаунда НЕ меняется здесь.
     # Если existing inbound имеет decryption: "none", а транспорт xhttp — новый клиент
     # технически добавится в clients[], но его vless:// URL без encryption= НЕ будет работать.
@@ -609,13 +609,13 @@ add_inbound() {
         "flow": $flow
       }]
     ' "$CONFIG_FILE"; then
-      echo -e "${RED}  ✗ Не удалось добавить клиента в inbound${NC}"
+      echo -e "${RED}  ✗ Could not add the client to the inbound${NC}"
       return 1
     fi
     return
   fi
 
-  echo -e "${CYAN} → Создание нового inbound на порту $port${NC}"
+  echo -e "${CYAN} → Creating a new inbound on port $port${NC}"
   local inbound=""
   case $transport in
     tcp-mux)
@@ -750,14 +750,14 @@ XHTTPEOF
   esac
 
   if ! safe_jq_write ".inbounds += [$inbound]" "$CONFIG_FILE"; then
-    echo -e "${RED}  ✗ Не удалось создать inbound в конфиге${NC}"
+    echo -e "${RED}  ✗ Could not create the inbound in the config${NC}"
     return 1
   fi
 
   # Open firewall port. Не считаем неактивный UFW ошибкой создания профиля:
   # config.json уже валиден, а часть VPS управляет firewall вне ufw.
   open_firewall_port "$port" || \
-    echo -e "${YELLOW}  ⚠ Порт $port не был открыт через UFW — проверьте firewall вручную${NC}"
+    echo -e "${YELLOW}  ⚠ Port $port was not opened via UFW — check the firewall manually${NC}"
   return 0
 }
 
