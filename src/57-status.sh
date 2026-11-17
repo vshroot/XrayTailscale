@@ -42,9 +42,17 @@ _status_pause() {
 
 # ─── Чтение маркеров (безопасно к отсутствию файлов) ────────
 _status_sub_port() {
-  local port=""
+  local port="" mode=""
   port=$(cat "$STATUS_SUB_PORT_FILE" 2>/dev/null || true)
   [[ "$port" =~ ^[0-9]+$ ]] || port=""
+  mode=$(cat "$STATUS_SUB_MODE_FILE" 2>/dev/null || true)
+  # domain_tls: внешний :443 слушает Xray Reality, а подписку отдаёт
+  # backend self-steal — слушать надо именно его, иначе check 4 ловит xray.
+  if [[ "$mode" == "domain_tls" && "$port" == "443" ]]; then
+    local backend=""
+    backend=$(_status_selfsteal_backend_port)
+    [[ "$backend" =~ ^[0-9]+$ ]] && port="$backend"
+  fi
   printf '%s\n' "$port"
 }
 
@@ -916,7 +924,23 @@ _status_sub_port_check() {
     return 1
   fi
   backend=$(_status_selfsteal_backend_port)
+  local mode=""
+  mode=$(cat "$STATUS_SUB_MODE_FILE" 2>/dev/null || true)
+  # domain_tls: подписку отдаёт backend self-steal на $backend — это штатный
+  # слушатель, а не конфликт. В IP-режиме backend на маркерном порту = баг.
   if [[ -n "$backend" && "$port" == "$backend" ]]; then
+    if [[ "$mode" == "domain_tls" ]]; then
+      line=$(_status_port_listener "$port")
+      if [[ -z "$line" ]]; then
+        _STATUS_REASON="никто не слушает backend :${port}"
+        return 1
+      fi
+      grep -q 'nginx' <<< "$line" || {
+        _STATUS_REASON="backend :${port} занят чужим процессом ($(_status_listener_process "$line"))"
+        return 1
+      }
+      return 0
+    fi
     _STATUS_REASON="порт :${port} совпадает с backend'ом self-steal"
     return 1
   fi
@@ -937,7 +961,11 @@ _status_sub_port_conflict() {
   local port="${1:-}" backend=""
   [[ -n "$port" ]] || return 1
   backend=$(_status_selfsteal_backend_port)
-  [[ -n "$backend" && "$port" == "$backend" ]] && return 0
+  if [[ -n "$backend" && "$port" == "$backend" ]]; then
+    # domain_tls: backend — штатный слушатель подписки, не конфликт.
+    [[ "$(cat "$STATUS_SUB_MODE_FILE" 2>/dev/null || true)" == "domain_tls" ]] && return 1
+    return 0
+  fi
   [[ -n "$(_status_port_listener "$port")" ]] || return 1
   [[ -n "$port" ]] || return 1
   _status_sub_port_check "$port" >/dev/null 2>&1 && return 1
