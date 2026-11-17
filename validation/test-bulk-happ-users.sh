@@ -181,7 +181,6 @@ type repair_stale_subscription_profiles_core >/dev/null 2>&1 || fail "missing re
 type _list_visible_profile_names >/dev/null 2>&1 || fail "missing _list_visible_profile_names"
 
 ! grep -q '^BULK_DIR=' xraytailscale || fail "BULK_DIR constant should not be required for print-only output"
-grep -q '10) bulk_happ_users_menu' xraytailscale || fail "main menu option 10 must route to bulk HAPP users"
 grep -q 'bulk-repair|subscription-repair)' xraytailscale || fail "CLI must expose bulk-repair and subscription-repair subcommands"
 grep -q 'Show/print user URLs' xraytailscale || fail "bulk menu must expose print URLs action"
 grep -q '_bulk_select_batch_for_print' xraytailscale || fail "bulk menu must use numbered batch selection"

@@ -172,6 +172,5 @@ grep -q 'selfsteal-auto)' "$REPO_ROOT/xraytailscale" || fail "dispatch: нет �
 grep -q 'selfsteal_auto_command' "$REPO_ROOT/xraytailscale" || fail "dispatch: не вызывается selfsteal_auto_command"
 grep -q 'XT_DOMAIN' "$REPO_ROOT/install.sh" || fail "install.sh: нет XT_DOMAIN автодеплоя"
 grep -q 'selfsteal-auto' "$REPO_ROOT/install.sh" || fail "install.sh: не вызывается selfsteal-auto"
-grep -q 'selfsteal_autoconvert_seen' "$REPO_ROOT/xraytailscale" || fail "main_menu: нет авто-конвертации с маркером"
 
 echo "PASS: selfsteal convert (pick/inbound/profiles/nginx-relocate/CLI/install)"

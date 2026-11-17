@@ -365,11 +365,12 @@ for var in STATUS_SUB_MARKER STATUS_SUB_PORT_FILE STATUS_SELFSTEAL_DOMAIN_FILE \
 done
 echo "  ✓ пути маркеров переопределяемы через env"
 
-# ── 10. main_menu не тронут (подключение — следующая фаза) ─
-if grep -q 'status_screen' src/55-main-menu.sh; then
-  fail "src/55-main-menu.sh не должен подключать status_screen в этой фазе"
-fi
-echo "  ✓ src/55-main-menu.sh не изменён (подключение — следующая фаза)"
+# ── 10. main_menu маршрутизирует в status_screen ───────────
+main_menu_body=$(_fn_body src/55-main-menu.sh main_menu)
+[[ -n "$main_menu_body" ]] || fail "не удалось извлечь тело main_menu"
+grep -qE '^[[:space:]]+status_screen[[:space:]]*$' <<< "$main_menu_body" || \
+  fail "src/55-main-menu.sh: main_menu должен вызывать status_screen"
+echo "  ✓ main_menu вызывает status_screen"
 
 # ── 11. Консистентность конфиг/маркер при сбоях (находки quality-ревью) ──
 # Инвариант: если перенос завершился НЕуспешно, конфиг nginx остаётся на
