@@ -65,6 +65,42 @@ TAILSCALE_SYSCTL_EOF
   fi
 
   echo -e "${GREEN}  ✓ IP forwarding enabled${NC}"
+
+  # Tailscale рекомендует UDP GRO forwarding для throughput exit node.
+  # Best-effort: не валим настройку, если ethtool нет или NIC не поддерживает.
+  _tailscale_fix_udp_gro || true
+  return 0
+}
+
+_tailscale_fix_udp_gro() {
+  command -v ethtool >/dev/null 2>&1 || return 0
+  local wan_if
+  wan_if=$(ip route show default 2>/dev/null | awk '/^default/ {print $5; exit}')
+  [[ -n "$wan_if" ]] || return 0
+  # Уже включено?
+  if ethtool -k "$wan_if" 2>/dev/null | grep -q 'rx-udp-gro-forwarding: on'; then
+    return 0
+  fi
+  if ethtool -K "$wan_if" rx-udp-gro-forwarding on rx-gro-list off >/dev/null 2>&1; then
+    echo -e "${GREEN}  ✓ UDP GRO forwarding enabled on ${wan_if}${NC}"
+    # Persist через systemd unit, чтобы переживало reboot.
+    cat > /etc/systemd/system/tailscale-udp-gro.service <<GRO_EOF
+[Unit]
+Description=Tailscale UDP GRO forwarding on ${wan_if}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'ethtool -K ${wan_if} rx-udp-gro-forwarding on rx-gro-list off || true'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+GRO_EOF
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable tailscale-udp-gro.service >/dev/null 2>&1 || true
+  fi
   return 0
 }
 
@@ -105,11 +141,47 @@ configure_tailscale_exit_node() {
       up_args+=(--auth-key "$auth_key")
     fi
 
-    if ! tailscale "${up_args[@]}"; then
+    # tailscale up БЛОКИРУЕТСЯ до логина и печатает ссылку только один раз.
+    # Запускаем в фоне и явно достаём AuthURL из `tailscale status --json`,
+    # чтобы пользователь гарантированно увидел ссылку (раньше она терялась).
+    local up_log up_pid auth_url="" i up_rc state
+    up_log=$(mktemp /tmp/tailscale-up.XXXXXX) || return 1
+    tailscale "${up_args[@]}" >"$up_log" 2>&1 &
+    up_pid=$!
+
+    for i in $(seq 1 15); do
+      auth_url=$(tailscale status --json 2>/dev/null | jq -r '.AuthURL // empty' 2>/dev/null || true)
+      [[ -n "$auth_url" ]] && break
+      kill -0 "$up_pid" 2>/dev/null || break
+      sleep 1
+    done
+
+    if [[ -n "$auth_url" ]]; then
+      echo ""
+      echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
+      echo -e "${GREEN}║  LOG IN TO TAILSCALE — open this URL in your browser:    ║${NC}"
+      echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
+      echo -e "${CYAN}$auth_url${NC}"
+      echo ""
+      echo -e "${YELLOW}After logging in, this setup continues automatically (up to 5 min).${NC}"
+      for i in $(seq 1 150); do
+        state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // ""' 2>/dev/null || true)
+        [[ "$state" == "Running" ]] && break
+        kill -0 "$up_pid" 2>/dev/null || break
+        sleep 2
+      done
+    fi
+
+    wait "$up_pid"; up_rc=$?
+    if [[ "$up_rc" -ne 0 ]]; then
+      cat "$up_log" >&2 || true
+      rm -f "$up_log"
       auth_key=""
       echo -e "${RED}✗ tailscale up could not connect the exit node${NC}"
+      echo -e "${YELLOW}  Retry: run this menu item again after logging in at https://login.tailscale.com${NC}"
       return 1
     fi
+    rm -f "$up_log"
     auth_key=""
 
     printf '%s\n' "$node_hostname" > /usr/local/etc/xray/.tailscale_hostname

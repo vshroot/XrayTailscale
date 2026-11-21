@@ -143,13 +143,53 @@ update_xray_core() {
     fi
   fi
 
-  # ── Step 5: Confirmation prompt (CONTEXT.md decision 2) ────────
+  # Возвращает 0, если major.minor.patch версии $1 >= версии $2.
+_xray_ver_ge() {
+  local a b IFS=.
+  read -r -a a <<< "${1#v}"
+  read -r -a b <<< "${2#v}"
+  local i
+  for i in 0 1 2; do
+    local x="${a[$i]:-0}" y="${b[$i]:-0}"
+    (( 10#$x > 10#$y )) && return 0
+    (( 10#$x < 10#$y )) && return 1
+  done
+  return 0
+}
+
+# Предупреждение о несовместимости Xray ≥26.9.9 с sing-box/Karing.
+_xray_update_karing_warning() {
+  local current="$1" target="$2"
+  # Порог применим только к 26.x.
+  [[ "$target" == 26.* ]] || return 0
+  if _xray_ver_ge "$target" "26.9.9" && ! _xray_ver_ge "$current" "26.9.9"; then
+    echo -e "${RED}╔══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║  WARNING: Karing / sing-box compatibility will BREAK     ║${NC}"
+    echo -e "${RED}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${YELLOW}Xray-core ≥ 26.9.9 requires the X25519MLKEM768 key share in the${NC}"
+    echo -e "${YELLOW}Reality handshake. sing-box (Karing, Streisand, FoXray) does NOT${NC}"
+    echo -e "${YELLOW}send it, so those clients will fail with 'reality verification failed'.${NC}"
+    echo -e "${YELLOW}Xray-based clients (HAPP, v2rayNG, v2rayN) keep working.${NC}"
+    echo -e "${CYAN}To keep Karing working, stay on Xray ≤ 26.6.27 (answer 'n').${NC}"
+    echo ""
+  fi
+  return 0
+}
+
+# ── Step 5: Confirmation prompt (CONTEXT.md decision 2) ────────
   echo -e "${CYAN}Xray-core update available:${NC}"
   echo -e "  ${YELLOW}Current:${NC} $CURRENT_VERSION"
   echo -e "  ${GREEN}New:${NC}    $TARGET_VERSION"
   echo -e "  ${CYAN}Size:${NC}   ~6.5MB (zip)"
   echo -e "  ${CYAN}Downtime:${NC} ~5 seconds"
   echo ""
+
+  # sing-box (Karing, Streisand, FoXray и др.) не умеет X25519MLKEM768,
+  # который Xray-core ≥ 26.9.9 требует в Reality ClientHello. При обновлении
+  # через порог 26.9.9 такие клиенты молча перестают подключаться
+  # ("reality verification failed"). Предупреждаем ДО скачивания.
+  _xray_update_karing_warning "$CURRENT_VERSION" "$TARGET_VERSION"
+
   if [[ "${INSTALL_MODE:-0}" != "1" ]]; then
     echo -n -e "${YELLOW}Continue? [y/N]: ${NC}"
     read confirm
