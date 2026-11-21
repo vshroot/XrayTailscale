@@ -42,6 +42,18 @@ grep -q 'LOG IN TO TAILSCALE' src/45-tailscale.sh || fail "tailscale prints the 
 grep -q '_tailscale_fix_udp_gro' src/45-tailscale.sh || fail "UDP GRO fix is wired"
 echo "  ✓ tailscale login URL + UDP GRO"
 
+
+# 5) Чистая установка пиннит sing-box-совместимую версию Xray
+for f in xraytailscale update.sh install.sh; do
+  grep -q 'XRAY_COMPAT_VERSION="26.6.27"' "$f" || fail "$f defines XRAY_COMPAT_VERSION"
+  grep -q 'if \[\[ "${INSTALL_MODE:-0}" == "1" \]\]; then' "$f" || fail "$f pins on install"
+done
+echo "  ✓ install pins compatible Xray"
+
+# 6) xhttp-legacy помечен как Xray-only (sing-box не поддерживает XHTTP)
+grep -q '(Xray%20only)' src/35-subscription.sh || fail "xhttp link is marked Xray only"
+echo "  ✓ xhttp marked Xray only"
+
 rm -f /tmp/_xt_vg.sh /tmp/_xt_kw.sh
 
 if [[ "$fails" -eq 0 ]]; then

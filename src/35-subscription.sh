@@ -232,7 +232,11 @@ prepare_happ_vless_urls() {
       *#*-tcp-utls-firefox) tcp_utls+=("$line") ;;
       *#*-grpc) grpc_routes+=("$line") ;;
       *#*-tcp-mux) tcp_mux+=("$line") ;;
-      *#*-xhttp-legacy) xhttp_legacy+=("$line") ;;
+      *#*-xhttp-legacy)
+        # sing-box (Karing, Streisand, FoXray) не поддерживает XHTTP-транспорт.
+        # Помечаем ссылку, чтобы пользователь не выбирал её в таких клиентах.
+        line="${line}%20(Xray%20only)"
+        xhttp_legacy+=("$line") ;;
       *) other+=("$line") ;;
     esac
   done <<< "$input"

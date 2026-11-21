@@ -541,6 +541,8 @@ fi
 #   1 — пропущено пользователем (y/N → N)
 #   2 — критическая ошибка (network / SHA / arch unsupported)
 #   3 — config несовместим с новой версией (rollback применен, Xray на старой)
+XRAY_COMPAT_VERSION="26.6.27"
+
 update_xray_core() {
   local CURRENT_VERSION TARGET_TAG TARGET_VERSION MACHINE
   local TMPDIR ZIP_URL DGST_URL ZIP_PATH DGST_PATH
@@ -570,6 +572,16 @@ update_xray_core() {
     return 2
   }
   TARGET_VERSION="${TARGET_TAG#v}"
+
+  # Чистая установка: по умолчанию ставим последнюю sing-box/Karing-совместимую
+  # версию. Xray >= 26.9.9 требует X25519MLKEM768 в Reality ClientHello,
+  # который sing-box не отправляет — Karing перестаёт подключаться.
+  # Ручное обновление через меню остаётся доступным (с предупреждением).
+  if [[ "${INSTALL_MODE:-0}" == "1" ]]; then
+    TARGET_TAG="v${XRAY_COMPAT_VERSION}"
+    TARGET_VERSION="$XRAY_COMPAT_VERSION"
+    echo -e "${CYAN}Installing Xray $TARGET_VERSION (last sing-box/Karing-compatible)${NC}"
+  fi
 
   # ── Step 4: Compare versions ────────────────────────────────────
   if [[ "$CURRENT_VERSION" == "$TARGET_VERSION" ]]; then
